@@ -1,0 +1,48 @@
+@import 'tailwindcss';
+
+:root {
+  color-scheme: light;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: #f4f4f6;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei',
+    sans-serif;
+}
+
+body {
+  overscroll-behavior: none;
+}
+
+/* Center a phone-width shell on wide (PC) viewports; full-bleed on real mobile widths. */
+.app-shell {
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100dvh;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+@media (min-width: 481px) {
+  .app-shell {
+    min-height: 100dvh;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 20px 60px rgba(0, 0, 0, 0.08);
+  }
+}
+
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
