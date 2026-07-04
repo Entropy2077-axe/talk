@@ -1,6 +1,9 @@
 import { forwardRef } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { db } from '../db/db'
 import { Avatar } from './Avatar'
 import { formatBubbleTime } from '../lib/time'
+import { formatCurrency } from '../lib/wallet'
 import type { Message } from '../types'
 
 interface MessageBubbleProps {
@@ -12,10 +15,21 @@ interface MessageBubbleProps {
   stickerUrl?: string
   highlighted?: boolean
   onLinkClick?: (label: string) => void
+  onCommissionRespond?: (commissionId: string, accept: boolean) => void
 }
 
 export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(function MessageBubble(
-  { message, contactName, contactAvatar, contactAvatarColor, userAvatar, stickerUrl, highlighted, onLinkClick },
+  {
+    message,
+    contactName,
+    contactAvatar,
+    contactAvatarColor,
+    userAvatar,
+    stickerUrl,
+    highlighted,
+    onLinkClick,
+    onCommissionRespond,
+  },
   ref,
 ) {
   const isUser = message.role === 'user'
@@ -62,9 +76,67 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
             </button>
           )}
 
+          {message.type === 'commission' && message.commission && (
+            <CommissionCard commissionId={message.commission.commissionId} onRespond={onCommissionRespond} />
+          )}
+
+          {message.type === 'gift' && message.gift && (
+            <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5">
+              <span className="text-2xl">{message.gift.icon}</span>
+              <div>
+                <p className="text-[13.5px] text-gray-800">送出了「{message.gift.name}」</p>
+                {message.gift.description && <p className="text-[11px] text-gray-400">{message.gift.description}</p>}
+              </div>
+            </div>
+          )}
+
           <span className="mt-0.5 px-1 text-[10px] text-gray-300">{formatBubbleTime(message.createdAt)}</span>
         </div>
       </div>
     </div>
   )
 })
+
+function CommissionCard({
+  commissionId,
+  onRespond,
+}: {
+  commissionId: string
+  onRespond?: (commissionId: string, accept: boolean) => void
+}) {
+  const commission = useLiveQuery(() => db.commissions.get(commissionId), [commissionId])
+  if (!commission) return null
+
+  return (
+    <div className="w-56 rounded-xl border border-gray-200 bg-white p-3">
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <span className="text-xs text-gray-400">📋 委托</span>
+        <span className="ml-auto text-xs font-medium text-[#aa3bff]">{formatCurrency(commission.reward)}</span>
+      </div>
+      <p className="mb-1 text-[14px] font-medium text-gray-900">{commission.title}</p>
+      <p className="mb-2 text-[12.5px] leading-relaxed text-gray-500">{commission.description}</p>
+      {commission.status === 'pending' ? (
+        <div className="flex gap-2">
+          <button
+            onClick={() => onRespond?.(commission.id, false)}
+            className="flex-1 rounded-lg bg-gray-100 py-1.5 text-xs text-gray-600"
+          >
+            不接取
+          </button>
+          <button
+            onClick={() => onRespond?.(commission.id, true)}
+            className="flex-1 rounded-lg bg-gray-900 py-1.5 text-xs text-white"
+          >
+            接取
+          </button>
+        </div>
+      ) : (
+        <span className="text-xs text-gray-400">
+          {commission.status === 'accepted' && '已接取 · 待完成'}
+          {commission.status === 'declined' && '已拒绝'}
+          {commission.status === 'completed' && '已完成'}
+        </span>
+      )}
+    </div>
+  )
+}

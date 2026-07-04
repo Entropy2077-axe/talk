@@ -118,6 +118,8 @@ export function ChatPage() {
         ...recentHistory.map((m): ChatMessage => {
           if (m.type === 'sticker') return { role: m.role, content: `[发了一个表情: ${m.content}]` }
           if (m.type === 'link') return { role: m.role, content: `[分享了一个链接: ${m.content}]` }
+          if (m.type === 'commission') return { role: m.role, content: `[发布了委托: ${m.content}]` }
+          if (m.type === 'gift') return { role: m.role, content: `[送出了礼物: ${m.content}]` }
           return { role: m.role, content: m.content }
         }),
       ])
@@ -158,13 +160,35 @@ export function ChatPage() {
       cumulative += typingDelayMs(bubble)
       const timer = setTimeout(async () => {
         if (streamRef.current !== streamId || !conversationId || !contact) return
+
+        let commissionId: string | undefined
+        if (bubble.type === 'commission') {
+          commissionId = uuid()
+          await db.commissions.add({
+            id: commissionId,
+            contactId: contact.id,
+            title: bubble.title,
+            description: bubble.description,
+            reward: bubble.reward,
+            status: 'pending',
+            createdAt: Date.now(),
+          })
+        }
+
+        let content: string
+        if (bubble.type === 'text') content = bubble.content
+        else if (bubble.type === 'sticker') content = bubble.name
+        else if (bubble.type === 'commission') content = bubble.title
+        else content = bubble.label
+
         const msg: Message = {
           id: uuid(),
           conversationId,
           role: 'assistant',
           type: bubble.type,
-          content: bubble.type === 'text' ? bubble.content : bubble.type === 'sticker' ? bubble.name : bubble.label,
+          content,
           link: bubble.type === 'link' ? { app: bubble.app, label: bubble.label, data: bubble.data } : undefined,
+          commission: commissionId ? { commissionId } : undefined,
           createdAt: Date.now(),
         }
         await db.messages.add(msg)
@@ -178,9 +202,8 @@ export function ChatPage() {
     })
   }
 
-  async function handleSend() {
-    const text = input.trim()
-    if (!text || !conversationId) return
+  async function sendMessage(text: string) {
+    if (!text.trim() || !conversationId) return
     if (!settings.apiKey) {
       setError('还没有配置API Key 请先去"我-设置"里填写')
       return
@@ -189,7 +212,6 @@ export function ChatPage() {
     const streamId = uuid()
     streamRef.current = streamId
     clearPending()
-    setInput('')
     setError('')
 
     const msg: Message = {
@@ -197,13 +219,38 @@ export function ChatPage() {
       conversationId,
       role: 'user',
       type: 'text',
-      content: text,
+      content: text.trim(),
       createdAt: Date.now(),
     }
     await db.messages.add(msg)
     await db.conversations.update(conversationId, { updatedAt: Date.now() })
 
     runAiTurn(streamId)
+  }
+
+  async function handleSend() {
+    const text = input.trim()
+    if (!text) return
+    setInput('')
+    await sendMessage(text)
+  }
+
+  async function handleCommissionRespond(commissionId: string, accept: boolean) {
+    const commission = await db.commissions.get(commissionId)
+    if (!commission || commission.status !== 'pending') return
+    await db.commissions.update(commissionId, { status: accept ? 'accepted' : 'declined', respondedAt: Date.now() })
+    if (accept) {
+      await db.todos.add({
+        id: uuid(),
+        title: commission.title,
+        note: commission.description,
+        done: false,
+        createdAt: Date.now(),
+        source: 'commission',
+        commissionId,
+      })
+    }
+    await sendMessage(accept ? `好 这个我接了` : `这个我接不了 抱歉`)
   }
 
   if (conversation === undefined || contact === undefined) return null
@@ -250,6 +297,7 @@ export function ChatPage() {
             stickerUrl={m.type === 'sticker' ? stickerByName.get(m.content) : undefined}
             highlighted={flashId === m.id}
             onLinkClick={() => setToast('小程序功能正在开发中')}
+            onCommissionRespond={handleCommissionRespond}
           />
         ))}
         {aiTyping && (

@@ -1,11 +1,14 @@
 import Dexie, { type Table } from 'dexie'
-import type { Contact, Conversation, Message, Sticker } from '../types'
+import type { Commission, Contact, Conversation, InventoryItem, Message, Sticker, Todo } from '../types'
 
 export class TalkDB extends Dexie {
   contacts!: Table<Contact, string>
   conversations!: Table<Conversation, string>
   messages!: Table<Message, string>
   stickers!: Table<Sticker, string>
+  todos!: Table<Todo, string>
+  commissions!: Table<Commission, string>
+  inventory!: Table<InventoryItem, string>
 
   constructor() {
     super('talk-db')
@@ -23,6 +26,11 @@ export class TalkDB extends Dexie {
     this.version(3).stores({
       locations: null,
       tasks: null,
+    })
+    this.version(4).stores({
+      todos: 'id, done, commissionId, createdAt',
+      commissions: 'id, contactId, status, createdAt',
+      inventory: 'id, acquiredAt',
     })
   }
 }

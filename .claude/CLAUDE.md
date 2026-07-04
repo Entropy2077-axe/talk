@@ -2,7 +2,7 @@
 
 ## 项目定位
 React 核心的仿微信风格 AI 对话应用。用户"添加联系人"（通过问卷让对方自动生成人设+名字，一次性确认，之后不能再改人设），
-与 DeepSeek 模型进行拟人化聊天，并随聊天积累记忆和关系。目标：安卓适配良好、PC 浏览器可直接调试、后续可选打包为原生 APK。
+与 DeepSeek 模型进行拟人化聊天，并随聊天积累记忆和关系。内置待办/委托/货币/商城/仓库这套小游戏化系统（AI会发委托、给奖金，奖金能在AI生成的虚拟商城买东西送朋友）。目标：安卓适配良好、PC 浏览器可直接调试、后续可选打包为原生 APK。
 
 ## 技术栈与关键决策
 - **构建**: Vite + React + TypeScript。`vite.config.ts` 设置 `server.host: true`，方便手机在同一局域网通过 `http://<PC局域网IP>:5173` 直接访问调试。
@@ -81,6 +81,30 @@ v1 曾做过一套完整的地图+日程+一次性任务系统（`lib/locations.
 
 **如果以后又有人反馈"经常没回复"**：先怀疑是不是哪里又不小心给主聊天请求加上了 `jsonMode:true`，这是最容易复发的地方。
 
+## 待办/委托/货币/商城/仓库系统（新增，五个子模块一起设计的）
+用户想法：内置一个TODO软件，独立设一个底部tab；AI能给用户发"委托"卡片（可接取/不接取），接取会变成一条待办，完成后拿到AI设定的奖金；有货币系统；网购商城用**另一个独立的模型和提示词**生成商品（支持浏览和搜索）；买到的东西进仓库，可以送给联系人。
+
+**底部导航从4个变成5个**：`消息 / 联系人 / 待办 / 发现 / 我`——这是本次用户明确要求"独立设一个在下方菜单栏"，之前"四个选项"的说法已经被这次需求覆盖，以后不要再假设底部固定只有4个tab。
+
+**范围裁剪（重要，别自己加回去）**：用户原话是"接取或不接取都发给联系人 联系人会有反应"——这句话只覆盖**接取/拒绝那一刻**，没有要求"完成委托时AI必须立刻反应"或者"赠送礼物时AI必须立刻反应"。所以：
+- 接取/拒绝委托：发生在**已经打开的ChatPage里**（用户点卡片按钮），直接复用聊天已有的实时发送+AI回复流程，天然会有AI反应。
+- **完成委托**（在待办页勾选完成）和**赠送礼物**（在仓库页选联系人）都发生在**不在聊天页面**的上下文里：只是把一条消息写进对应会话的数据库（`role:'user'`），**不会主动触发API调用**去实时生成AI反应——用户下次自己点开那个聊天时，这条消息已经在历史记录里，AI下一次回复自然会看到并做出反应。这是刻意的简化：如果要在这些场景也做到"立刻收到AI反应"，需要把 ChatPage 里"发消息+调API+展示气泡"的整套逻辑抽成一个不依赖UI的共享模块，这次评估了一下觉得为了这两个场景做这个复杂度不值得，没有做。以后如果用户明确要求"完成委托/送礼物之后想马上看到TA的反应"，才需要考虑抽这个共享模块。
+
+**数据模型**（`types/index.ts`，Dexie version(4)）:
+- `Commission { id, contactId, title, description, reward, status: pending|accepted|declined|completed, createdAt, respondedAt?, completedAt? }`——AI发布的委托，reward由AI在协议里给，`aiProtocol.ts`的`clampReward()`强制clamp到10-200之间，防止AI随口给个离谱数字破坏经济平衡。
+- `Todo { id, title, note?, done, createdAt, completedAt?, source: 'user'|'commission', commissionId? }`——个人待办和"接取的委托"用同一张表，靠`source`区分。
+- `InventoryItem { id, name, description, icon, price, acquiredAt }`——仓库物品，直接存AI生成商品的快照（没有单独的商品目录表，因为商品是即时生成的，逛了没买的商品根本不落库，只在`ShopPage`组件state里）。
+- `AppSettings.walletBalance`——全局货币(`lib/wallet.ts`里定的"金币"🪙)，新用户默认`INITIAL_WALLET_BALANCE=100`。`AppSettings.shopModel`——商城独立的模型选择，默认也是`deepseek-chat`，但用户可以在设置页单独改，不跟聊天用的`model`混用。
+
+**委托的完整生命周期**：
+1. AI在聊天里输出`{"type":"commission", title, description, reward}`（协议在`FIXED_PROTOCOL_PROMPT`里，明确要求"只有场景合适时偶尔发一次 不要每条都发"）。`ChatPage.revealBubbles`处理这个bubble类型时**先创建`Commission`行**(status:pending)，再把`message.commission={commissionId}`存进消息里，`MessageBubble`里的`CommissionCard`子组件用`useLiveQuery`实时读这个commission的状态来决定渲染按钮还是状态文字。
+2. 用户点"接取"或"不接取"——`ChatPage.handleCommissionRespond`更新commission状态，接取的话额外创建一条`Todo`(source:'commission')，然后调用`sendMessage()`（就是原来`handleSend`抽出来的部分，现在输入框和委托按钮共用同一个函数）发一条"好 这个我接了"之类的话，走正常的AI回复流程。
+3. 用户在`TodoPage`把这条委托类待办勾选完成——`completeCommissionTodo()`：更新commission状态为completed、`walletBalance += reward`、直接写一条`role:'user'`的完成消息到对应会话（不触发API，见上面"范围裁剪"）。委托类todo一旦完成不能再取消勾选（按钮disabled），个人todo可以自由切换。
+
+**商城生成**（`lib/shop.ts`）：`buildShopPrompt(query)`——有搜索词就生成相关商品，没有就生成"首页推荐"；`parseShopProducts()`解析`{"products":[{name,description,price,icon}]}`，price clamp到5-300。`ShopPage`调用时传`model: settings.shopModel`（不是`settings.model`）、`jsonMode:true`（单轮请求，不受json_object多轮bug影响）。购买时直接从`walletBalance`扣款、写入`inventory`表，没钱会弹toast提示"金币不够啦"，不会出现负数余额。
+
+**仓库赠送**（`WarehousePage`）：选联系人后，物品从`inventory`表删除（送出去了，仓库不再持有），并往那个联系人的会话里插入一条`type:'gift'`消息(`message.gift={name,icon,description}`)，跳转到那个聊天页。同样不主动调API，AI会在下次回复时看到这条`[送出了礼物: xxx]`的历史记录。
+
 ## 表情包系统（`StickersPage` + `lib/image.ts`）
 用户需求：导入图片当表情包、用户命名。核心功能一直都有（上传+起名字），后来做了这些完善：
 - **上传时自动压缩**：`resizeImageDataUrl()`（`lib/image.ts`）用canvas把图片最长边缩到240px、转成JPEG quality 0.85再存库，避免直接把手机相册原图（可能几MB）塞进IndexedDB。
@@ -89,13 +113,15 @@ v1 曾做过一套完整的地图+日程+一次性任务系统（`lib/locations.
 - 命名唯一性：`db.stickers` 的 `&name` 是Dexie唯一索引，新增/改名前都手动 `where('name').equals()` 查重给出友好提示（而不是让Dexie直接抛ConstraintError）。
 
 ## 目录结构速查
-- `src/pages/`：MessagesPage / ContactsPage / ContactAddPage(问卷+直接创建，含头像+性格标签+随机词条) / ContactCardPage(名片：备注/记忆展示+头像更换，无人设无关系维度展示) / ChatPage / DiscoverPage(关系网入口) / RelationshipsPage(关系总览，唯一展示关系维度的地方) / MePage / ProfileEditPage(全屏个人资料) / SettingsPage(含清空数据危险操作) / StickersPage(上传压缩+改名+删除确认)。
-- `src/components/`：TopBar / BottomNav / SearchOverlay / MessageBubble(assistant消息头像上方显示名字) / ActionSheet / Avatar(圆角矩形) / AvatarPicker / ImageCropper。
-- `src/lib/`：deepseek.ts(含jsonMode开关+角色合并) / aiProtocol.ts(解析+非JSON兜底按行拆气泡) / prompt.ts(三层提示词+人设生成) / memory.ts(记忆+关系增量，合并一次API调用) / relationship.ts(五维度/初始值/归纳标签) / randomTraits.ts(随机词条池) / contact.ts(displayName) / image.ts(图片压缩) / search.ts / time.ts(含当前时间描述+年龄计算) / colors.ts / avatarEmojis.ts。
+- `src/pages/`：MessagesPage / ContactsPage / ContactAddPage(问卷+直接创建，含头像+性格标签+随机词条) / ContactCardPage(名片：备注/记忆展示+头像更换，无人设无关系维度展示) / ChatPage(含委托卡片交互) / TodoPage(个人待办+委托待办，底部tab) / DiscoverPage(商城/仓库/关系网入口) / RelationshipsPage(关系总览，唯一展示关系维度的地方) / ShopPage(独立模型生成商品) / WarehousePage(库存+赠送) / MePage(含货币显示) / ProfileEditPage(全屏个人资料) / SettingsPage(含购物专用模型选择+清空数据危险操作) / StickersPage(上传压缩+改名+删除确认)。
+- `src/components/`：TopBar / BottomNav(5个tab) / SearchOverlay / MessageBubble(assistant消息头像上方显示名字，含委托卡片`CommissionCard`子组件+礼物卡片渲染) / ActionSheet / Avatar(圆角矩形) / AvatarPicker / ImageCropper。
+- `src/lib/`：deepseek.ts(含jsonMode开关+角色合并) / aiProtocol.ts(解析+非JSON兜底按行拆气泡+委托reward clamp) / prompt.ts(三层提示词+人设生成) / memory.ts(记忆+关系增量，合并一次API调用) / relationship.ts(五维度/初始值/归纳标签) / shop.ts(独立商品生成prompt+解析) / wallet.ts(货币常量+格式化) / randomTraits.ts(随机词条池) / contact.ts(displayName) / image.ts(图片压缩) / search.ts / time.ts(含当前时间描述+年龄计算) / colors.ts / avatarEmojis.ts。
 
 ## 尚未实现 / 后续计划
-- 发现页的小程序系统只有"关系网"是真的，虚拟网购/TODO仍是占位（地图已被移除，不在计划内）。
+- 发现页的小程序系统里"商城""仓库""关系网"都是真的，其余（比如更多品类的虚拟服务）仍待补充（地图已被移除，不在计划内）。
 - 群聊 / AI与AI互动未实现——这也是关系网里"AI与AI关系"暂时没法真正使用的原因。
+- 完成委托/赠送礼物不会实时触发AI反应，只是写入历史记录等下次对话时AI自然看到（见上面"待办/委托/货币/商城/仓库系统"里的范围裁剪说明），如果要做成实时反应需要抽取ChatPage的发送/调用API逻辑成独立模块。
+- 一次性任务(委托)目前没有做"重复接取同一委托"之类的防护，也没有"委托过期"机制，量不大暂时够用。
 - Capacitor Android 原生打包：本地已有 Android Studio（`C:\Projects\AndroidStudio`），用户说不着急。
 - `CONTEXT_WINDOW_SIZE`/`MEMORY_UPDATE_INTERVAL` 仍是代码常量，没有设置页UI。
 

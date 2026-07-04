@@ -31,7 +31,8 @@ const FIXED_PROTOCOL_PROMPT = `【分句发送】
     { "type": "text", "content": "这里是一句短消息" },
     { "type": "text", "content": "这里是另一句" },
     { "type": "sticker", "name": "表情包名字" },
-    { "type": "link", "app": "shop", "label": "去逛逛", "data": {} }
+    { "type": "link", "app": "shop", "label": "去逛逛", "data": {} },
+    { "type": "commission", "title": "帮忙取个快递", "description": "在楼下驿站 麻烦顺路带一下呗", "reward": 20 }
   ]
 }
 
@@ -39,6 +40,7 @@ const FIXED_PROTOCOL_PROMPT = `【分句发送】
 - type为"text"时 content是这条消息的文字内容 一次不要写太多字 模拟真人一条一条发送
 - type为"sticker"时 name必须是下面提供的表情包名字列表中的一个 不能编造不存在的名字 表情包可以穿插在消息中间 不一定要放在最后
 - type为"link"时 表示分享一个应用内小程序链接 app字段必须是下面提供的可用小程序标识之一 label是这条链接卡片显示的文字 data是可选的附加数据 链接同样可以出现在消息序列的任意位置
+- type为"commission"时 表示你想拜托对方帮个忙、给对方发布一个可以选择接受或拒绝的委托 title是委托的简短标题 description是具体说明 reward是你愿意支付的报酬(10到200之间的整数 根据事情的麻烦程度自己定 不要每次都给一样的数) 只有在对话情境合适的时候才偶尔发一次(比如你确实需要帮忙、想找对方办点事) 不要每条回复都发 大多数时候都不需要
 - messages数组顺序就是发送顺序 数组不能为空
 
 【可用表情包列表】

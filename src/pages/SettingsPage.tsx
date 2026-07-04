@@ -9,7 +9,7 @@ import { db } from '../db/db'
 
 export function SettingsPage() {
   const navigate = useNavigate()
-  const { apiKey, baseUrl, model, globalSystemPrompt, setSettings } = useSettingsStore()
+  const { apiKey, baseUrl, model, shopModel, globalSystemPrompt, setSettings } = useSettingsStore()
   const [confirmingWipe, setConfirmingWipe] = useState(false)
 
   async function handleWipeContacts() {
@@ -24,6 +24,7 @@ export function SettingsPage() {
   const [apiKeyDraft, setApiKeyDraft] = useState(apiKey)
   const [baseUrlDraft, setBaseUrlDraft] = useState(baseUrl)
   const [modelDraft, setModelDraft] = useState(model)
+  const [shopModelDraft, setShopModelDraft] = useState(shopModel)
   const [promptDraft, setPromptDraft] = useState(globalSystemPrompt)
 
   const [models, setModels] = useState<string[]>([])
@@ -112,6 +113,33 @@ export function SettingsPage() {
         </div>
         {pullError && <p className="mb-2 text-xs text-red-500">{pullError}</p>}
 
+        <label className="mb-1 block text-xs text-gray-500">购物商城商品生成模型（独立于聊天，可以选不同的模型）</label>
+        <div className="mb-1 flex gap-2">
+          {models.length > 0 ? (
+            <select
+              value={shopModelDraft}
+              onChange={(e) => {
+                setShopModelDraft(e.target.value)
+                setSettings({ shopModel: e.target.value })
+              }}
+              className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            >
+              {models.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              value={shopModelDraft}
+              onChange={(e) => setShopModelDraft(e.target.value)}
+              onBlur={() => setSettings({ shopModel: shopModelDraft.trim() })}
+              className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            />
+          )}
+        </div>
+
         <div className="mt-2 flex gap-2">
           <button
             onClick={handlePullModels}
@@ -167,7 +195,7 @@ export function SettingsPage() {
           清空所有联系人与聊天记录
         </button>
         <p className="mt-2 text-[11px] text-gray-400">
-          数据存在你这台设备的浏览器本地 这个操作会删除所有联系人、会话、聊天记录和日程安排 不可恢复
+          数据存在你这台设备的浏览器本地 这个操作会删除所有联系人、会话和聊天记录 不可恢复
         </p>
       </section>
 

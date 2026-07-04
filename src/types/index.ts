@@ -34,12 +34,22 @@ export interface Conversation {
 }
 
 export type MessageRole = 'user' | 'assistant'
-export type MessageType = 'text' | 'sticker' | 'link'
+export type MessageType = 'text' | 'sticker' | 'link' | 'commission' | 'gift'
 
 export interface LinkPayload {
-  app: string // e.g. 'shop' | 'map' | 'todo'
+  app: string // e.g. 'shop' | 'todo'
   label: string
   data?: Record<string, unknown>
+}
+
+export interface CommissionPayload {
+  commissionId: string
+}
+
+export interface GiftPayload {
+  name: string
+  icon: string
+  description?: string
 }
 
 export interface Message {
@@ -47,8 +57,10 @@ export interface Message {
   conversationId: string
   role: MessageRole
   type: MessageType
-  content: string // text content, sticker name, or link label
+  content: string // text content, sticker name, link/commission/gift label
   link?: LinkPayload
+  commission?: CommissionPayload
+  gift?: GiftPayload
   bubbleGroupId?: string // groups bubbles emitted from one AI response
   createdAt: number
   pending?: boolean // true while an assistant bubble is still "typing" (not yet delivered)
@@ -61,16 +73,54 @@ export interface Sticker {
   createdAt: number
 }
 
+/** A paid task a contact offers the user in chat — accept/decline is itself sent back as a chat message. */
+export type CommissionStatus = 'pending' | 'accepted' | 'declined' | 'completed'
+
+export interface Commission {
+  id: string
+  contactId: string
+  title: string
+  description: string
+  reward: number // in 金币(coins), set by the AI when it issues the commission, clamped to a sane range
+  status: CommissionStatus
+  createdAt: number
+  respondedAt?: number
+  completedAt?: number
+}
+
+export interface Todo {
+  id: string
+  title: string
+  note?: string
+  done: boolean
+  createdAt: number
+  completedAt?: number
+  source: 'user' | 'commission'
+  commissionId?: string // set when source === 'commission'
+}
+
+/** A purchased shop item sitting in the user's warehouse until used or gifted away. */
+export interface InventoryItem {
+  id: string
+  name: string
+  description: string
+  icon: string // emoji
+  price: number // what it cost, kept for reference
+  acquiredAt: number
+}
+
 export interface AppSettings {
   apiKey: string
   baseUrl: string
   model: string
+  shopModel: string // separate model selection for shop product generation
   globalSystemPrompt: string
   userNickname: string
   userAvatar: string
   userGender: string
   userBirthday: string // "YYYY-MM-DD", empty if unset
   userBio: string
+  walletBalance: number // 金币(coins) the user can spend in the shop
 }
 
 // ---- AI JSON output protocol ----
@@ -88,7 +138,14 @@ export interface AiBubbleLink {
   label: string
   data?: Record<string, unknown>
 }
-export type AiBubble = AiBubbleText | AiBubbleSticker | AiBubbleLink
+/** The contact offering the user a paid commission/errand. */
+export interface AiBubbleCommission {
+  type: 'commission'
+  title: string
+  description: string
+  reward: number
+}
+export type AiBubble = AiBubbleText | AiBubbleSticker | AiBubbleLink | AiBubbleCommission
 
 export interface AiResponse {
   messages: AiBubble[]

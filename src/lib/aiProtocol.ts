@@ -50,9 +50,30 @@ function tryParseJson(trimmedRaw: string): AiBubble[] | null {
       bubbles.push({ type: 'sticker', name: m.name.trim() })
     } else if (m.type === 'link' && typeof m.app === 'string' && typeof m.label === 'string') {
       bubbles.push({ type: 'link', app: m.app, label: m.label, data: m.data })
+    } else if (
+      m.type === 'commission' &&
+      typeof m.title === 'string' &&
+      m.title.trim() &&
+      typeof m.description === 'string' &&
+      typeof m.reward === 'number'
+    ) {
+      bubbles.push({
+        type: 'commission',
+        title: m.title.trim(),
+        description: m.description.trim(),
+        reward: clampReward(m.reward),
+      })
     }
   }
   return bubbles
+}
+
+// Keeps the AI from handing out (or lowballing) wildly unbalanced rewards.
+const MIN_COMMISSION_REWARD = 10
+const MAX_COMMISSION_REWARD = 200
+function clampReward(reward: number): number {
+  if (!Number.isFinite(reward)) return MIN_COMMISSION_REWARD
+  return Math.round(Math.min(MAX_COMMISSION_REWARD, Math.max(MIN_COMMISSION_REWARD, reward)))
 }
 
 /** Simulated typing delay before a bubble appears, based on its own content length. */

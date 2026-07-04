@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom'
 const TABS = [
   { to: '/', label: '消息', icon: MessageIcon },
   { to: '/contacts', label: '联系人', icon: ContactIcon },
+  { to: '/todos', label: '待办', icon: TodoIcon },
   { to: '/discover', label: '发现', icon: DiscoverIcon },
   { to: '/me', label: '我', icon: MeIcon },
 ]
@@ -55,6 +56,21 @@ function ContactIcon({ active }: { active: boolean }) {
         strokeWidth="1.7"
         strokeLinecap="round"
       />
+    </svg>
+  )
+}
+function TodoIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <rect x="4.5" y="4" width="15" height="16" rx="2" stroke={active ? '#111827' : '#9ca3af'} strokeWidth="1.7" />
+      <path
+        d="M8 9.5l1.6 1.6L12.5 8"
+        stroke={active ? '#111827' : '#9ca3af'}
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M8.5 15h7" stroke={active ? '#111827' : '#9ca3af'} strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   )
 }

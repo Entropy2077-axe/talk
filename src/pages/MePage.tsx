@@ -2,10 +2,11 @@ import { useNavigate } from 'react-router-dom'
 import { TopBar } from '../components/TopBar'
 import { Avatar } from '../components/Avatar'
 import { useSettingsStore } from '../store/useSettingsStore'
+import { formatCurrency } from '../lib/wallet'
 
 export function MePage() {
   const navigate = useNavigate()
-  const { userAvatar, userNickname } = useSettingsStore()
+  const { userAvatar, userNickname, walletBalance } = useSettingsStore()
 
   return (
     <div className="relative flex min-h-full flex-col bg-[#f4f4f6]">
@@ -16,7 +17,10 @@ export function MePage() {
         className="mt-3 flex items-center justify-between bg-white px-4 py-4 active:bg-gray-50"
       >
         <Avatar avatar={userAvatar} size={60} />
-        <span className="text-[16px] font-medium text-gray-900">{userNickname}</span>
+        <div className="flex flex-col items-end gap-1">
+          <span className="text-[16px] font-medium text-gray-900">{userNickname}</span>
+          <span className="text-xs text-gray-400">{formatCurrency(walletBalance)}</span>
+        </div>
       </button>
 
       <div className="mt-3">

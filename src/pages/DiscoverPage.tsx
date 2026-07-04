@@ -3,7 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { TopBar } from '../components/TopBar'
 import { SearchOverlay } from '../components/SearchOverlay'
 
-const ENTRIES = [{ to: '/relationships', icon: '🕸️', label: '关系网' }]
+const ENTRIES = [
+  { to: '/shop', icon: '🛍️', label: '商城' },
+  { to: '/warehouse', icon: '📦', label: '仓库' },
+  { to: '/relationships', icon: '🕸️', label: '关系网' },
+]
 
 export function DiscoverPage() {
   const [searching, setSearching] = useState(false)
@@ -33,7 +37,7 @@ export function DiscoverPage() {
       </div>
 
       <div className="flex flex-1 items-center justify-center">
-        <p className="text-sm text-gray-400">更多小程序（网购/TODO）敬请期待</p>
+        <p className="text-sm text-gray-400">更多小程序敬请期待</p>
       </div>
       {searching && <SearchOverlay onClose={() => setSearching(false)} />}
     </div>
