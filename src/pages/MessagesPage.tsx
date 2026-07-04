@@ -8,6 +8,7 @@ import { SearchOverlay } from '../components/SearchOverlay'
 import { ActionSheet } from '../components/ActionSheet'
 import { useLongPress } from '../hooks/useLongPress'
 import { formatListTime } from '../lib/time'
+import { displayName } from '../lib/contact'
 import type { Message } from '../types'
 
 export function MessagesPage() {
@@ -54,7 +55,7 @@ export function MessagesPage() {
       <div className="flex-1">
         {rows.length === 0 && (
           <p className="px-4 py-10 text-center text-sm text-gray-400">
-            还没有会话 去"联系人"页新建一个AI开始聊天吧
+            还没有会话 去"联系人"页添加一个联系人开始聊天吧
           </p>
         )}
         {rows.map(({ conv, contact, lastMessage }) => (
@@ -63,7 +64,7 @@ export function MessagesPage() {
             pinned={conv.pinned}
             avatar={contact!.avatar}
             avatarColor={contact!.avatarColor}
-            name={contact!.name}
+            name={displayName(contact!)}
             preview={lastMessagePreview(lastMessage)}
             time={formatListTime(conv.updatedAt)}
             onClick={() => navigate(`/chat/${conv.id}`)}

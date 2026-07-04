@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { TopBar } from '../components/TopBar'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { listModels, testConnection } from '../lib/deepseek'
-import { DEFAULT_GLOBAL_SYSTEM_PROMPT } from '../lib/prompt'
+import { DEFAULT_STYLE_PROMPT } from '../lib/prompt'
 
 export function SettingsPage() {
   const { apiKey, baseUrl, model, globalSystemPrompt, setSettings } = useSettingsStore()
@@ -124,9 +124,9 @@ export function SettingsPage() {
 
       <section className="mt-3 flex-1 bg-white px-4 py-3">
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-xs font-medium text-gray-400">统一系统提示词（对所有AI生效）</h2>
+          <h2 className="text-xs font-medium text-gray-400">说话风格提示词（对所有AI生效）</h2>
           <button
-            onClick={() => setPromptDraft(DEFAULT_GLOBAL_SYSTEM_PROMPT)}
+            onClick={() => setPromptDraft(DEFAULT_STYLE_PROMPT)}
             className="text-xs text-gray-400 underline"
           >
             恢复默认
@@ -136,11 +136,11 @@ export function SettingsPage() {
           value={promptDraft}
           onChange={(e) => setPromptDraft(e.target.value)}
           onBlur={() => setSettings({ globalSystemPrompt: promptDraft })}
-          rows={16}
+          rows={14}
           className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs leading-relaxed text-gray-700"
         />
         <p className="mt-2 text-[11px] text-gray-400">
-          提示词中的 {'{{STICKERS}}'}、{'{{LINKS}}'}、{'{{PERSONA}}'} 会在发送请求时自动替换为表情包列表、可用小程序、以及每个AI各自的人物设定
+          这里只控制所有AI共通的说话语气和习惯 每个AI各自的人物设定在联系人名片里单独编辑 消息输出格式、表情包与小程序调用规则由系统固定处理 不在这里展示
         </p>
       </section>
     </div>

@@ -5,6 +5,7 @@ import { db } from '../db/db'
 import { Avatar } from './Avatar'
 import { excerptAround, highlightSegments, truncateName } from '../lib/search'
 import { formatListTime } from '../lib/time'
+import { displayName } from '../lib/contact'
 
 interface SearchOverlayProps {
   onClose: () => void
@@ -24,7 +25,7 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
     if (!q) return []
     const convByContact = new Map(conversations.map((c) => [c.contactId, c]))
     return contacts
-      .filter((c) => c.name.toLowerCase().includes(q.toLowerCase()))
+      .filter((c) => displayName(c).toLowerCase().includes(q.toLowerCase()))
       .map((c) => ({ contact: c, conv: convByContact.get(c.id) }))
       .sort((a, b) => (b.conv?.updatedAt ?? 0) - (a.conv?.updatedAt ?? 0))
   }, [q, contacts, conversations])
@@ -38,7 +39,7 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
       .map((m) => {
         const conv = convById.get(m.conversationId)
         const contact = conv ? contactById.get(conv.contactId) : undefined
-        return { message: m, contactName: contact?.name ?? '未知' }
+        return { message: m, contactName: contact ? displayName(contact) : '未知' }
       })
       .sort((a, b) => b.message.createdAt - a.message.createdAt)
       .slice(0, 50)
@@ -83,7 +84,7 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
                 >
                   <Avatar avatar={contact.avatar} color={contact.avatarColor} size={38} />
                   <span className="text-[15px] text-gray-900">
-                    {highlightSegments(contact.name, q).map((seg, i) => (
+                    {highlightSegments(displayName(contact), q).map((seg, i) => (
                       <span key={i} className={seg.matched ? 'text-[#aa3bff]' : ''}>
                         {seg.text}
                       </span>

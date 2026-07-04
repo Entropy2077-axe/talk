@@ -9,6 +9,8 @@ import { useSettingsStore } from '../store/useSettingsStore'
 import { chatCompletion, type ChatMessage } from '../lib/deepseek'
 import { parseAiResponse, typingDelayMs } from '../lib/aiProtocol'
 import { buildSystemPrompt, AVAILABLE_LINK_APPS } from '../lib/prompt'
+import { CONTEXT_WINDOW_SIZE, maybeUpdateMemory } from '../lib/memory'
+import { displayName } from '../lib/contact'
 import type { AiBubble, Message } from '../types'
 
 export function ChatPage() {
@@ -82,14 +84,20 @@ export function ChatPage() {
     try {
       const history = await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt')
       const systemPrompt = buildSystemPrompt({
-        globalPrompt: settings.globalSystemPrompt,
+        stylePrompt: settings.globalSystemPrompt,
         persona: contact.systemPrompt,
+        memoryFacts: contact.memoryFacts,
+        memoryStyle: contact.memoryStyle,
         stickerNames: stickers.map((s) => s.name),
         linkApps: AVAILABLE_LINK_APPS,
       })
+      // Only the most recent messages go verbatim into the request — older
+      // context is represented purely through the memory summary above, so
+      // token usage stays bounded no matter how long the conversation gets.
+      const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
       const chatMessages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
-        ...history.map((m): ChatMessage => {
+        ...recentHistory.map((m): ChatMessage => {
           if (m.type === 'sticker') return { role: m.role, content: `[发了一个表情: ${m.content}]` }
           if (m.type === 'link') return { role: m.role, content: `[分享了一个链接: ${m.content}]` }
           return { role: m.role, content: m.content }
@@ -138,7 +146,10 @@ export function ChatPage() {
         }
         await db.messages.add(msg)
         await db.conversations.update(conversationId, { updatedAt: Date.now() })
-        if (i === bubbles.length - 1) setAiTyping(false)
+        if (i === bubbles.length - 1) {
+          setAiTyping(false)
+          if (contact) maybeUpdateMemory(contact.id, conversationId, settings)
+        }
       }, cumulative)
       timersRef.current.push(timer)
     })
@@ -185,7 +196,7 @@ export function ChatPage() {
   return (
     <div className="flex min-h-full flex-col bg-[#ededed]">
       <TopBar
-        title={contact.name}
+        title={displayName(contact)}
         showBack
         right={
           <button

@@ -6,11 +6,16 @@ import { db } from '../db/db'
 import { TopBar } from '../components/TopBar'
 import { Avatar } from '../components/Avatar'
 import { ActionSheet } from '../components/ActionSheet'
+import { displayName } from '../lib/contact'
+import { resetMemory } from '../lib/memory'
 
 export function ContactCardPage() {
   const { contactId } = useParams()
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [editingRemark, setEditingRemark] = useState(false)
+  const [remarkDraft, setRemarkDraft] = useState('')
+  const [clearMemoryConfirm, setClearMemoryConfirm] = useState(false)
 
   const contact = useLiveQuery(() => (contactId ? db.contacts.get(contactId) : undefined), [contactId])
   const conversation = useLiveQuery(
@@ -47,20 +52,66 @@ export function ContactCardPage() {
     navigate('/contacts', { replace: true })
   }
 
+  async function saveRemark() {
+    await db.contacts.update(contactId!, { remark: remarkDraft.trim() })
+    setEditingRemark(false)
+  }
+
+  const hasMemory = contact.memoryFacts || contact.memoryStyle
+
   return (
     <div className="relative flex min-h-full flex-col bg-[#f4f4f6]">
       <TopBar title="联系人名片" showBack />
 
-      <section className="mt-3 flex flex-col items-center gap-2 bg-white px-4 py-8">
+      <section className="mt-3 flex flex-col items-center gap-1 bg-white px-4 py-8">
         <Avatar avatar={contact.avatar} color={contact.avatarColor} size={80} />
-        <h2 className="text-lg font-medium text-gray-900">{contact.name}</h2>
+        <h2 className="mt-1 text-lg font-medium text-gray-900">{displayName(contact)}</h2>
+        {contact.remark && <p className="text-xs text-gray-400">本名 {contact.name}</p>}
       </section>
+
+      <div className="mt-3 bg-white">
+        <button
+          onClick={() => {
+            setRemarkDraft(contact.remark ?? '')
+            setEditingRemark(true)
+          }}
+          className="flex w-full items-center justify-between px-4 py-3.5 text-left active:bg-gray-50"
+        >
+          <span className="text-[15px] text-gray-900">备注</span>
+          <span className="text-sm text-gray-400">{contact.remark || '未设置'}</span>
+        </button>
+      </div>
 
       <section className="mt-3 bg-white px-4 py-4">
         <h3 className="mb-2 text-xs font-medium text-gray-400">人物设定</h3>
         <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-600">
           {contact.systemPrompt}
         </p>
+      </section>
+
+      <section className="mt-3 bg-white px-4 py-4">
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-xs font-medium text-gray-400">AI记忆（随聊天自动积累）</h3>
+          {hasMemory && (
+            <button onClick={() => setClearMemoryConfirm(true)} className="text-xs text-gray-400 underline">
+              清空记忆
+            </button>
+          )}
+        </div>
+        {hasMemory ? (
+          <div className="space-y-2 text-sm leading-relaxed text-gray-600">
+            <p>
+              <span className="text-xs text-gray-400">了解到的信息 </span>
+              {contact.memoryFacts || '暂无'}
+            </p>
+            <p>
+              <span className="text-xs text-gray-400">相处状态 </span>
+              {contact.memoryStyle || '暂无'}
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-400">还没有形成记忆 多聊几句之后AI会自己记住一些关于你的事</p>
+        )}
       </section>
 
       <div className="mt-3 flex flex-col gap-2 bg-white px-4 py-4">
@@ -83,6 +134,45 @@ export function ContactCardPage() {
           onClose={() => setMenuOpen(false)}
           options={[{ label: '确认删除该联系人及聊天记录', onSelect: handleDelete, danger: true }]}
         />
+      )}
+
+      {clearMemoryConfirm && (
+        <ActionSheet
+          onClose={() => setClearMemoryConfirm(false)}
+          options={[
+            {
+              label: '确认清空AI对你的记忆',
+              onSelect: () => resetMemory(contactId!),
+              danger: true,
+            },
+          ]}
+        />
+      )}
+
+      {editingRemark && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/30 p-8">
+          <div className="w-full rounded-2xl bg-white p-4">
+            <h2 className="mb-3 text-center text-[15px] font-medium text-gray-900">设置备注</h2>
+            <input
+              value={remarkDraft}
+              onChange={(e) => setRemarkDraft(e.target.value)}
+              placeholder="给TA起个只有你看得到的称呼"
+              maxLength={20}
+              className="mb-4 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => setEditingRemark(false)}
+                className="flex-1 rounded-lg bg-gray-100 py-2 text-sm text-gray-600"
+              >
+                取消
+              </button>
+              <button onClick={saveRemark} className="flex-1 rounded-lg bg-gray-900 py-2 text-sm text-white">
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

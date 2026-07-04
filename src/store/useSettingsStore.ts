@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { DEFAULT_GLOBAL_SYSTEM_PROMPT } from '../lib/prompt'
+import { DEFAULT_STYLE_PROMPT } from '../lib/prompt'
 import type { AppSettings } from '../types'
 
 interface SettingsState extends AppSettings {
@@ -16,7 +16,7 @@ export const useSettingsStore = create<SettingsState>()(
       apiKey: envKey,
       baseUrl: envBaseUrl,
       model: 'deepseek-chat',
-      globalSystemPrompt: DEFAULT_GLOBAL_SYSTEM_PROMPT,
+      globalSystemPrompt: DEFAULT_STYLE_PROMPT,
       userNickname: '我',
       userAvatar: '🙂',
       setSettings: (patch) => set(patch),

@@ -1,0 +1,159 @@
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { TopBar } from '../components/TopBar'
+import { useSettingsStore } from '../store/useSettingsStore'
+import { chatCompletion } from '../lib/deepseek'
+import {
+  AGE_RANGE_OPTIONS,
+  GENDER_OPTIONS,
+  PERSONALITY_TAG_OPTIONS,
+  RELATIONSHIP_OPTIONS,
+  buildPersonaGenerationPrompt,
+  parsePersonaGeneration,
+} from '../lib/prompt'
+
+export function ContactAddPage() {
+  const navigate = useNavigate()
+  const settings = useSettingsStore()
+
+  const [tags, setTags] = useState<string[]>([])
+  const [ageRange, setAgeRange] = useState('')
+  const [gender, setGender] = useState('')
+  const [relationship, setRelationship] = useState('')
+  const [extra, setExtra] = useState('')
+  const [generating, setGenerating] = useState(false)
+  const [error, setError] = useState('')
+
+  function toggleTag(tag: string) {
+    setTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))
+  }
+
+  async function handleGenerate() {
+    if (!settings.apiKey) {
+      setError('还没有配置API Key 请先去"我-设置"里填写')
+      return
+    }
+    setGenerating(true)
+    setError('')
+    try {
+      const raw = await chatCompletion({
+        apiKey: settings.apiKey,
+        baseUrl: settings.baseUrl,
+        model: settings.model,
+        messages: [
+          {
+            role: 'system',
+            content: buildPersonaGenerationPrompt({
+              personalityTags: tags,
+              ageRange,
+              gender,
+              relationship,
+              extra,
+            }),
+          },
+          { role: 'user', content: '请生成' },
+        ],
+      })
+      const parsed = parsePersonaGeneration(raw)
+      if (!parsed) throw new Error('生成结果解析失败 请重试一次')
+      navigate('/contact/new/confirm', { state: parsed })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  return (
+    <div className="flex min-h-full flex-col bg-[#f4f4f6]">
+      <TopBar title="添加联系人" showBack />
+
+      <div className="mt-3 flex-1 bg-white px-4 py-4">
+        <p className="mb-4 text-xs text-gray-400">
+          描述一下你想认识的这个人 名字会由AI自己来取 生成后你还可以再调整
+        </p>
+
+        <label className="mb-2 block text-xs font-medium text-gray-400">性格倾向（可多选）</label>
+        <div className="mb-4 flex flex-wrap gap-2">
+          {PERSONALITY_TAG_OPTIONS.map((tag) => (
+            <button
+              key={tag}
+              onClick={() => toggleTag(tag)}
+              className={`rounded-full px-3 py-1.5 text-xs ${
+                tags.includes(tag) ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'
+              }`}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+
+        <label className="mb-2 block text-xs font-medium text-gray-400">年龄段</label>
+        <div className="mb-4 flex flex-wrap gap-2">
+          {AGE_RANGE_OPTIONS.map((v) => (
+            <button
+              key={v}
+              onClick={() => setAgeRange(ageRange === v ? '' : v)}
+              className={`rounded-full px-3 py-1.5 text-xs ${
+                ageRange === v ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'
+              }`}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+
+        <label className="mb-2 block text-xs font-medium text-gray-400">性别</label>
+        <div className="mb-4 flex flex-wrap gap-2">
+          {GENDER_OPTIONS.map((v) => (
+            <button
+              key={v}
+              onClick={() => setGender(v === '不限' ? '' : v)}
+              className={`rounded-full px-3 py-1.5 text-xs ${
+                (gender === v || (v === '不限' && !gender)) ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'
+              }`}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+
+        <label className="mb-2 block text-xs font-medium text-gray-400">关系定位</label>
+        <div className="mb-4 flex flex-wrap gap-2">
+          {RELATIONSHIP_OPTIONS.map((v) => (
+            <button
+              key={v}
+              onClick={() => setRelationship(relationship === v ? '' : v)}
+              className={`rounded-full px-3 py-1.5 text-xs ${
+                relationship === v ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'
+              }`}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+
+        <label className="mb-2 block text-xs font-medium text-gray-400">补充说明（可选）</label>
+        <textarea
+          value={extra}
+          onChange={(e) => setExtra(e.target.value)}
+          placeholder="比如职业、爱好、说话口头禅、你们认识的契机…"
+          rows={4}
+          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+        />
+
+        {error && <p className="mt-3 text-xs text-red-500">{error}</p>}
+      </div>
+
+      <div className="sticky bottom-0 border-t border-gray-100 bg-white p-3">
+        <button
+          onClick={handleGenerate}
+          disabled={generating}
+          className="w-full rounded-lg bg-gray-900 py-2.5 text-sm text-white disabled:opacity-40"
+        >
+          {generating ? '正在生成…' : '生成联系人'}
+        </button>
+      </div>
+    </div>
+  )
+}

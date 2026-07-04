@@ -2,17 +2,18 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { TopBar } from '../components/TopBar'
 import { Avatar } from '../components/Avatar'
+import { AvatarPicker } from '../components/AvatarPicker'
 import { useSettingsStore } from '../store/useSettingsStore'
 
 export function MePage() {
   const navigate = useNavigate()
   const { userAvatar, userNickname, setSettings } = useSettingsStore()
   const [editing, setEditing] = useState(false)
+  const [pickingAvatar, setPickingAvatar] = useState(false)
   const [nickDraft, setNickDraft] = useState(userNickname)
-  const [avatarDraft, setAvatarDraft] = useState(userAvatar)
 
   function save() {
-    setSettings({ userNickname: nickDraft.trim() || '我', userAvatar: avatarDraft.trim() || '🙂' })
+    setSettings({ userNickname: nickDraft.trim() || '我' })
     setEditing(false)
   }
 
@@ -53,13 +54,16 @@ export function MePage() {
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/30 p-8">
           <div className="w-full rounded-2xl bg-white p-4">
             <h2 className="mb-3 text-center text-[15px] font-medium text-gray-900">编辑资料</h2>
-            <label className="mb-1 block text-xs text-gray-400">头像（emoji）</label>
-            <input
-              value={avatarDraft}
-              onChange={(e) => setAvatarDraft(e.target.value)}
-              maxLength={4}
-              className="mb-3 w-full rounded-lg border border-gray-200 px-3 py-2 text-center text-2xl"
-            />
+
+            <label className="mb-1 block text-xs text-gray-400">头像</label>
+            <button
+              onClick={() => setPickingAvatar(true)}
+              className="mb-3 flex items-center gap-3 rounded-lg border border-gray-200 px-3 py-2"
+            >
+              <Avatar avatar={userAvatar} size={40} />
+              <span className="text-sm text-gray-500">点击更换</span>
+            </button>
+
             <label className="mb-1 block text-xs text-gray-400">昵称</label>
             <input
               value={nickDraft}
@@ -80,6 +84,13 @@ export function MePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {pickingAvatar && (
+        <AvatarPicker
+          onSelect={(avatar) => setSettings({ userAvatar: avatar })}
+          onClose={() => setPickingAvatar(false)}
+        />
       )}
     </div>
   )

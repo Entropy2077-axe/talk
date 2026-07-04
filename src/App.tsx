@@ -6,6 +6,7 @@ import { DiscoverPage } from './pages/DiscoverPage'
 import { MePage } from './pages/MePage'
 import { ChatPage } from './pages/ChatPage'
 import { ContactCardPage } from './pages/ContactCardPage'
+import { ContactAddPage } from './pages/ContactAddPage'
 import { ContactEditPage } from './pages/ContactEditPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { StickersPage } from './pages/StickersPage'
@@ -21,7 +22,8 @@ function App() {
           <Route path="/me" element={<MePage />} />
         </Route>
         <Route path="/chat/:conversationId" element={<ChatPage />} />
-        <Route path="/contact/new" element={<ContactEditPage />} />
+        <Route path="/contact/new" element={<ContactAddPage />} />
+        <Route path="/contact/new/confirm" element={<ContactEditPage />} />
         <Route path="/contact/:contactId" element={<ContactCardPage />} />
         <Route path="/contact/:contactId/edit" element={<ContactEditPage />} />
         <Route path="/settings" element={<SettingsPage />} />

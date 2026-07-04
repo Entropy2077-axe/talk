@@ -1,11 +1,17 @@
 export interface Contact {
   id: string
-  name: string
+  name: string // the persona's own name, chosen by the AI at creation time — not user-renameable
+  remark?: string // user's own nickname for this contact, like a real contacts app; overrides name for display
   avatar: string // emoji or data URL
   avatarColor: string // fallback background color
-  systemPrompt: string
+  systemPrompt: string // persona description generated at creation time (editable for fine-tuning)
   bio?: string
   createdAt: number
+  // ---- adaptive memory ----
+  memoryFacts: string // compact known-facts summary about the user, refreshed periodically
+  memoryStyle: string // compact notes on how tone/familiarity should adapt to this user over time
+  memoryUpdatedAt: number
+  memoryMessageCursor: number // number of messages already folded into memory, so updates only look at what's new
 }
 
 export interface Conversation {
