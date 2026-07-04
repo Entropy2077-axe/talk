@@ -78,6 +78,7 @@ export function ContactAddPage() {
           },
           { role: 'user', content: '请生成' },
         ],
+        jsonMode: true,
       })
       const parsed = parsePersonaGeneration(raw)
       if (!parsed) throw new Error('生成结果解析失败 请重试一次')

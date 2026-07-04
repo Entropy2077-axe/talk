@@ -111,6 +111,7 @@ export async function maybeUpdateMemory(
         },
         { role: 'user', content: formatMessagesForMemory(newMessages) },
       ],
+      jsonMode: true,
     })
     const updated = parseMemoryResponse(raw)
     if (!updated) return

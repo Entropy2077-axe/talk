@@ -75,6 +75,15 @@ export async function chatCompletion(opts: {
   model: string
   messages: ChatMessage[]
   signal?: AbortSignal
+  /**
+   * Only safe for genuinely single-turn calls (persona generation, memory
+   * summarization) that never carry accumulated assistant history. On the
+   * main multi-turn chat call, forcing json_object mode was measured to
+   * make the model emit pure-whitespace/blank completions from the 2nd
+   * turn onward — see coalesceConsecutiveRoles's neighbor note and project
+   * memory. Leave this off there and rely on prompt instructions instead.
+   */
+  jsonMode?: boolean
 }): Promise<string> {
   const res = await fetch(`${normalizeBaseUrl(opts.baseUrl)}/v1/chat/completions`, {
     method: 'POST',
@@ -86,7 +95,7 @@ export async function chatCompletion(opts: {
     body: JSON.stringify({
       model: opts.model,
       messages: opts.messages,
-      response_format: { type: 'json_object' },
+      ...(opts.jsonMode ? { response_format: { type: 'json_object' } } : {}),
       temperature: 1.1,
     }),
   })

@@ -93,7 +93,10 @@ export function buildSystemPrompt(opts: {
 
   const contextSection = `【当前时间】\n${opts.currentTimeText}\n\n【关于对方(用户)】\n${opts.userProfileText}\n\n【你的日程情况】\n${opts.scheduleContextText}`
 
-  return [opts.stylePrompt, protocol, personaSection, memorySection, contextSection].join('\n\n')
+  // Protocol/output-format instructions go last (closest to where the
+  // model starts generating) — measured to noticeably help JSON-format
+  // compliance versus burying it under the persona/memory/context sections.
+  return [opts.stylePrompt, personaSection, memorySection, contextSection, protocol].join('\n\n')
 }
 
 export const AVAILABLE_LINK_APPS: { app: string; desc: string }[] = [
