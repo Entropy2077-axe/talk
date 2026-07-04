@@ -5,9 +5,11 @@ import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { TopBar } from '../components/TopBar'
 import { Avatar } from '../components/Avatar'
+import { AvatarPicker } from '../components/AvatarPicker'
 import { ActionSheet } from '../components/ActionSheet'
 import { displayName } from '../lib/contact'
 import { resetMemory } from '../lib/memory'
+import { RELATIONSHIP_DIMENSIONS, relationshipStageLabel } from '../lib/relationship'
 
 export function ContactCardPage() {
   const { contactId } = useParams()
@@ -16,6 +18,7 @@ export function ContactCardPage() {
   const [editingRemark, setEditingRemark] = useState(false)
   const [remarkDraft, setRemarkDraft] = useState('')
   const [clearMemoryConfirm, setClearMemoryConfirm] = useState(false)
+  const [pickingAvatar, setPickingAvatar] = useState(false)
 
   const contact = useLiveQuery(() => (contactId ? db.contacts.get(contactId) : undefined), [contactId])
   const conversation = useLiveQuery(
@@ -64,7 +67,9 @@ export function ContactCardPage() {
       <TopBar title="联系人名片" showBack />
 
       <section className="mt-3 flex flex-col items-center gap-1 bg-white px-4 py-8">
-        <Avatar avatar={contact.avatar} color={contact.avatarColor} size={80} />
+        <button onClick={() => setPickingAvatar(true)}>
+          <Avatar avatar={contact.avatar} color={contact.avatarColor} size={80} />
+        </button>
         <h2 className="mt-1 text-lg font-medium text-gray-900">{displayName(contact)}</h2>
         {contact.remark && <p className="text-xs text-gray-400">本名 {contact.name}</p>}
       </section>
@@ -83,10 +88,28 @@ export function ContactCardPage() {
       </div>
 
       <section className="mt-3 bg-white px-4 py-4">
-        <h3 className="mb-2 text-xs font-medium text-gray-400">人物设定</h3>
-        <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-600">
-          {contact.systemPrompt}
-        </p>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-xs font-medium text-gray-400">关系</h3>
+          <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-600">
+            {relationshipStageLabel(contact.relationship)}
+          </span>
+        </div>
+        <div className="space-y-2.5">
+          {RELATIONSHIP_DIMENSIONS.map(({ key, label }) => (
+            <div key={key}>
+              <div className="mb-1 flex items-center justify-between text-xs text-gray-500">
+                <span>{label}</span>
+                <span>{contact.relationship[key]}</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-gray-100">
+                <div
+                  className="h-full rounded-full bg-[#aa3bff]"
+                  style={{ width: `${contact.relationship[key]}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
       </section>
 
       <section className="mt-3 bg-white px-4 py-4">
@@ -110,19 +133,13 @@ export function ContactCardPage() {
             </p>
           </div>
         ) : (
-          <p className="text-sm text-gray-400">还没有形成记忆 多聊几句之后AI会自己记住一些关于你的事</p>
+          <p className="text-sm text-gray-400">还没有形成记忆 多聊几句之后会自己记住一些关于你的事</p>
         )}
       </section>
 
       <div className="mt-3 flex flex-col gap-2 bg-white px-4 py-4">
         <button onClick={handleChat} className="w-full rounded-lg bg-gray-900 py-2.5 text-sm text-white">
           发消息
-        </button>
-        <button
-          onClick={() => navigate(`/contact/${contactId}/edit`)}
-          className="w-full rounded-lg bg-gray-100 py-2.5 text-sm text-gray-700"
-        >
-          编辑资料
         </button>
         <button onClick={() => setMenuOpen(true)} className="w-full rounded-lg bg-gray-100 py-2.5 text-sm text-red-500">
           删除联系人
@@ -141,11 +158,18 @@ export function ContactCardPage() {
           onClose={() => setClearMemoryConfirm(false)}
           options={[
             {
-              label: '确认清空AI对你的记忆',
+              label: '确认清空对方对你的记忆',
               onSelect: () => resetMemory(contactId!),
               danger: true,
             },
           ]}
+        />
+      )}
+
+      {pickingAvatar && (
+        <AvatarPicker
+          onSelect={(avatar) => db.contacts.update(contactId!, { avatar })}
+          onClose={() => setPickingAvatar(false)}
         />
       )}
 

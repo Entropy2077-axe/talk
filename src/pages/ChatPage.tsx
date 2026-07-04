@@ -116,6 +116,11 @@ export function ChatPage() {
 
       if (streamRef.current !== streamId) return
       const bubbles = parseAiResponse(raw)
+      if (bubbles.length === 0) {
+        setError('对方这次没有正常回复 可以再发一条试试')
+        setAiTyping(false)
+        return
+      }
       revealBubbles(bubbles, streamId)
     } catch (err) {
       if (streamRef.current !== streamId) return
@@ -186,7 +191,7 @@ export function ChatPage() {
   if (conversation === undefined || contact === undefined) return null
   if (conversation === null || contact === null) {
     return (
-      <div className="flex min-h-full flex-col bg-[#ededed]">
+      <div className="flex h-dvh flex-col overflow-hidden bg-[#ededed]">
         <TopBar title="对话" showBack />
         <p className="px-4 py-10 text-center text-sm text-gray-400">会话不存在</p>
       </div>
@@ -194,7 +199,7 @@ export function ChatPage() {
   }
 
   return (
-    <div className="flex min-h-full flex-col bg-[#ededed]">
+    <div className="flex h-dvh flex-col overflow-hidden bg-[#ededed]">
       <TopBar
         title={displayName(contact)}
         showBack
@@ -220,6 +225,7 @@ export function ChatPage() {
               if (el) bubbleRefs.current.set(m.id, el)
             }}
             message={m}
+            contactName={displayName(contact)}
             contactAvatar={contact.avatar}
             contactAvatarColor={contact.avatarColor}
             userAvatar={settings.userAvatar}

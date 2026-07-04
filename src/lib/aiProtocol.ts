@@ -1,22 +1,30 @@
 import type { AiBubble, AiResponse } from '../types'
 
+/**
+ * Parses the model's JSON reply into bubbles. Returns an empty array
+ * whenever nothing usable could be extracted (empty/blank response,
+ * malformed JSON, missing `messages`, or every entry filtered out) —
+ * callers must treat `[]` as "no reply" and surface that explicitly,
+ * never fall back to displaying raw/empty text as a bubble.
+ */
 export function parseAiResponse(raw: string): AiBubble[] {
-  let text = raw.trim()
+  const trimmedRaw = raw.trim()
+  if (!trimmedRaw) return []
+
+  let text = trimmedRaw
   // strip ```json ... ``` fences if the model added them despite instructions
   const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
   if (fenceMatch) text = fenceMatch[1].trim()
+  if (!text) return []
 
   let parsed: AiResponse
   try {
     parsed = JSON.parse(text)
   } catch {
-    // fall back: treat whole thing as a single plain-text bubble
-    return [{ type: 'text', content: raw.trim() }]
+    return []
   }
 
-  if (!parsed || !Array.isArray(parsed.messages)) {
-    return [{ type: 'text', content: raw.trim() }]
-  }
+  if (!parsed || !Array.isArray(parsed.messages)) return []
 
   const bubbles: AiBubble[] = []
   for (const m of parsed.messages) {
@@ -29,7 +37,7 @@ export function parseAiResponse(raw: string): AiBubble[] {
       bubbles.push({ type: 'link', app: m.app, label: m.label, data: m.data })
     }
   }
-  return bubbles.length > 0 ? bubbles : [{ type: 'text', content: raw.trim() }]
+  return bubbles
 }
 
 /** Simulated typing delay before a bubble appears, based on its own content length. */
