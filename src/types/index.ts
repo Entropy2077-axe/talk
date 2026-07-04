@@ -23,6 +23,54 @@ export interface Contact {
   memoryMessageCursor: number // number of messages already folded into memory, so updates only look at what's new
   // ---- relationship network (contact's relationship toward the user) ----
   relationship: RelationshipDimensions
+  // ---- moments (朋友圈) ----
+  lastMomentAt?: number // when this contact last posted a moment, used for the "hasn't posted in 10 min" eligibility check
+  pendingEvents?: string[] // short notes about notable things to naturally mention next chat (e.g. "对方刚给你的朋友圈点了赞"), cleared once used
+}
+
+/** A directed relationship link between two AI contacts (set up when adding a contact), used to decide who reacts to whose moments. */
+export const CONTACT_RELATION_LABELS = [
+  '好朋友',
+  '损友',
+  '暧昧对象',
+  '恋人',
+  '家人',
+  '前辈/同事',
+  '点头之交',
+  '看不顺眼',
+  '对头',
+] as const
+export type ContactRelationLabel = (typeof CONTACT_RELATION_LABELS)[number]
+
+export interface ContactRelationLink {
+  id: string
+  fromContactId: string
+  toContactId: string
+  label: ContactRelationLabel
+  createdAt: number
+}
+
+export interface Moment {
+  id: string
+  contactId: string
+  content: string
+  createdAt: number
+}
+
+export interface MomentComment {
+  id: string
+  momentId: string
+  authorContactId: string
+  content: string
+  createdAt: number
+}
+
+export interface MomentLike {
+  id: string
+  momentId: string
+  /** Either a contactId, or the literal sentinel 'user' for the app's own user liking a moment. */
+  likerId: string
+  createdAt: number
 }
 
 export interface Conversation {
@@ -121,6 +169,7 @@ export interface AppSettings {
   userBirthday: string // "YYYY-MM-DD", empty if unset
   userBio: string
   walletBalance: number // 金币(coins) the user can spend in the shop
+  momentsCoverPhoto: string // data URL for the 朋友圈 page's cover banner, empty until the user sets one
 }
 
 // ---- AI JSON output protocol ----

@@ -11,6 +11,7 @@ import { TodoPage } from './pages/TodoPage'
 import { RelationshipsPage } from './pages/RelationshipsPage'
 import { ShopPage } from './pages/ShopPage'
 import { WarehousePage } from './pages/WarehousePage'
+import { MomentsPage } from './pages/MomentsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { StickersPage } from './pages/StickersPage'
 import { ProfileEditPage } from './pages/ProfileEditPage'
@@ -34,6 +35,7 @@ function App() {
         <Route path="/relationships" element={<RelationshipsPage />} />
         <Route path="/shop" element={<ShopPage />} />
         <Route path="/warehouse" element={<WarehousePage />} />
+        <Route path="/moments" element={<MomentsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/stickers" element={<StickersPage />} />
         <Route path="/profile/edit" element={<ProfileEditPage />} />

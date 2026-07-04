@@ -7,16 +7,21 @@ import { TopBar } from '../components/TopBar'
 import { Avatar } from '../components/Avatar'
 import { displayName } from '../lib/contact'
 import { formatCurrency } from '../lib/wallet'
+import { useSettingsStore } from '../store/useSettingsStore'
+import { triggerAiTurn } from '../lib/chatEngine'
 import type { InventoryItem } from '../types'
 
 export function WarehousePage() {
   const navigate = useNavigate()
   const items = useLiveQuery(() => db.inventory.orderBy('acquiredAt').reverse().toArray(), []) ?? []
   const contacts = useLiveQuery(() => db.contacts.toArray(), []) ?? []
+  const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? []
+  const settings = useSettingsStore()
   const [gifting, setGifting] = useState<InventoryItem | null>(null)
 
   async function handleGift(contactId: string) {
     if (!gifting) return
+    const contact = contacts.find((c) => c.id === contactId)
     const conv = await db.conversations.where('contactId').equals(contactId).first()
     if (conv) {
       await db.messages.add({
@@ -29,6 +34,7 @@ export function WarehousePage() {
         createdAt: Date.now(),
       })
       await db.conversations.update(conv.id, { updatedAt: Date.now() })
+      if (contact) triggerAiTurn(conv.id, contact, settings, stickers)
     }
     await db.inventory.delete(gifting.id)
     setGifting(null)

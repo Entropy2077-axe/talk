@@ -25,6 +25,7 @@ export const useSettingsStore = create<SettingsState>()(
       userBirthday: '',
       userBio: '',
       walletBalance: INITIAL_WALLET_BALANCE,
+      momentsCoverPhoto: '',
       setSettings: (patch) => set(patch),
     }),
     { name: 'talk-settings' },

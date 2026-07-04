@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { v4 as uuid } from 'uuid'
@@ -60,9 +60,12 @@ export function ChatPage() {
     return () => setActiveConversation(null)
   }, [conversationId, setActiveConversation])
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: 'end' })
-  }, [messages.length, aiTyping])
+  // useLayoutEffect (not useEffect) so the jump-to-bottom happens before the
+  // browser paints — otherwise opening a long conversation briefly flashes
+  // the middle/top of the history before snapping to the bottom.
+  useLayoutEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+  }, [conversationId, messages.length, aiTyping])
 
   useEffect(() => {
     if (!highlightId || messages.length === 0) return

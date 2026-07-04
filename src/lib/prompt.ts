@@ -40,7 +40,7 @@ const FIXED_PROTOCOL_PROMPT = `【分句发送】
 - type为"text"时 content是这条消息的文字内容 一次不要写太多字 模拟真人一条一条发送
 - type为"sticker"时 name必须是下面提供的表情包名字列表中的一个 不能编造不存在的名字 表情包可以穿插在消息中间 不一定要放在最后
 - type为"link"时 表示分享一个应用内小程序链接 app字段必须是下面提供的可用小程序标识之一 label是这条链接卡片显示的文字 data是可选的附加数据 链接同样可以出现在消息序列的任意位置
-- type为"commission"时 表示你想拜托对方帮个忙、给对方发布一个可以选择接受或拒绝的委托 title是委托的简短标题 description是具体说明 reward是你愿意支付的报酬(10到200之间的整数 根据事情的麻烦程度自己定 不要每次都给一样的数) 只有在对话情境合适的时候才偶尔发一次(比如你确实需要帮忙、想找对方办点事) 不要每条回复都发 大多数时候都不需要
+- type为"commission"时 表示你想拜托对方帮个忙、给对方发布一个可以选择接受或拒绝的委托 title是委托的简短标题 description是具体说明 reward是你愿意支付的报酬(10到200之间的整数 根据事情的麻烦程度自己定 不要每次都给一样的数) 只有在对话情境合适的时候才偶尔发一次(比如你确实需要帮忙、想找对方办点事) 不要每条回复都发 大多数时候都不需要。**如果对方直接明确让你发布/安排一个委托或任务(比如说"发个任务吧""给我发个委托"这种)，你必须在这一条回复里就直接用commission类型真正发出来，不能只用text说"帮我带杯咖啡吧"这种话敷衍带过、嘴上答应却不实际发委托** —— 一旦你决定了要委托对方做什么，就在同一条回复的messages数组里加上对应的commission条目，绝不能拖到下一轮回复才发
 - messages数组顺序就是发送顺序 数组不能为空
 
 【可用表情包列表】
@@ -58,6 +58,7 @@ export function buildSystemPrompt(opts: {
   linkApps: { app: string; desc: string }[]
   currentTimeText: string
   userProfileText: string
+  recentEventsText?: string
 }): string {
   const stickersText =
     opts.stickerNames.length > 0
@@ -75,7 +76,8 @@ export function buildSystemPrompt(opts: {
 
   const memorySection = `【你对TA的了解】\n${opts.memoryFacts || '（你们才刚认识 还不了解对方）'}\n\n【你们的相处状态】\n${opts.memoryStyle || '（关系还比较陌生 语气可以稍微客气、试探一点）'}`
 
-  const contextSection = `【当前时间】\n${opts.currentTimeText}\n\n【关于对方(用户)】\n${opts.userProfileText}`
+  const eventsLine = opts.recentEventsText ? `\n\n【最近发生的事 可以自然地提一下 不用刻意】\n${opts.recentEventsText}` : ''
+  const contextSection = `【当前时间】\n${opts.currentTimeText}\n\n【关于对方(用户)】\n${opts.userProfileText}${eventsLine}`
 
   // Protocol/output-format instructions go last (closest to where the
   // model starts generating) — measured to noticeably help JSON-format

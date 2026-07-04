@@ -6,13 +6,16 @@ import { TopBar } from '../components/TopBar'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { displayName } from '../lib/contact'
 import { formatCurrency } from '../lib/wallet'
+import { triggerAiTurn } from '../lib/chatEngine'
 import type { Todo } from '../types'
 
 export function TodoPage() {
   const todos = useLiveQuery(() => db.todos.orderBy('createdAt').reverse().toArray(), []) ?? []
   const commissions = useLiveQuery(() => db.commissions.toArray(), []) ?? []
   const contacts = useLiveQuery(() => db.contacts.toArray(), []) ?? []
-  const { walletBalance, setSettings } = useSettingsStore()
+  const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? []
+  const settings = useSettingsStore()
+  const { walletBalance, setSettings } = settings
   const [newTitle, setNewTitle] = useState('')
 
   const commissionById = useMemo(() => new Map(commissions.map((c) => [c.id, c])), [commissions])
@@ -52,6 +55,8 @@ export function TodoPage() {
         createdAt: Date.now(),
       })
       await db.conversations.update(conv.id, { updatedAt: Date.now() })
+      const contact = contactById.get(commission.contactId)
+      if (contact) triggerAiTurn(conv.id, contact, settings, stickers)
     }
   }
 

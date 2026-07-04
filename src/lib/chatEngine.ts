@@ -107,6 +107,27 @@ export async function sendMessage(
   runAiTurn(conversationId, contact, settings, stickers, streamId)
 }
 
+/**
+ * Kicks off a reply from whatever's already in the conversation history,
+ * without inserting a new user-role message first — for background actions
+ * that write their own message directly (gifting an item from the
+ * warehouse, completing a commission from the todo list) and then want a
+ * real reply out of it instead of just leaving a message sitting there
+ * until the user happens to reopen that chat.
+ */
+export async function triggerAiTurn(
+  conversationId: string,
+  contact: Contact,
+  settings: AppSettings,
+  stickers: Sticker[],
+): Promise<void> {
+  const streamId = uuid()
+  streamByConversation.set(conversationId, streamId)
+  clearPending(conversationId)
+  useChatEngineStore.getState().patch(conversationId, { error: '' })
+  await runAiTurn(conversationId, contact, settings, stickers, streamId)
+}
+
 async function runAiTurn(
   conversationId: string,
   contact: Contact,
@@ -119,6 +140,12 @@ async function runAiTurn(
   try {
     const history = await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt')
 
+    // Notable things that happened outside the chat itself (e.g. the user
+    // liked this contact's moment) get mentioned once then cleared, rather
+    // than sitting there forever or requiring a proactive-message system.
+    const pendingEvents = contact.pendingEvents ?? []
+    if (pendingEvents.length > 0) await db.contacts.update(contact.id, { pendingEvents: [] })
+
     const systemPrompt = buildSystemPrompt({
       stylePrompt: settings.globalSystemPrompt,
       persona: contact.systemPrompt,
@@ -128,6 +155,7 @@ async function runAiTurn(
       linkApps: AVAILABLE_LINK_APPS,
       currentTimeText: describeCurrentTime(new Date()),
       userProfileText: buildUserProfileText(settings),
+      recentEventsText: pendingEvents.length > 0 ? pendingEvents.join('；') : undefined,
     })
     const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
     const chatMessages: ChatMessage[] = coalesceConsecutiveRoles([

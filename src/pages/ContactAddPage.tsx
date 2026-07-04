@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { TopBar } from '../components/TopBar'
@@ -11,6 +12,8 @@ import { randomAvatarColor } from '../lib/colors'
 import { AVATAR_EMOJIS } from '../lib/avatarEmojis'
 import { pickRandomTrait } from '../lib/randomTraits'
 import { initialRelationshipFor } from '../lib/relationship'
+import { displayName } from '../lib/contact'
+import { CONTACT_RELATION_LABELS, type ContactRelationLabel } from '../types'
 import {
   AGE_RANGE_OPTIONS,
   GENDER_OPTIONS,
@@ -20,9 +23,16 @@ import {
   parsePersonaGeneration,
 } from '../lib/prompt'
 
+interface RelationRow {
+  key: string
+  targetContactId: string
+  label: ContactRelationLabel
+}
+
 export function ContactAddPage() {
   const navigate = useNavigate()
   const settings = useSettingsStore()
+  const existingContacts = useLiveQuery(() => db.contacts.toArray(), []) ?? []
 
   const [tags, setTags] = useState<string[]>([])
   const [customTag, setCustomTag] = useState('')
@@ -34,6 +44,25 @@ export function ContactAddPage() {
   const [pickingAvatar, setPickingAvatar] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState('')
+  const [relationRows, setRelationRows] = useState<RelationRow[]>([])
+
+  function addRelationRow() {
+    const taken = new Set(relationRows.map((r) => r.targetContactId))
+    const firstAvailable = existingContacts.find((c) => !taken.has(c.id))
+    if (!firstAvailable) return
+    setRelationRows((prev) => [
+      ...prev,
+      { key: uuid(), targetContactId: firstAvailable.id, label: CONTACT_RELATION_LABELS[0] },
+    ])
+  }
+
+  function updateRelationRow(key: string, patch: Partial<RelationRow>) {
+    setRelationRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)))
+  }
+
+  function removeRelationRow(key: string) {
+    setRelationRows((prev) => prev.filter((r) => r.key !== key))
+  }
 
   function toggleTag(tag: string) {
     setTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))
@@ -102,6 +131,15 @@ export function ContactAddPage() {
         createdAt: now,
         updatedAt: now,
       })
+      for (const row of relationRows) {
+        await db.contactRelations.add({
+          id: uuid(),
+          fromContactId: id,
+          toContactId: row.targetContactId,
+          label: row.label,
+          createdAt: now,
+        })
+      }
       navigate('/contacts')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -218,6 +256,57 @@ export function ContactAddPage() {
             </button>
           ))}
         </div>
+
+        {existingContacts.length > 0 && (
+          <>
+            <div className="mb-2 flex items-center justify-between">
+              <label className="block text-xs font-medium text-gray-400">TA与其他联系人的关系（可选）</label>
+              <button
+                onClick={addRelationRow}
+                disabled={relationRows.length >= existingContacts.length}
+                className="text-xs text-[#aa3bff] disabled:opacity-40"
+              >
+                + 添加关系
+              </button>
+            </div>
+            <div className="mb-4 space-y-2">
+              {relationRows.map((row) => (
+                <div key={row.key} className="flex items-center gap-2">
+                  <select
+                    value={row.targetContactId}
+                    onChange={(e) => updateRelationRow(row.key, { targetContactId: e.target.value })}
+                    className="flex-1 rounded-lg border border-gray-200 px-2 py-1.5 text-xs"
+                  >
+                    {existingContacts.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {displayName(c)}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={row.label}
+                    onChange={(e) =>
+                      updateRelationRow(row.key, { label: e.target.value as ContactRelationLabel })
+                    }
+                    className="flex-1 rounded-lg border border-gray-200 px-2 py-1.5 text-xs"
+                  >
+                    {CONTACT_RELATION_LABELS.map((l) => (
+                      <option key={l} value={l}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                  <button onClick={() => removeRelationRow(row.key)} className="shrink-0 text-xs text-gray-300">
+                    删除
+                  </button>
+                </div>
+              ))}
+              {relationRows.length === 0 && (
+                <p className="text-xs text-gray-400">不设置的话TA和其他联系人之间默认没有关系 不会互相在朋友圈下面互动</p>
+              )}
+            </div>
+          </>
+        )}
 
         <label className="mb-2 block text-xs font-medium text-gray-400">补充说明（可选）</label>
         <textarea

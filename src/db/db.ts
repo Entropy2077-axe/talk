@@ -1,5 +1,17 @@
 import Dexie, { type Table } from 'dexie'
-import type { Commission, Contact, Conversation, InventoryItem, Message, Sticker, Todo } from '../types'
+import type {
+  Commission,
+  Contact,
+  ContactRelationLink,
+  Conversation,
+  InventoryItem,
+  Message,
+  Moment,
+  MomentComment,
+  MomentLike,
+  Sticker,
+  Todo,
+} from '../types'
 
 export class TalkDB extends Dexie {
   contacts!: Table<Contact, string>
@@ -9,6 +21,10 @@ export class TalkDB extends Dexie {
   todos!: Table<Todo, string>
   commissions!: Table<Commission, string>
   inventory!: Table<InventoryItem, string>
+  moments!: Table<Moment, string>
+  momentComments!: Table<MomentComment, string>
+  momentLikes!: Table<MomentLike, string>
+  contactRelations!: Table<ContactRelationLink, string>
 
   constructor() {
     super('talk-db')
@@ -31,6 +47,12 @@ export class TalkDB extends Dexie {
       todos: 'id, done, commissionId, createdAt',
       commissions: 'id, contactId, status, createdAt',
       inventory: 'id, acquiredAt',
+    })
+    this.version(5).stores({
+      moments: 'id, contactId, createdAt',
+      momentComments: 'id, momentId, authorContactId',
+      momentLikes: 'id, momentId, likerId',
+      contactRelations: 'id, fromContactId, toContactId',
     })
   }
 }

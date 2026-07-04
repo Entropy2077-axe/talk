@@ -9,6 +9,7 @@ import { AvatarPicker } from '../components/AvatarPicker'
 import { ActionSheet } from '../components/ActionSheet'
 import { displayName } from '../lib/contact'
 import { resetMemory } from '../lib/memory'
+import { cascadeDeleteContactSocialData } from '../lib/moments'
 
 export function ContactCardPage() {
   const { contactId } = useParams()
@@ -49,6 +50,7 @@ export function ContactCardPage() {
       await db.messages.where('conversationId').equals(conversation.id).delete()
       await db.conversations.delete(conversation.id)
     }
+    await cascadeDeleteContactSocialData(contactId!)
     await db.contacts.delete(contactId!)
     navigate('/contacts', { replace: true })
   }

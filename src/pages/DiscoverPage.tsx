@@ -4,6 +4,7 @@ import { TopBar } from '../components/TopBar'
 import { SearchOverlay } from '../components/SearchOverlay'
 
 const ENTRIES = [
+  { to: '/moments', icon: '📸', label: '朋友圈' },
   { to: '/shop', icon: '🛍️', label: '商城' },
   { to: '/warehouse', icon: '📦', label: '仓库' },
   { to: '/relationships', icon: '🕸️', label: '关系网' },

@@ -36,7 +36,7 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
   return (
     <div ref={ref} className={`px-3 py-1.5 ${highlighted ? 'bg-yellow-50' : ''}`}>
       {!isUser && <p className="mb-1 text-[11px] text-gray-400">{contactName}</p>}
-      <div className={`flex items-end gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
+      <div className={`flex items-start gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
         {isUser ? (
           <Avatar avatar={userAvatar} size={32} />
         ) : (

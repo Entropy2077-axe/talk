@@ -18,6 +18,7 @@ const SORT_OPTIONS: { key: keyof RelationshipDimensions; label: string }[] = [
 export function RelationshipsPage() {
   const navigate = useNavigate()
   const contactsRaw = useLiveQuery(() => db.contacts.toArray(), []) ?? []
+  const relations = useLiveQuery(() => db.contactRelations.toArray(), []) ?? []
   const [sortKey, setSortKey] = useState<keyof RelationshipDimensions>('affection')
   const [showLegend, setShowLegend] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -26,6 +27,7 @@ export function RelationshipsPage() {
     () => [...contactsRaw].sort((a, b) => b.relationship[sortKey] - a.relationship[sortKey]),
     [contactsRaw, sortKey],
   )
+  const contactById = useMemo(() => new Map(contactsRaw.map((c) => [c.id, c])), [contactsRaw])
 
   return (
     <div className="flex min-h-full flex-col bg-[#f4f4f6]">
@@ -85,6 +87,13 @@ export function RelationshipsPage() {
               expanded={expandedId === c.id}
               onToggle={() => setExpandedId(expandedId === c.id ? null : c.id)}
               onOpenCard={() => navigate(`/contact/${c.id}`)}
+              links={relations
+                .filter((r) => r.fromContactId === c.id || r.toContactId === c.id)
+                .map((r) => ({
+                  label: r.label,
+                  other: contactById.get(r.fromContactId === c.id ? r.toContactId : r.fromContactId),
+                }))
+                .filter((l) => l.other)}
             />
           ))}
         </div>
@@ -98,11 +107,13 @@ function RelationshipCard({
   expanded,
   onToggle,
   onOpenCard,
+  links,
 }: {
   contact: Contact
   expanded: boolean
   onToggle: () => void
   onOpenCard: () => void
+  links: { label: string; other: Contact | undefined }[]
 }) {
   return (
     <div className="rounded-xl bg-white p-3">
@@ -137,6 +148,22 @@ function RelationshipCard({
               </span>
             </div>
           ))}
+
+          <div className="border-t border-gray-100 pt-2">
+            <p className="mb-1 text-xs font-medium text-gray-400">TA与其他人的关系</p>
+            {links.length === 0 ? (
+              <p className="text-xs text-gray-400">还没有设置和其他联系人的关系</p>
+            ) : (
+              <div className="space-y-1">
+                {links.map((l, i) => (
+                  <p key={i} className="text-xs text-gray-500">
+                    {l.other ? displayName(l.other) : '未知'} · {l.label}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+
           <button onClick={onOpenCard} className="mt-2 w-full rounded-lg bg-gray-100 py-2 text-xs text-gray-700">
             查看联系人名片
           </button>
