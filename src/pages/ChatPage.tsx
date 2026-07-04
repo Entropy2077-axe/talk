@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { v4 as uuid } from 'uuid'
@@ -6,13 +6,10 @@ import { db } from '../db/db'
 import { TopBar } from '../components/TopBar'
 import { MessageBubble } from '../components/MessageBubble'
 import { useSettingsStore } from '../store/useSettingsStore'
-import { chatCompletion, coalesceConsecutiveRoles, type ChatMessage } from '../lib/deepseek'
-import { parseAiResponse, typingDelayMs } from '../lib/aiProtocol'
-import { buildSystemPrompt, AVAILABLE_LINK_APPS } from '../lib/prompt'
-import { CONTEXT_WINDOW_SIZE, maybeUpdateMemory } from '../lib/memory'
+import { useChatUiStore } from '../store/useChatUiStore'
+import { sendMessage, useChatEngineStore } from '../lib/chatEngine'
 import { displayName } from '../lib/contact'
-import { describeCurrentTime, ageFromBirthday } from '../lib/time'
-import type { AiBubble, Message } from '../types'
+import type { Message } from '../types'
 
 export function ChatPage() {
   const { conversationId } = useParams()
@@ -20,6 +17,7 @@ export function ChatPage() {
   const highlightId = searchParams.get('highlight')
   const navigate = useNavigate()
   const settings = useSettingsStore()
+  const setActiveConversation = useChatUiStore((s) => s.setActiveConversation)
 
   const conversation = useLiveQuery(
     () => (conversationId ? db.conversations.get(conversationId) : undefined),
@@ -38,19 +36,29 @@ export function ChatPage() {
       [conversationId],
     ) ?? []
   const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? []
-  const stickerByName = useMemo(() => new Map(stickers.map((s) => [s.name, s.dataUrl])), [stickers])
+  const stickerByName = new Map(stickers.map((s) => [s.name, s.dataUrl]))
+
+  // The AI-turn state (typing indicator / error) lives in a module-level
+  // store, not local state — it keeps running in the background even when
+  // this page unmounts, so it must be read reactively from there instead.
+  const { aiTyping, error } = useChatEngineStore(
+    (s) => s.states[conversationId ?? ''] ?? { aiTyping: false, error: '' },
+  )
 
   const [input, setInput] = useState('')
-  const [aiTyping, setAiTyping] = useState(false)
-  const [error, setError] = useState('')
   const [toast, setToast] = useState('')
 
-  const streamRef = useRef<string | null>(null)
-  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([])
-  const abortRef = useRef<AbortController | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const bubbleRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const [flashId, setFlashId] = useState<string | null>(highlightId)
+
+  // Registers this conversation as "currently open" so background replies
+  // don't pop a notification for the chat the user is already looking at.
+  useEffect(() => {
+    if (!conversationId) return
+    setActiveConversation(conversationId)
+    return () => setActiveConversation(null)
+  }, [conversationId, setActiveConversation])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' })
@@ -65,177 +73,15 @@ export function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightId, messages.length])
 
-  useEffect(() => {
-    return () => {
-      timersRef.current.forEach(clearTimeout)
-      abortRef.current?.abort()
-    }
-  }, [])
-
-  function clearPending() {
-    timersRef.current.forEach(clearTimeout)
-    timersRef.current = []
-    abortRef.current?.abort()
-  }
-
-  function buildUserProfileText(): string {
-    const parts: string[] = [`昵称: ${settings.userNickname || '未设置'}`]
-    if (settings.userGender) parts.push(`性别: ${settings.userGender}`)
-    const age = ageFromBirthday(settings.userBirthday)
-    if (age !== null) parts.push(`年龄: ${age}岁`)
-    if (settings.userBio) parts.push(`简介: ${settings.userBio}`)
-    return parts.join(' · ')
-  }
-
-  async function runAiTurn(streamId: string) {
-    if (!conversationId || !contact) return
-    setAiTyping(true)
-    setError('')
-    try {
-      const history = await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt')
-
-      const systemPrompt = buildSystemPrompt({
-        stylePrompt: settings.globalSystemPrompt,
-        persona: contact.systemPrompt,
-        memoryFacts: contact.memoryFacts,
-        memoryStyle: contact.memoryStyle,
-        stickerNames: stickers.map((s) => s.name),
-        linkApps: AVAILABLE_LINK_APPS,
-        currentTimeText: describeCurrentTime(new Date()),
-        userProfileText: buildUserProfileText(),
-      })
-      // Only the most recent messages go verbatim into the request — older
-      // context is represented purely through the memory summary above, so
-      // token usage stays bounded no matter how long the conversation gets.
-      const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
-      // Each AI turn is stored as several separate assistant bubbles, so the
-      // raw mapping below produces runs of consecutive "assistant" messages
-      // with no interleaved "user" turn — coalesce them back into one
-      // message per real turn (see coalesceConsecutiveRoles for why this
-      // matters: it visibly degraded reply quality from the 2nd turn on).
-      const chatMessages: ChatMessage[] = coalesceConsecutiveRoles([
-        { role: 'system', content: systemPrompt },
-        ...recentHistory.map((m): ChatMessage => {
-          if (m.type === 'sticker') return { role: m.role, content: `[发了一个表情: ${m.content}]` }
-          if (m.type === 'link') return { role: m.role, content: `[分享了一个链接: ${m.content}]` }
-          if (m.type === 'commission') return { role: m.role, content: `[发布了委托: ${m.content}]` }
-          if (m.type === 'gift') return { role: m.role, content: `[送出了礼物: ${m.content}]` }
-          return { role: m.role, content: m.content }
-        }),
-      ])
-
-      const controller = new AbortController()
-      abortRef.current = controller
-      const raw = await chatCompletion({
-        apiKey: settings.apiKey,
-        baseUrl: settings.baseUrl,
-        model: settings.model,
-        messages: chatMessages,
-        signal: controller.signal,
-      })
-
-      if (streamRef.current !== streamId) return
-      const bubbles = parseAiResponse(raw)
-      if (bubbles.length === 0) {
-        setError('对方这次没有正常回复 可以再发一条试试')
-        setAiTyping(false)
-        return
-      }
-      revealBubbles(bubbles, streamId)
-    } catch (err) {
-      if (streamRef.current !== streamId) return
-      if (err instanceof DOMException && err.name === 'AbortError') return
-      setError(err instanceof Error ? err.message : String(err))
-      setAiTyping(false)
-    }
-  }
-
-  function revealBubbles(bubbles: AiBubble[], streamId: string) {
-    if (bubbles.length === 0) {
-      setAiTyping(false)
-      return
-    }
-    let cumulative = 0
-    bubbles.forEach((bubble, i) => {
-      cumulative += typingDelayMs(bubble)
-      const timer = setTimeout(async () => {
-        if (streamRef.current !== streamId || !conversationId || !contact) return
-
-        let commissionId: string | undefined
-        if (bubble.type === 'commission') {
-          commissionId = uuid()
-          await db.commissions.add({
-            id: commissionId,
-            contactId: contact.id,
-            title: bubble.title,
-            description: bubble.description,
-            reward: bubble.reward,
-            status: 'pending',
-            createdAt: Date.now(),
-          })
-        }
-
-        let content: string
-        if (bubble.type === 'text') content = bubble.content
-        else if (bubble.type === 'sticker') content = bubble.name
-        else if (bubble.type === 'commission') content = bubble.title
-        else content = bubble.label
-
-        const msg: Message = {
-          id: uuid(),
-          conversationId,
-          role: 'assistant',
-          type: bubble.type,
-          content,
-          link: bubble.type === 'link' ? { app: bubble.app, label: bubble.label, data: bubble.data } : undefined,
-          commission: commissionId ? { commissionId } : undefined,
-          createdAt: Date.now(),
-        }
-        await db.messages.add(msg)
-        await db.conversations.update(conversationId, { updatedAt: Date.now() })
-        if (i === bubbles.length - 1) {
-          setAiTyping(false)
-          maybeUpdateMemory(contact.id, conversationId, settings)
-        }
-      }, cumulative)
-      timersRef.current.push(timer)
-    })
-  }
-
-  async function sendMessage(text: string) {
-    if (!text.trim() || !conversationId) return
-    if (!settings.apiKey) {
-      setError('还没有配置API Key 请先去"我-设置"里填写')
-      return
-    }
-
-    const streamId = uuid()
-    streamRef.current = streamId
-    clearPending()
-    setError('')
-
-    const msg: Message = {
-      id: uuid(),
-      conversationId,
-      role: 'user',
-      type: 'text',
-      content: text.trim(),
-      createdAt: Date.now(),
-    }
-    await db.messages.add(msg)
-    await db.conversations.update(conversationId, { updatedAt: Date.now() })
-
-    runAiTurn(streamId)
-  }
-
   async function handleSend() {
     const text = input.trim()
-    if (!text) return
+    if (!text || !conversationId || !contact) return
     setInput('')
-    await sendMessage(text)
+    await sendMessage(conversationId, contact, settings, stickers, text)
   }
 
   async function handleCommissionRespond(commissionId: string, accept: boolean) {
+    if (!conversationId || !contact) return
     const commission = await db.commissions.get(commissionId)
     if (!commission || commission.status !== 'pending') return
     await db.commissions.update(commissionId, { status: accept ? 'accepted' : 'declined', respondedAt: Date.now() })
@@ -250,7 +96,7 @@ export function ChatPage() {
         commissionId,
       })
     }
-    await sendMessage(accept ? `好 这个我接了` : `这个我接不了 抱歉`)
+    await sendMessage(conversationId, contact, settings, stickers, accept ? `好 这个我接了` : `这个我接不了 抱歉`)
   }
 
   if (conversation === undefined || contact === undefined) return null

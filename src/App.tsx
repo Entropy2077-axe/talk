@@ -14,10 +14,12 @@ import { WarehousePage } from './pages/WarehousePage'
 import { SettingsPage } from './pages/SettingsPage'
 import { StickersPage } from './pages/StickersPage'
 import { ProfileEditPage } from './pages/ProfileEditPage'
+import { NotificationBanner } from './components/NotificationBanner'
 
 function App() {
   return (
     <div className="app-shell">
+      <NotificationBanner />
       <Routes>
         <Route element={<TabLayout />}>
           <Route path="/" element={<MessagesPage />} />

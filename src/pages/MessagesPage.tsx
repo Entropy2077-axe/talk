@@ -9,6 +9,7 @@ import { ActionSheet } from '../components/ActionSheet'
 import { useLongPress } from '../hooks/useLongPress'
 import { formatListTime } from '../lib/time'
 import { displayName } from '../lib/contact'
+import { previewForMessage } from '../lib/messagePreview'
 import type { Message } from '../types'
 
 export function MessagesPage() {
@@ -40,13 +41,6 @@ export function MessagesPage() {
       })
   }, [conversations, contacts, messages])
 
-  function lastMessagePreview(m?: Message) {
-    if (!m) return '暂无消息'
-    if (m.type === 'sticker') return '[表情]'
-    if (m.type === 'link') return `[链接] ${m.content}`
-    return m.content
-  }
-
   const menuConv = rows.find((r) => r.conv.id === menuFor)?.conv
 
   return (
@@ -65,7 +59,7 @@ export function MessagesPage() {
             avatar={contact!.avatar}
             avatarColor={contact!.avatarColor}
             name={displayName(contact!)}
-            preview={lastMessagePreview(lastMessage)}
+            preview={previewForMessage(lastMessage)}
             time={formatListTime(conv.updatedAt)}
             onClick={() => navigate(`/chat/${conv.id}`)}
             onLongPress={() => setMenuFor(conv.id)}
