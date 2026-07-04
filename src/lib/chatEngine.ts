@@ -26,7 +26,12 @@ interface ConversationRuntimeState {
   error: string
 }
 
-const DEFAULT_RUNTIME_STATE: ConversationRuntimeState = { aiTyping: false, error: '' }
+// Exported as a stable reference — selectors that fall back to this for a
+// conversation with no state yet must never construct a fresh object
+// literal on the fly (e.g. `s.states[id] ?? { aiTyping: false, error: '' }`),
+// since a new reference every call trips React's useSyncExternalStore
+// infinite-loop detection and crashes the page.
+export const DEFAULT_RUNTIME_STATE: ConversationRuntimeState = { aiTyping: false, error: '' }
 
 interface ChatEngineStore {
   states: Record<string, ConversationRuntimeState>

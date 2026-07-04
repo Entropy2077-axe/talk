@@ -7,7 +7,7 @@ import { TopBar } from '../components/TopBar'
 import { MessageBubble } from '../components/MessageBubble'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { useChatUiStore } from '../store/useChatUiStore'
-import { sendMessage, useChatEngineStore } from '../lib/chatEngine'
+import { DEFAULT_RUNTIME_STATE, sendMessage, useChatEngineStore } from '../lib/chatEngine'
 import { displayName } from '../lib/contact'
 import type { Message } from '../types'
 
@@ -42,7 +42,7 @@ export function ChatPage() {
   // store, not local state — it keeps running in the background even when
   // this page unmounts, so it must be read reactively from there instead.
   const { aiTyping, error } = useChatEngineStore(
-    (s) => s.states[conversationId ?? ''] ?? { aiTyping: false, error: '' },
+    (s) => s.states[conversationId ?? ''] ?? DEFAULT_RUNTIME_STATE,
   )
 
   const [input, setInput] = useState('')
