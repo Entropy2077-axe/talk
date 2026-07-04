@@ -3,10 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { TopBar } from '../components/TopBar'
 import { SearchOverlay } from '../components/SearchOverlay'
 
-const ENTRIES = [
-  { to: '/map', icon: '🗺️', label: '地图' },
-  { to: '/relationships', icon: '🕸️', label: '关系网' },
-]
+const ENTRIES = [{ to: '/relationships', icon: '🕸️', label: '关系网' }]
 
 export function DiscoverPage() {
   const [searching, setSearching] = useState(false)

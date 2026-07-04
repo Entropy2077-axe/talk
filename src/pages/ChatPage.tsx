@@ -12,9 +12,7 @@ import { buildSystemPrompt, AVAILABLE_LINK_APPS } from '../lib/prompt'
 import { CONTEXT_WINDOW_SIZE, maybeUpdateMemory } from '../lib/memory'
 import { displayName } from '../lib/contact'
 import { describeCurrentTime, ageFromBirthday } from '../lib/time'
-import { locationLabel } from '../lib/locations'
-import { buildScheduleContextText, resolveExpectedLocation, upcomingTasks } from '../lib/schedule'
-import type { AiBubble, Message, ScheduleTask } from '../types'
+import type { AiBubble, Message } from '../types'
 
 export function ChatPage() {
   const { conversationId } = useParams()
@@ -41,14 +39,6 @@ export function ChatPage() {
     ) ?? []
   const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? []
   const stickerByName = useMemo(() => new Map(stickers.map((s) => [s.name, s.dataUrl])), [stickers])
-  const locations = useLiveQuery(() => db.locations.toArray(), []) ?? []
-  const locationById = useMemo(() => new Map(locations.map((l) => [l.id, l])), [locations])
-  const tasks =
-    useLiveQuery(
-      () =>
-        contact ? db.tasks.where('contactId').equals(contact.id).toArray() : Promise.resolve([] as ScheduleTask[]),
-      [contact],
-    ) ?? []
 
   const [input, setInput] = useState('')
   const [aiTyping, setAiTyping] = useState(false)
@@ -94,8 +84,6 @@ export function ChatPage() {
     const age = ageFromBirthday(settings.userBirthday)
     if (age !== null) parts.push(`年龄: ${age}岁`)
     if (settings.userBio) parts.push(`简介: ${settings.userBio}`)
-    const userLoc = locationById.get(settings.userLocationId)
-    if (userLoc) parts.push(`对方现在所在的位置: ${locationLabel(userLoc)}`)
     return parts.join(' · ')
   }
 
@@ -106,17 +94,6 @@ export function ChatPage() {
     try {
       const history = await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt')
 
-      const now = new Date()
-      const expected = resolveExpectedLocation(contact.dailySchedule, tasks, now)
-      const scheduleContextText = buildScheduleContextText({
-        expected,
-        expectedLocationLabel: expected ? locationLabel(locationById.get(expected.locationId)) : '',
-        currentLocationLabel: locationLabel(locationById.get(contact.currentLocationId)),
-        upcoming: upcomingTasks(tasks, now, 3).map((t) => ({
-          text: `${t.date} ${t.startTime}-${t.endTime} 在${locationLabel(locationById.get(t.locationId))} ${t.label}`,
-        })),
-      })
-
       const systemPrompt = buildSystemPrompt({
         stylePrompt: settings.globalSystemPrompt,
         persona: contact.systemPrompt,
@@ -124,10 +101,8 @@ export function ChatPage() {
         memoryStyle: contact.memoryStyle,
         stickerNames: stickers.map((s) => s.name),
         linkApps: AVAILABLE_LINK_APPS,
-        locationOptions: locations.map((l) => ({ id: l.id, label: locationLabel(l) })),
-        currentTimeText: describeCurrentTime(now),
+        currentTimeText: describeCurrentTime(new Date()),
         userProfileText: buildUserProfileText(),
-        scheduleContextText,
       })
       // Only the most recent messages go verbatim into the request — older
       // context is represented purely through the memory summary above, so
@@ -143,8 +118,6 @@ export function ChatPage() {
         ...recentHistory.map((m): ChatMessage => {
           if (m.type === 'sticker') return { role: m.role, content: `[发了一个表情: ${m.content}]` }
           if (m.type === 'link') return { role: m.role, content: `[分享了一个链接: ${m.content}]` }
-          if (m.type === 'location') return { role: m.role, content: `[更新了位置: ${m.content}]` }
-          if (m.type === 'schedule_task') return { role: m.role, content: `[约定了安排: ${m.content}]` }
           return { role: m.role, content: m.content }
         }),
       ])
@@ -185,50 +158,17 @@ export function ChatPage() {
       cumulative += typingDelayMs(bubble)
       const timer = setTimeout(async () => {
         if (streamRef.current !== streamId || !conversationId || !contact) return
-
-        let content = ''
-        if (bubble.type === 'text') content = bubble.content
-        else if (bubble.type === 'sticker') content = bubble.name
-        else content = bubble.label
-
         const msg: Message = {
           id: uuid(),
           conversationId,
           role: 'assistant',
           type: bubble.type,
-          content,
+          content: bubble.type === 'text' ? bubble.content : bubble.type === 'sticker' ? bubble.name : bubble.label,
           link: bubble.type === 'link' ? { app: bubble.app, label: bubble.label, data: bubble.data } : undefined,
-          location: bubble.type === 'location' ? { locationId: bubble.locationId } : undefined,
-          scheduleTask:
-            bubble.type === 'schedule_task'
-              ? {
-                  date: bubble.date,
-                  startTime: bubble.startTime,
-                  endTime: bubble.endTime,
-                  locationId: bubble.locationId,
-                }
-              : undefined,
           createdAt: Date.now(),
         }
         await db.messages.add(msg)
         await db.conversations.update(conversationId, { updatedAt: Date.now() })
-
-        if (bubble.type === 'location') {
-          await db.contacts.update(contact.id, { currentLocationId: bubble.locationId })
-        } else if (bubble.type === 'schedule_task') {
-          await db.tasks.add({
-            id: uuid(),
-            contactId: contact.id,
-            date: bubble.date,
-            startTime: bubble.startTime,
-            endTime: bubble.endTime,
-            locationId: bubble.locationId,
-            label: bubble.label,
-            createdAt: Date.now(),
-            source: 'ai',
-          })
-        }
-
         if (i === bubbles.length - 1) {
           setAiTyping(false)
           maybeUpdateMemory(contact.id, conversationId, settings)
@@ -308,7 +248,6 @@ export function ChatPage() {
             contactAvatarColor={contact.avatarColor}
             userAvatar={settings.userAvatar}
             stickerUrl={m.type === 'sticker' ? stickerByName.get(m.content) : undefined}
-            locationById={locationById}
             highlighted={flashId === m.id}
             onLinkClick={() => setToast('小程序功能正在开发中')}
           />

@@ -13,11 +13,10 @@ export function SettingsPage() {
   const [confirmingWipe, setConfirmingWipe] = useState(false)
 
   async function handleWipeContacts() {
-    await db.transaction('rw', db.contacts, db.conversations, db.messages, db.tasks, async () => {
+    await db.transaction('rw', db.contacts, db.conversations, db.messages, async () => {
       await db.messages.clear()
       await db.conversations.clear()
       await db.contacts.clear()
-      await db.tasks.clear()
     })
     navigate('/contacts')
   }

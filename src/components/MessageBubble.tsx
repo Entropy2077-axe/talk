@@ -1,8 +1,7 @@
 import { forwardRef } from 'react'
 import { Avatar } from './Avatar'
 import { formatBubbleTime } from '../lib/time'
-import { locationLabel } from '../lib/locations'
-import type { Location, Message } from '../types'
+import type { Message } from '../types'
 
 interface MessageBubbleProps {
   message: Message
@@ -11,23 +10,12 @@ interface MessageBubbleProps {
   contactAvatarColor: string
   userAvatar: string
   stickerUrl?: string
-  locationById?: Map<string, Location>
   highlighted?: boolean
   onLinkClick?: (label: string) => void
 }
 
 export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(function MessageBubble(
-  {
-    message,
-    contactName,
-    contactAvatar,
-    contactAvatarColor,
-    userAvatar,
-    stickerUrl,
-    locationById,
-    highlighted,
-    onLinkClick,
-  },
+  { message, contactName, contactAvatar, contactAvatarColor, userAvatar, stickerUrl, highlighted, onLinkClick },
   ref,
 ) {
   const isUser = message.role === 'user'
@@ -71,45 +59,6 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
                 🔗
               </span>
               <span className="text-[13.5px] text-gray-800">{message.link?.label ?? message.content}</span>
-            </button>
-          )}
-
-          {message.type === 'location' && (
-            <button
-              onClick={() => onLinkClick?.(message.content)}
-              className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-left"
-            >
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#aa3bff]/10 text-sm">
-                📍
-              </span>
-              <div>
-                <p className="text-[13.5px] text-gray-800">{message.content}</p>
-                {message.location && (
-                  <p className="text-[11px] text-gray-400">
-                    {locationLabel(locationById?.get(message.location.locationId))}
-                  </p>
-                )}
-              </div>
-            </button>
-          )}
-
-          {message.type === 'schedule_task' && (
-            <button
-              onClick={() => onLinkClick?.(message.content)}
-              className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-left"
-            >
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#aa3bff]/10 text-sm">
-                📅
-              </span>
-              <div>
-                <p className="text-[13.5px] text-gray-800">{message.content}</p>
-                {message.scheduleTask && (
-                  <p className="text-[11px] text-gray-400">
-                    {message.scheduleTask.date} {message.scheduleTask.startTime}-{message.scheduleTask.endTime} ·{' '}
-                    {locationLabel(locationById?.get(message.scheduleTask.locationId))}
-                  </p>
-                )}
-              </div>
             </button>
           )}
 

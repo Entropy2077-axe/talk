@@ -22,7 +22,6 @@ export const useSettingsStore = create<SettingsState>()(
       userGender: '',
       userBirthday: '',
       userBio: '',
-      userLocationId: '',
       setSettings: (patch) => set(patch),
     }),
     { name: 'talk-settings' },

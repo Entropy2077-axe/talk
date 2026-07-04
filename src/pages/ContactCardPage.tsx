@@ -9,9 +9,6 @@ import { AvatarPicker } from '../components/AvatarPicker'
 import { ActionSheet } from '../components/ActionSheet'
 import { displayName } from '../lib/contact'
 import { resetMemory } from '../lib/memory'
-import { locationLabel } from '../lib/locations'
-import { resolveExpectedLocation } from '../lib/schedule'
-import type { ScheduleTask } from '../types'
 
 export function ContactCardPage() {
   const { contactId } = useParams()
@@ -27,16 +24,6 @@ export function ContactCardPage() {
     () => (contactId ? db.conversations.where('contactId').equals(contactId).first() : undefined),
     [contactId],
   )
-  const locations = useLiveQuery(() => db.locations.toArray(), []) ?? []
-  const tasks =
-    useLiveQuery(
-      () =>
-        contactId
-          ? db.tasks.where('contactId').equals(contactId).toArray()
-          : Promise.resolve([] as ScheduleTask[]),
-      [contactId],
-    ) ?? []
-
   if (contact === undefined) return null
   if (contact === null || !contactId) {
     return (
@@ -72,8 +59,6 @@ export function ContactCardPage() {
   }
 
   const hasMemory = contact.memoryFacts || contact.memoryStyle
-  const locationById = new Map(locations.map((l) => [l.id, l]))
-  const expected = resolveExpectedLocation(contact.dailySchedule, tasks, new Date())
 
   return (
     <div className="relative flex min-h-full flex-col bg-[#f4f4f6]">
@@ -97,15 +82,6 @@ export function ContactCardPage() {
         >
           <span className="text-[15px] text-gray-900">备注</span>
           <span className="text-sm text-gray-400">{contact.remark || '未设置'}</span>
-        </button>
-        <button
-          onClick={() => navigate(`/contact/${contactId}/schedule`)}
-          className="flex w-full items-center justify-between border-t border-gray-100 px-4 py-3.5 text-left active:bg-gray-50"
-        >
-          <span className="text-[15px] text-gray-900">日程与约会</span>
-          <span className="text-sm text-gray-400">
-            {expected ? `现在可能在 ${locationLabel(locationById.get(expected.locationId))}` : '未设置'}
-          </span>
         </button>
       </div>
 

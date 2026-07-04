@@ -1,5 +1,3 @@
-import { PRESET_LOCATIONS } from './locations'
-
 /**
  * The editable part of the global prompt: purely about human-like chatting
  * style. Shown and editable in Settings. Must never mention JSON/output
@@ -19,7 +17,7 @@ export const DEFAULT_STYLE_PROMPT = `你正在扮演一个真实的人 在和朋
 
 /**
  * Output-format / protocol instructions. Fixed, hidden from the user, and
- * never editable — this is what makes the JSON bubble/sticker/link/location
+ * never editable — this is what makes the JSON bubble/sticker/link
  * protocol reliable, so it must not drift when a user edits their style prompt.
  */
 const FIXED_PROTOCOL_PROMPT = `【分句发送】
@@ -33,9 +31,7 @@ const FIXED_PROTOCOL_PROMPT = `【分句发送】
     { "type": "text", "content": "这里是一句短消息" },
     { "type": "text", "content": "这里是另一句" },
     { "type": "sticker", "name": "表情包名字" },
-    { "type": "link", "app": "shop", "label": "去逛逛", "data": {} },
-    { "type": "location", "locationId": "地点id", "label": "我到咖啡厅啦" },
-    { "type": "schedule_task", "date": "2026-07-05", "startTime": "20:00", "endTime": "22:00", "locationId": "地点id", "label": "和TA看电影" }
+    { "type": "link", "app": "shop", "label": "去逛逛", "data": {} }
   ]
 }
 
@@ -43,18 +39,13 @@ const FIXED_PROTOCOL_PROMPT = `【分句发送】
 - type为"text"时 content是这条消息的文字内容 一次不要写太多字 模拟真人一条一条发送
 - type为"sticker"时 name必须是下面提供的表情包名字列表中的一个 不能编造不存在的名字 表情包可以穿插在消息中间 不一定要放在最后
 - type为"link"时 表示分享一个应用内小程序链接 app字段必须是下面提供的可用小程序标识之一 label是这条链接卡片显示的文字 data是可选的附加数据 链接同样可以出现在消息序列的任意位置
-- type为"location"时 表示你现在实际所在的位置发生了变化（比如你出门了、到了、换地方了） locationId必须是下面【可用地点列表】里的一个id 不能编造 label是一句自然的话说明这件事 比如"到咖啡厅了" 不要每次回复都发location 只有位置真的变化、或者对话里提到你要出发/到了的时候才发 如果你现在的位置和日程/任务提示的不一样 你可以自己判断要不要现在切换过去 什么时候切换更合理
-- type为"schedule_task"时 表示你和对方约定了一个具体的、会覆盖你日常日程的安排（比如约会、临时有事）只有在对话里明确约定了具体的日期、时间段和地点时才输出 date格式"YYYY-MM-DD" startTime/endTime格式"HH:mm" locationId必须来自【可用地点列表】 label简短描述这个安排
 - messages数组顺序就是发送顺序 数组不能为空
 
 【可用表情包列表】
 {{STICKERS}}
 
 【可用小程序链接】
-{{LINKS}}
-
-【可用地点列表】
-{{LOCATIONS}}`
+{{LINKS}}`
 
 export function buildSystemPrompt(opts: {
   stylePrompt: string
@@ -63,10 +54,8 @@ export function buildSystemPrompt(opts: {
   memoryStyle: string
   stickerNames: string[]
   linkApps: { app: string; desc: string }[]
-  locationOptions: { id: string; label: string }[]
   currentTimeText: string
   userProfileText: string
-  scheduleContextText: string
 }): string {
   const stickersText =
     opts.stickerNames.length > 0
@@ -78,20 +67,13 @@ export function buildSystemPrompt(opts: {
       ? opts.linkApps.map((l) => `- ${l.app}: ${l.desc}`).join('\n')
       : '（当前没有可用小程序 不要输出link类型的消息）'
 
-  const locationsText =
-    opts.locationOptions.length > 0
-      ? opts.locationOptions.map((l) => `- ${l.id}: ${l.label}`).join('\n')
-      : '（当前没有可用地点 不要输出location或schedule_task类型的消息）'
-
-  const protocol = FIXED_PROTOCOL_PROMPT.replace('{{STICKERS}}', stickersText)
-    .replace('{{LINKS}}', linksText)
-    .replace('{{LOCATIONS}}', locationsText)
+  const protocol = FIXED_PROTOCOL_PROMPT.replace('{{STICKERS}}', stickersText).replace('{{LINKS}}', linksText)
 
   const personaSection = `【人物设定】\n${opts.persona || '（暂无特殊设定 自由发挥 扮演一个普通朋友）'}`
 
   const memorySection = `【你对TA的了解】\n${opts.memoryFacts || '（你们才刚认识 还不了解对方）'}\n\n【你们的相处状态】\n${opts.memoryStyle || '（关系还比较陌生 语气可以稍微客气、试探一点）'}`
 
-  const contextSection = `【当前时间】\n${opts.currentTimeText}\n\n【关于对方(用户)】\n${opts.userProfileText}\n\n【你的日程情况】\n${opts.scheduleContextText}`
+  const contextSection = `【当前时间】\n${opts.currentTimeText}\n\n【关于对方(用户)】\n${opts.userProfileText}`
 
   // Protocol/output-format instructions go last (closest to where the
   // model starts generating) — measured to noticeably help JSON-format
@@ -101,7 +83,6 @@ export function buildSystemPrompt(opts: {
 
 export const AVAILABLE_LINK_APPS: { app: string; desc: string }[] = [
   { app: 'shop', desc: '虚拟网购小程序' },
-  { app: 'map', desc: '虚拟地图小程序' },
   { app: 'todo', desc: 'TODO任务清单小程序' },
 ]
 
@@ -115,30 +96,13 @@ export interface PersonaAnswers {
   extra: string
 }
 
-export interface GeneratedScheduleBlock {
-  dayType: 'weekday' | 'weekend' | 'daily'
-  startTime: string
-  endTime: string
-  locationName: string
-  label?: string
-}
-
 export interface PersonaGenerationResult {
   name: string
   persona: string
-  dailySchedule: GeneratedScheduleBlock[]
 }
 
-const DEFAULT_GENERATED_SCHEDULE: GeneratedScheduleBlock[] = [
-  { dayType: 'weekday', startTime: '09:00', endTime: '18:00', locationName: '公司/学校', label: '上班上学' },
-  { dayType: 'weekday', startTime: '18:00', endTime: '23:00', locationName: '家里', label: '下班休息' },
-  { dayType: 'weekend', startTime: '10:00', endTime: '22:00', locationName: '家里', label: '在家休息' },
-  { dayType: 'daily', startTime: '23:00', endTime: '09:00', locationName: '家里', label: '睡觉' },
-]
-
 export function buildPersonaGenerationPrompt(answers: PersonaAnswers): string {
-  const locationNames = PRESET_LOCATIONS.map((l) => l.name).join('、')
-  return `你是一个角色设定生成器 任务是为一个聊天AI设计一个真实可信的人类身份和作息 不要输出除JSON以外的任何内容
+  return `你是一个角色设定生成器 任务是为一个聊天AI设计一个真实可信的人类身份 不要输出除JSON以外的任何内容
 
 用户想添加一个这样的聊天对象:
 - 性格倾向: ${answers.personalityTags.length > 0 ? answers.personalityTags.join('、') : '不限 你自由发挥'}
@@ -148,20 +112,11 @@ export function buildPersonaGenerationPrompt(answers: PersonaAnswers): string {
 - 补充要求: ${answers.extra || '无'}
 
 请你设计一个具体的人 输出如下JSON:
-{
-  "name": "这个人的名字或者网名",
-  "persona": "第三人称描述这个人的性格、说话习惯、大概的背景和生活状态、和用户的关系细节 写成一段自然语言 200到400字之间 要具体真实 不要写成产品说明书",
-  "dailySchedule": [
-    {"dayType": "weekday", "startTime": "09:00", "endTime": "18:00", "locationName": "地点名字", "label": "在做什么"},
-    {"dayType": "weekend", "startTime": "10:00", "endTime": "22:00", "locationName": "地点名字", "label": "在做什么"},
-    {"dayType": "daily", "startTime": "23:00", "endTime": "08:00", "locationName": "地点名字", "label": "睡觉"}
-  ]
-}
+{"name": "这个人的名字或者网名", "persona": "第三人称描述这个人的性格、说话习惯、大概的背景和生活状态、和用户的关系细节 写成一段自然语言 200到400字之间 要具体真实 不要写成产品说明书"}
 
 要求:
 - name要符合年龄段和性别 可以是真实姓名也可以是网名/昵称 不要用"AI""助手""小美"这种明显是虚构工具人的名字 除非用户明确要求
 - persona里要体现性格倾向和关系定位 但要写得像在描述一个真实存在的普通人 而不是罗列标签
-- dailySchedule要符合这个人的年龄和生活状态 设计3到6个时间段 覆盖一整天 dayType用"weekday"(工作日)/"weekend"(周末)/"daily"(每天都一样，包括跨越到第二天凌晨的时段)三选一 时间格式必须是"HH:mm" locationName可以从这些参考地点里选（也可以自己想一个更贴切的简短地名）: ${locationNames}
 - 只输出JSON 不要有markdown代码块标记`
 }
 
@@ -171,28 +126,13 @@ export function parsePersonaGeneration(raw: string): PersonaGenerationResult | n
   if (fenceMatch) text = fenceMatch[1].trim()
   try {
     const parsed = JSON.parse(text)
-    if (typeof parsed?.name !== 'string' || typeof parsed?.persona !== 'string') return null
-
-    const schedule: GeneratedScheduleBlock[] = Array.isArray(parsed.dailySchedule)
-      ? parsed.dailySchedule.filter(
-          (b: unknown): b is GeneratedScheduleBlock =>
-            !!b &&
-            typeof b === 'object' &&
-            typeof (b as GeneratedScheduleBlock).startTime === 'string' &&
-            typeof (b as GeneratedScheduleBlock).endTime === 'string' &&
-            typeof (b as GeneratedScheduleBlock).locationName === 'string' &&
-            ['weekday', 'weekend', 'daily'].includes((b as GeneratedScheduleBlock).dayType),
-        )
-      : []
-
-    return {
-      name: parsed.name.trim(),
-      persona: parsed.persona.trim(),
-      dailySchedule: schedule.length > 0 ? schedule : DEFAULT_GENERATED_SCHEDULE,
+    if (typeof parsed?.name === 'string' && typeof parsed?.persona === 'string') {
+      return { name: parsed.name.trim(), persona: parsed.persona.trim() }
     }
   } catch {
-    return null
+    // ignore
   }
+  return null
 }
 
 export const PERSONALITY_TAG_OPTIONS = [
