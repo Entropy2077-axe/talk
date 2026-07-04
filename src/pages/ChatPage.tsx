@@ -6,7 +6,7 @@ import { db } from '../db/db'
 import { TopBar } from '../components/TopBar'
 import { MessageBubble } from '../components/MessageBubble'
 import { useSettingsStore } from '../store/useSettingsStore'
-import { chatCompletion, type ChatMessage } from '../lib/deepseek'
+import { chatCompletion, coalesceConsecutiveRoles, type ChatMessage } from '../lib/deepseek'
 import { parseAiResponse, typingDelayMs } from '../lib/aiProtocol'
 import { buildSystemPrompt, AVAILABLE_LINK_APPS } from '../lib/prompt'
 import { CONTEXT_WINDOW_SIZE, maybeUpdateMemory } from '../lib/memory'
@@ -133,7 +133,12 @@ export function ChatPage() {
       // context is represented purely through the memory summary above, so
       // token usage stays bounded no matter how long the conversation gets.
       const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
-      const chatMessages: ChatMessage[] = [
+      // Each AI turn is stored as several separate assistant bubbles, so the
+      // raw mapping below produces runs of consecutive "assistant" messages
+      // with no interleaved "user" turn — coalesce them back into one
+      // message per real turn (see coalesceConsecutiveRoles for why this
+      // matters: it visibly degraded reply quality from the 2nd turn on).
+      const chatMessages: ChatMessage[] = coalesceConsecutiveRoles([
         { role: 'system', content: systemPrompt },
         ...recentHistory.map((m): ChatMessage => {
           if (m.type === 'sticker') return { role: m.role, content: `[发了一个表情: ${m.content}]` }
@@ -142,7 +147,7 @@ export function ChatPage() {
           if (m.type === 'schedule_task') return { role: m.role, content: `[约定了安排: ${m.content}]` }
           return { role: m.role, content: m.content }
         }),
-      ]
+      ])
 
       const controller = new AbortController()
       abortRef.current = controller
