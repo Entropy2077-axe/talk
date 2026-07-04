@@ -11,6 +11,9 @@ import { randomAvatarColor } from '../lib/colors'
 import { AVATAR_EMOJIS } from '../lib/avatarEmojis'
 import { pickRandomTrait } from '../lib/randomTraits'
 import { initialRelationshipFor } from '../lib/relationship'
+import { resolveOrCreateLocation } from '../lib/locations'
+import { resolveExpectedLocation } from '../lib/schedule'
+import type { ScheduleBlock } from '../types'
 import {
   AGE_RANGE_OPTIONS,
   GENDER_OPTIONS,
@@ -79,6 +82,29 @@ export function ContactAddPage() {
       const parsed = parsePersonaGeneration(raw)
       if (!parsed) throw new Error('生成结果解析失败 请重试一次')
 
+      // Resolve each generated block's location name to an id sequentially
+      // (not in parallel) so repeated names (e.g. "家里" appearing twice)
+      // resolve to the same location instead of racing to create duplicates.
+      const nameToId = new Map<string, string>()
+      const dailySchedule: ScheduleBlock[] = []
+      for (const block of parsed.dailySchedule) {
+        let locationId = nameToId.get(block.locationName)
+        if (!locationId) {
+          locationId = await resolveOrCreateLocation(block.locationName)
+          nameToId.set(block.locationName, locationId)
+        }
+        dailySchedule.push({
+          id: uuid(),
+          dayType: block.dayType,
+          startTime: block.startTime,
+          endTime: block.endTime,
+          locationId,
+          label: block.label,
+        })
+      }
+      const expected = resolveExpectedLocation(dailySchedule, [], new Date())
+      const currentLocationId = expected?.locationId ?? dailySchedule[0]?.locationId ?? ''
+
       const id = uuid()
       const now = Date.now()
       await db.contacts.add({
@@ -93,6 +119,8 @@ export function ContactAddPage() {
         memoryUpdatedAt: 0,
         memoryMessageCursor: 0,
         relationship: initialRelationshipFor(relationship),
+        dailySchedule,
+        currentLocationId,
       })
       await db.conversations.add({
         id: uuid(),

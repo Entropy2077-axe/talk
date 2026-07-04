@@ -35,6 +35,24 @@ export function parseAiResponse(raw: string): AiBubble[] {
       bubbles.push({ type: 'sticker', name: m.name.trim() })
     } else if (m.type === 'link' && typeof m.app === 'string' && typeof m.label === 'string') {
       bubbles.push({ type: 'link', app: m.app, label: m.label, data: m.data })
+    } else if (m.type === 'location' && typeof m.locationId === 'string' && typeof m.label === 'string') {
+      bubbles.push({ type: 'location', locationId: m.locationId, label: m.label })
+    } else if (
+      m.type === 'schedule_task' &&
+      typeof m.date === 'string' &&
+      typeof m.startTime === 'string' &&
+      typeof m.endTime === 'string' &&
+      typeof m.locationId === 'string' &&
+      typeof m.label === 'string'
+    ) {
+      bubbles.push({
+        type: 'schedule_task',
+        date: m.date,
+        startTime: m.startTime,
+        endTime: m.endTime,
+        locationId: m.locationId,
+        label: m.label,
+      })
     }
   }
   return bubbles

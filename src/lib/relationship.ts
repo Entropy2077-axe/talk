@@ -1,12 +1,20 @@
 import type { RelationshipDimensions } from '../types'
 
-export const RELATIONSHIP_DIMENSIONS: { key: keyof RelationshipDimensions; label: string }[] = [
-  { key: 'familiarity', label: '熟悉度' },
-  { key: 'affection', label: '好感度' },
-  { key: 'trust', label: '信任度' },
-  { key: 'romance', label: '暧昧度' },
-  { key: 'friction', label: '摩擦感' },
+export const RELATIONSHIP_DIMENSIONS: { key: keyof RelationshipDimensions; label: string; description: string }[] = [
+  { key: 'familiarity', label: '熟悉度', description: '你们互相了解多少 聊过的话题和经历越多越高' },
+  { key: 'affection', label: '好感度', description: '对方对你的喜欢和亲近程度' },
+  { key: 'trust', label: '信任度', description: '愿意对你敞开心扉、说真心话的程度' },
+  { key: 'romance', label: '暧昧度', description: '你们之间暧昧、心动氛围的强弱' },
+  { key: 'friction', label: '摩擦感', description: '累积的不耐烦和小摩擦 越高关系越紧张' },
 ]
+
+export function dimensionQualifier(value: number): string {
+  if (value >= 80) return '非常高'
+  if (value >= 60) return '较高'
+  if (value >= 40) return '中等'
+  if (value >= 20) return '较低'
+  return '很低'
+}
 
 function clampDimension(n: number): number {
   return Math.max(0, Math.min(100, Math.round(n)))

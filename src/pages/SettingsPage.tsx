@@ -1,11 +1,26 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { TopBar } from '../components/TopBar'
+import { ActionSheet } from '../components/ActionSheet'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { listModels, testConnection } from '../lib/deepseek'
 import { DEFAULT_STYLE_PROMPT } from '../lib/prompt'
+import { db } from '../db/db'
 
 export function SettingsPage() {
+  const navigate = useNavigate()
   const { apiKey, baseUrl, model, globalSystemPrompt, setSettings } = useSettingsStore()
+  const [confirmingWipe, setConfirmingWipe] = useState(false)
+
+  async function handleWipeContacts() {
+    await db.transaction('rw', db.contacts, db.conversations, db.messages, db.tasks, async () => {
+      await db.messages.clear()
+      await db.conversations.clear()
+      await db.contacts.clear()
+      await db.tasks.clear()
+    })
+    navigate('/contacts')
+  }
 
   const [apiKeyDraft, setApiKeyDraft] = useState(apiKey)
   const [baseUrlDraft, setBaseUrlDraft] = useState(baseUrl)
@@ -143,6 +158,26 @@ export function SettingsPage() {
           这里只控制所有AI共通的说话语气和习惯 每个AI各自的人物设定在联系人名片里单独编辑 消息输出格式、表情包与小程序调用规则由系统固定处理 不在这里展示
         </p>
       </section>
+
+      <section className="mt-3 bg-white px-4 py-3">
+        <h2 className="mb-2 text-xs font-medium text-gray-400">危险操作</h2>
+        <button
+          onClick={() => setConfirmingWipe(true)}
+          className="w-full rounded-lg bg-red-50 py-2.5 text-sm text-red-500"
+        >
+          清空所有联系人与聊天记录
+        </button>
+        <p className="mt-2 text-[11px] text-gray-400">
+          数据存在你这台设备的浏览器本地 这个操作会删除所有联系人、会话、聊天记录和日程安排 不可恢复
+        </p>
+      </section>
+
+      {confirmingWipe && (
+        <ActionSheet
+          onClose={() => setConfirmingWipe(false)}
+          options={[{ label: '确认清空所有联系人与聊天记录', onSelect: handleWipeContacts, danger: true }]}
+        />
+      )}
     </div>
   )
 }

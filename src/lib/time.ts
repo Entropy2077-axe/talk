@@ -31,3 +31,24 @@ export function formatBubbleTime(ts: number): string {
   const d = new Date(ts)
   return d.toTimeString().slice(0, 5)
 }
+
+export function ageFromBirthday(birthday: string): number | null {
+  if (!birthday) return null
+  const b = new Date(birthday)
+  if (Number.isNaN(b.getTime())) return null
+  const now = new Date()
+  let age = now.getFullYear() - b.getFullYear()
+  const hasHadBirthdayThisYear =
+    now.getMonth() > b.getMonth() || (now.getMonth() === b.getMonth() && now.getDate() >= b.getDate())
+  if (!hasHadBirthdayThisYear) age -= 1
+  return age
+}
+
+/** Full, model-facing description of "right now" — recomputed fresh for every request. */
+export function describeCurrentTime(date: Date): string {
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  const dateStr = `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`
+  const weekday = WEEKDAYS[date.getDay()]
+  const timeStr = `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  return `${dateStr} ${weekday} ${timeStr}`
+}

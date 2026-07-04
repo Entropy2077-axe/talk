@@ -7,6 +7,18 @@ export interface RelationshipDimensions {
   friction: number // 摩擦感 — accumulated tension/annoyance
 }
 
+/** A recurring block in a contact's default weekly routine. */
+export type ScheduleDayType = 'weekday' | 'weekend' | 'daily'
+
+export interface ScheduleBlock {
+  id: string
+  dayType: ScheduleDayType
+  startTime: string // "HH:mm"
+  endTime: string // "HH:mm", may wrap past midnight (e.g. 23:00-07:00)
+  locationId: string
+  label?: string // what they're doing there, e.g. "上班"
+}
+
 export interface Contact {
   id: string
   name: string // the persona's own name, chosen by the AI at creation time — not user-renameable
@@ -23,6 +35,9 @@ export interface Contact {
   memoryMessageCursor: number // number of messages already folded into memory, so updates only look at what's new
   // ---- relationship network (contact's relationship toward the user) ----
   relationship: RelationshipDimensions
+  // ---- map / schedule ----
+  dailySchedule: ScheduleBlock[] // recurring routine, authored once at creation time
+  currentLocationId: string // last confirmed location; updated only when the AI actually announces a move
 }
 
 export interface Conversation {
@@ -34,7 +49,7 @@ export interface Conversation {
 }
 
 export type MessageRole = 'user' | 'assistant'
-export type MessageType = 'text' | 'sticker' | 'link'
+export type MessageType = 'text' | 'sticker' | 'link' | 'location' | 'schedule_task'
 
 export interface LinkPayload {
   app: string // e.g. 'shop' | 'map' | 'todo'
@@ -42,13 +57,26 @@ export interface LinkPayload {
   data?: Record<string, unknown>
 }
 
+export interface LocationPayload {
+  locationId: string
+}
+
+export interface ScheduleTaskPayload {
+  date: string
+  startTime: string
+  endTime: string
+  locationId: string
+}
+
 export interface Message {
   id: string
   conversationId: string
   role: MessageRole
   type: MessageType
-  content: string // text content, sticker name, or link label
+  content: string // text content, sticker name, link/location/task label
   link?: LinkPayload
+  location?: LocationPayload
+  scheduleTask?: ScheduleTaskPayload
   bubbleGroupId?: string // groups bubbles emitted from one AI response
   createdAt: number
   pending?: boolean // true while an assistant bubble is still "typing" (not yet delivered)
@@ -61,6 +89,26 @@ export interface Sticker {
   createdAt: number
 }
 
+export interface Location {
+  id: string
+  name: string
+  icon: string // emoji
+  isPreset: boolean
+}
+
+/** A one-off schedule override — takes priority over the daily routine for its date/time window. */
+export interface ScheduleTask {
+  id: string
+  contactId: string
+  date: string // "YYYY-MM-DD"
+  startTime: string // "HH:mm"
+  endTime: string // "HH:mm"
+  locationId: string
+  label: string
+  createdAt: number
+  source: 'user' | 'ai'
+}
+
 export interface AppSettings {
   apiKey: string
   baseUrl: string
@@ -68,6 +116,10 @@ export interface AppSettings {
   globalSystemPrompt: string
   userNickname: string
   userAvatar: string
+  userGender: string
+  userBirthday: string // "YYYY-MM-DD", empty if unset
+  userBio: string
+  userLocationId: string
 }
 
 // ---- AI JSON output protocol ----
@@ -85,7 +137,27 @@ export interface AiBubbleLink {
   label: string
   data?: Record<string, unknown>
 }
-export type AiBubble = AiBubbleText | AiBubbleSticker | AiBubbleLink
+/** The AI announcing it has moved to (or is heading to) a location right now. */
+export interface AiBubbleLocation {
+  type: 'location'
+  locationId: string
+  label: string
+}
+/** The AI arranging a one-off event that overrides its normal routine for that date/time. */
+export interface AiBubbleScheduleTask {
+  type: 'schedule_task'
+  date: string // "YYYY-MM-DD"
+  startTime: string // "HH:mm"
+  endTime: string // "HH:mm"
+  locationId: string
+  label: string
+}
+export type AiBubble =
+  | AiBubbleText
+  | AiBubbleSticker
+  | AiBubbleLink
+  | AiBubbleLocation
+  | AiBubbleScheduleTask
 
 export interface AiResponse {
   messages: AiBubble[]
