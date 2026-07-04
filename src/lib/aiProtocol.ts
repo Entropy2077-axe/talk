@@ -33,11 +33,22 @@ function tryParseJson(trimmedRaw: string): AiBubble[] | null {
   if (fenceMatch) text = fenceMatch[1].trim()
   if (!text) return null
 
-  let parsed: AiResponse
+  let parsed: AiResponse | undefined
   try {
     parsed = JSON.parse(text)
   } catch {
-    return null
+    // The model sometimes wraps the JSON in a bit of chit-chat before or
+    // after it despite instructions not to (e.g. "好的\n{...}" or a trailing
+    // remark) — that breaks a strict whole-string parse even though a
+    // perfectly valid JSON object is sitting in there. Scan for a balanced
+    // {...} object anywhere in the text and try that before giving up.
+    const extracted = extractJsonObject(text)
+    if (!extracted) return null
+    try {
+      parsed = JSON.parse(extracted)
+    } catch {
+      return null
+    }
   }
   if (!parsed || !Array.isArray(parsed.messages)) return null
 
@@ -50,22 +61,54 @@ function tryParseJson(trimmedRaw: string): AiBubble[] | null {
       bubbles.push({ type: 'sticker', name: m.name.trim() })
     } else if (m.type === 'link' && typeof m.app === 'string' && typeof m.label === 'string') {
       bubbles.push({ type: 'link', app: m.app, label: m.label, data: m.data })
-    } else if (
-      m.type === 'commission' &&
-      typeof m.title === 'string' &&
-      m.title.trim() &&
-      typeof m.description === 'string' &&
-      typeof m.reward === 'number'
-    ) {
-      bubbles.push({
-        type: 'commission',
-        title: m.title.trim(),
-        description: m.description.trim(),
-        reward: clampReward(m.reward),
-      })
+    } else if (m.type === 'commission' && typeof m.title === 'string' && m.title.trim() && typeof m.description === 'string') {
+      // reward is occasionally handed back as a numeric string ("30")
+      // rather than a JSON number — coerce rather than reject the whole
+      // commission over it.
+      const rewardNum = typeof m.reward === 'number' ? m.reward : Number(m.reward)
+      if (Number.isFinite(rewardNum)) {
+        bubbles.push({
+          type: 'commission',
+          title: m.title.trim(),
+          description: m.description.trim(),
+          reward: clampReward(rewardNum),
+        })
+      }
     }
   }
   return bubbles
+}
+
+/** Finds the first balanced {...} object in `text`, respecting quoted strings, and returns it as a substring. */
+function extractJsonObject(text: string): string | null {
+  const start = text.indexOf('{')
+  if (start === -1) return null
+
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (ch === '\\') {
+      escaped = true
+      continue
+    }
+    if (ch === '"') {
+      inString = !inString
+      continue
+    }
+    if (inString) continue
+    if (ch === '{') depth++
+    else if (ch === '}') {
+      depth--
+      if (depth === 0) return text.slice(start, i + 1)
+    }
+  }
+  return null
 }
 
 // Keeps the AI from handing out (or lowballing) wildly unbalanced rewards.
