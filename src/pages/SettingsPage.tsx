@@ -18,6 +18,10 @@ export function SettingsPage() {
     shopModel,
     globalSystemPrompt,
     autonomousBehaviorEnabled,
+    proactiveDailyCap,
+    proactiveProbability,
+    proactiveSilenceThresholdMs,
+    proactiveCooldownMs,
     tavilyApiKey,
     pexelsApiKey,
     adminModeEnabled,
@@ -313,7 +317,7 @@ export function SettingsPage() {
             <h2 className="text-xs font-medium text-gray-400">AI自主行为</h2>
             <p className="mt-1 text-[11px] leading-relaxed text-gray-400">
               开启后 app开着的时候AI会自己刷新朋友圈、偶尔主动找你聊天 不需要你先发消息 关掉app/切到后台太久就不会再触发
-              每天最多主动找你聊天几次、同一个人也有冷却时间 但依然会产生真实API调用
+              下面几个参数可以调节主动找你的频率 但依然会产生真实API调用
             </p>
           </div>
           <button
@@ -330,6 +334,70 @@ export function SettingsPage() {
             />
           </button>
         </div>
+
+        {autonomousBehaviorEnabled && (
+          <div className="mt-3 space-y-3 border-t border-gray-100 pt-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-gray-500">每天最多主动找你聊天几次</span>
+              <select
+                value={proactiveDailyCap}
+                onChange={(e) => setSettings({ proactiveDailyCap: Number(e.target.value) })}
+                className="rounded-lg border border-gray-200 px-2 py-1 text-xs"
+              >
+                {[1, 2, 3, 5, 10].map((n) => (
+                  <option key={n} value={n}>
+                    {n}次
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-gray-500">每次检查时主动找你的概率</span>
+              <select
+                value={proactiveProbability}
+                onChange={(e) => setSettings({ proactiveProbability: Number(e.target.value) })}
+                className="rounded-lg border border-gray-200 px-2 py-1 text-xs"
+              >
+                {[0.1, 0.25, 0.5, 0.75, 1].map((p) => (
+                  <option key={p} value={p}>
+                    {Math.round(p * 100)}%
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-gray-500">至少沉默多久才会主动找你</span>
+              <select
+                value={proactiveSilenceThresholdMs}
+                onChange={(e) => setSettings({ proactiveSilenceThresholdMs: Number(e.target.value) })}
+                className="rounded-lg border border-gray-200 px-2 py-1 text-xs"
+              >
+                {[15, 30, 45, 60, 120, 180].map((min) => (
+                  <option key={min} value={min * 60 * 1000}>
+                    {min < 60 ? `${min}分钟` : `${min / 60}小时`}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-gray-500">同一个人多久内不会重复主动找你</span>
+              <select
+                value={proactiveCooldownMs}
+                onChange={(e) => setSettings({ proactiveCooldownMs: Number(e.target.value) })}
+                className="rounded-lg border border-gray-200 px-2 py-1 text-xs"
+              >
+                {[1, 3, 6, 12, 24].map((h) => (
+                  <option key={h} value={h * 60 * 60 * 1000}>
+                    {h}小时
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="mt-3 bg-white px-4 py-3">

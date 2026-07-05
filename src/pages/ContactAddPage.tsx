@@ -171,6 +171,7 @@ export function ContactAddPage() {
         memoryUpdatedAt: 0,
         memoryMessageCursor: 0,
         relationship: initialRelationshipFor(relationship),
+        relationshipType: relationship || undefined,
         schedule: parsed.schedule,
         scheduleOverrides: [],
       })

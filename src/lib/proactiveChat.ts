@@ -12,25 +12,13 @@ import type { AppSettings } from '../types'
  * tab is closed; App.tsx runs a foreground setInterval at this cadence that
  * calls maybeTriggerProactiveMessage() (and separately, refreshMoments()).
  */
-export const AUTONOMOUS_TICK_INTERVAL_MS = 5 * 60 * 1000 // 5 min
-
-/** A contact won't proactively message again until this much time has passed since their last one. */
-const PROACTIVE_COOLDOWN_MS = 6 * 60 * 60 * 1000 // 6h
-
-/** Only conversations that have been quiet at least this long are candidates — doubles as "don't interrupt an active chat". */
-const PROACTIVE_SILENCE_THRESHOLD_MS = 45 * 60 * 1000 // 45 min
-
-/** Per-tick chance that *anything* happens at all, even if someone's eligible — most ticks should do nothing. */
-const PROACTIVE_PROBABILITY = 0.25
-
-/** Hard ceiling on total proactive chat-opens per day, regardless of contact count or lucky rolls — the actual API-cost backstop. */
-const DAILY_CAP = 3
+export const AUTONOMOUS_TICK_INTERVAL_MS = 5 * 60 * 1000 // 5 min — just the background timer's own polling cadence, not user-facing
 
 function canSendProactiveToday(): boolean {
-  const { proactiveMessageLog } = useSettingsStore.getState()
+  const { proactiveMessageLog, proactiveDailyCap } = useSettingsStore.getState()
   const today = toDateKey(new Date())
   if (!proactiveMessageLog || proactiveMessageLog.date !== today) return true
-  return proactiveMessageLog.count < DAILY_CAP
+  return proactiveMessageLog.count < proactiveDailyCap
 }
 
 function recordProactiveSent(): void {
@@ -51,7 +39,7 @@ export async function maybeTriggerProactiveMessage(settings: AppSettings): Promi
   try {
     if (!settings.apiKey) return
     if (!canSendProactiveToday()) return
-    if (Math.random() > PROACTIVE_PROBABILITY) return
+    if (Math.random() > settings.proactiveProbability) return
 
     const now = Date.now()
     const contacts = await db.contacts.toArray()
@@ -66,8 +54,8 @@ export async function maybeTriggerProactiveMessage(settings: AppSettings): Promi
     const eligible = contacts.filter((c) => {
       const conv = conversationByContact.get(c.id)
       if (!conv) return false
-      if (now - conv.updatedAt < PROACTIVE_SILENCE_THRESHOLD_MS) return false
-      if (c.lastProactiveMessageAt && now - c.lastProactiveMessageAt < PROACTIVE_COOLDOWN_MS) return false
+      if (now - conv.updatedAt < settings.proactiveSilenceThresholdMs) return false
+      if (c.lastProactiveMessageAt && now - c.lastProactiveMessageAt < settings.proactiveCooldownMs) return false
       if (!isPhoneAvailable(c, nowDate)) return false
       return true
     })

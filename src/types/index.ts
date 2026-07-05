@@ -36,6 +36,18 @@ export interface Contact {
   // ---- auto-generated photo avatar (see lib/avatarCategory.ts + lib/photoSearch.ts) ----
   avatarPhotographer?: string // Pexels photographer credit, unset for anime avatars (waifu.pics) or manually-picked emoji/uploads
   avatarPhotographerUrl?: string
+  // ---- relationship type label (恋人/朋友/家人 etc., see RELATIONSHIP_OPTIONS in prompt.ts) ----
+  // Picked during the creation questionnaire and previously only used as a
+  // one-time hint fed into persona generation, then discarded — meaning
+  // nothing persistently told the model "you two are dating" on every
+  // subsequent turn, just whatever the generated persona text happened to
+  // imply. Now persisted and re-injected into the system prompt every turn
+  // (see buildSystemPrompt's relationshipType param) so the dynamic doesn't
+  // fade over a long conversation. Optional since contacts created before
+  // this existed won't have it — editable afterward on ContactCardPage
+  // (unlike name/persona, which stay locked after creation) so those can be
+  // corrected retroactively.
+  relationshipType?: string
 }
 
 /** A recurring weekly time block — generated once at contact creation alongside the persona, not user-editable directly. */
@@ -250,6 +262,11 @@ export interface AppSettings {
   // ---- autonomous behavior (see lib/proactiveChat.ts) ----
   autonomousBehaviorEnabled: boolean // master switch: AI can post moments / proactively open a chat on a timer while the app is open. Off by default — it makes real API calls without a direct user action.
   proactiveMessageLog?: { date: string; count: number } // rolling daily counter backing the global cap on proactive chat-opens, keyed by local date
+  // was a hardcoded const in lib/proactiveChat.ts, moved to user-configurable settings (with the same defaults) — see SettingsPage's "AI自主行为" section
+  proactiveDailyCap: number // max proactive chat-opens per day, all contacts combined
+  proactiveProbability: number // 0-1, per-tick chance anything happens at all even when someone's eligible
+  proactiveSilenceThresholdMs: number // a conversation must have been quiet at least this long to make its contact eligible
+  proactiveCooldownMs: number // a contact won't proactively message again until this long has passed since their last one
   // ---- web search (see lib/webSearch.ts) ----
   tavilyApiKey: string // used only by the knowledge-base refresh job, not live during normal chat
   // ---- photo avatars/moments images (see lib/photoSearch.ts) ----

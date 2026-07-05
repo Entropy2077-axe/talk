@@ -2,6 +2,7 @@ import { db } from '../db/db'
 import { extractJsonObject, parseKnowledgeQueriesField } from './aiProtocol'
 import { activeUpcomingPlansText } from './memory'
 import { describeCurrentSchedule } from './schedule'
+import { RELATIONSHIP_TYPE_HINTS } from './prompt'
 import type { Contact, GroupAiBubble, GroupAiResponse, RelationshipDimensions } from '../types'
 
 /** Group chats above this size don't have every member answer every turn — only a random 3 do (see pickSpeakers). */
@@ -95,7 +96,10 @@ export function buildGroupSystemPrompt(opts: {
       const plansLine = plansText ? `\n${c.name}和用户的约定: \n${plansText}` : ''
       const scheduleText = describeCurrentSchedule(c, new Date())
       const scheduleLine = scheduleText ? `\n${c.name}当前的状态: ${scheduleText}` : ''
-      return `发言人${i + 1}: ${c.name}\n人设: ${c.systemPrompt || '（暂无特殊设定 自由发挥）'}\n${c.name}对用户的了解: ${c.memoryFacts || '（还不了解太多）'}\n${c.name}和用户的相处状态: ${c.memoryStyle || '（关系还比较陌生）'}${plansLine}${scheduleLine}`
+      const relationshipLine = c.relationshipType
+        ? `\n${c.name}和用户的关系定位: ${c.relationshipType} —— ${RELATIONSHIP_TYPE_HINTS[c.relationshipType] ?? `是${c.relationshipType}关系`} 每次发言都要符合这个定位 不要因为群里人多就淡化成普通朋友的语气`
+        : ''
+      return `发言人${i + 1}: ${c.name}\n人设: ${c.systemPrompt || '（暂无特殊设定 自由发挥）'}${relationshipLine}\n${c.name}对用户的了解: ${c.memoryFacts || '（还不了解太多）'}\n${c.name}和用户的相处状态: ${c.memoryStyle || '（关系还比较陌生）'}${plansLine}${scheduleLine}`
     })
     .join('\n\n')
 

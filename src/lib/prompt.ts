@@ -61,9 +61,28 @@ const FIXED_PROTOCOL_PROMPT = `【分句发送】
 【可用小程序链接】
 {{LINKS}}`
 
+/**
+ * A short, concrete reminder of what each relationship label actually means
+ * behaviorally — the label alone ("恋人") is easy for a model to read as
+ * flavor text rather than an instruction, especially once it's buried
+ * inside a paragraph of freeform persona text and the conversation runs
+ * long. Paired with buildSystemPrompt's relationshipType param, which
+ * re-injects this every turn as its own labeled section instead of relying
+ * on however the one-time persona-generation call happened to phrase it.
+ */
+export const RELATIONSHIP_TYPE_HINTS: Record<string, string> = {
+  朋友: '普通朋友关系 熟悉但没有暧昧或血缘 说话随意但不越界',
+  暧昧对象: '正处于暧昧阶段 对彼此有明显的心动和试探 但还不是正式恋人 说话可以带点撩、吃醋、暗示，但不要直接以情侣自居',
+  恋人: '正式的情侣/恋爱关系 说话方式要体现恋人间的亲密感 可以用昵称、撒娇、吃醋、关心对方的日常起居这些符合情侣关系的互动 不是普通朋友的疏离感',
+  损友: '相互损贬打趣但感情很好的朋友 说话经常互怼、开玩笑不留情面 但底子里是真的关心',
+  '前辈/同事': '工作或年级上的前辈/同事关系 相对更客气克制 话题也更偏工作/学业 不会随便对用户撒娇或表白式的亲密',
+  家人: '家人关系 说话方式更随意直接 带着家人间特有的唠叨、关心或理所当然感 不是外人式的客气',
+}
+
 export function buildSystemPrompt(opts: {
   stylePrompt: string
   persona: string
+  relationshipType?: string
   memoryFacts: string
   memoryStyle: string
   stickerNames: string[]
@@ -91,6 +110,10 @@ export function buildSystemPrompt(opts: {
 
   const personaSection = `【人物设定】\n${opts.persona || '（暂无特殊设定 自由发挥 扮演一个普通朋友）'}`
 
+  const relationshipTypeSection = opts.relationshipType
+    ? `【你和对方的关系定位 —— ${opts.relationshipType}】\n${RELATIONSHIP_TYPE_HINTS[opts.relationshipType] ?? `你们是${opts.relationshipType}关系`} 这是你们关系的基本定位 每次回复都要符合这个定位 不要因为聊了很久就淡化成普通朋友的语气`
+    : ''
+
   const memorySection = `【你对TA的了解】\n${opts.memoryFacts || '（你们才刚认识 还不了解对方）'}\n\n【你们的相处状态】\n${opts.memoryStyle || '（关系还比较陌生 语气可以稍微客气、试探一点）'}`
 
   const eventsLine = opts.recentEventsText ? `\n\n【最近发生的事 可以自然地提一下 不用刻意】\n${opts.recentEventsText}` : ''
@@ -114,7 +137,7 @@ export function buildSystemPrompt(opts: {
   // worldviewSection sits right after the style prompt (before persona) so
   // world facts frame the character, same rationale as ordering everywhere
   // else in this stack.
-  return [opts.stylePrompt, worldviewSection, personaSection, memorySection, contextSection, protocol]
+  return [opts.stylePrompt, worldviewSection, personaSection, relationshipTypeSection, memorySection, contextSection, protocol]
     .filter(Boolean)
     .join('\n\n')
 }

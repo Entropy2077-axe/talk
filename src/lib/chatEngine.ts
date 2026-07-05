@@ -154,6 +154,7 @@ async function runAiTurn(
     const systemPrompt = buildSystemPrompt({
       stylePrompt: settings.globalSystemPrompt,
       persona: contact.systemPrompt,
+      relationshipType: contact.relationshipType,
       memoryFacts: contact.memoryFacts,
       memoryStyle: contact.memoryStyle,
       stickerNames: stickers.map((s) => s.name),
