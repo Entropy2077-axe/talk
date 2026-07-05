@@ -1,5 +1,50 @@
 @import 'tailwindcss';
 
+/*
+ * Tailwind v4's default color palette is defined in oklch() (a color space
+ * Chrome only started supporting around version 111 — several years after
+ * a lot of real-world Android WebViews are stuck on). A real device report
+ * (Honor 60, WebView stuck on Chromium 99) showed the bottom nav's buttons
+ * remaining fully clickable/correctly positioned but visually invisible —
+ * layout-correct, paint-failed is the signature of a CSS value the engine
+ * can't parse: `color: oklch(...)` becomes invalid at computed-value time
+ * on an engine with no oklch() support, and per spec an inherited property
+ * like `color` falls back to whatever the ancestor's color is instead of
+ * erroring, silently making text/icons blend into (or vanish against) the
+ * background rather than throwing anything visible. This isn't scoped to
+ * one component — every gray/red/blue/etc utility class app-wide resolves
+ * through these same custom properties, so overriding them here with their
+ * plain-hex equivalents (identical visual color, just expressed in a color
+ * space every browser back to IE6 understands) fixes it globally in one
+ * place instead of hunting down every affected class. Two earlier fix
+ * attempts (viewport-height sync, removing backdrop-blur) both missed —
+ * this was the actual root cause, found by checking what Tailwind's own
+ * build output actually contained rather than guessing another CSS
+ * property. Values are Tailwind's own pre-v4 (classic) hex palette, so
+ * they're not approximations — they're the same colors Tailwind itself
+ * used before switching to oklch.
+ */
+@theme {
+  --color-gray-50: #f9fafb;
+  --color-gray-100: #f3f4f6;
+  --color-gray-200: #e5e7eb;
+  --color-gray-300: #d1d5db;
+  --color-gray-400: #9ca3af;
+  --color-gray-500: #6b7280;
+  --color-gray-600: #4b5563;
+  --color-gray-700: #374151;
+  --color-gray-800: #1f2937;
+  --color-gray-900: #111827;
+  --color-red-50: #fef2f2;
+  --color-red-400: #f87171;
+  --color-red-500: #ef4444;
+  --color-red-600: #dc2626;
+  --color-amber-600: #d97706;
+  --color-yellow-50: #fefce8;
+  --color-green-600: #16a34a;
+  --color-blue-600: #2563eb;
+}
+
 :root {
   color-scheme: light;
   /* Real viewport height in px, kept in sync by main.tsx via window.innerHeight.
