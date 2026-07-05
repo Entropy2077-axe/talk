@@ -79,7 +79,20 @@ export const RELATIONSHIP_TYPE_HINTS: Record<string, string> = {
   家人: '家人关系 说话方式更随意直接 带着家人间特有的唠叨、关心或理所当然感 不是外人式的客气',
 }
 
-export function buildSystemPrompt(opts: {
+export interface PromptSection {
+  label: string
+  content: string
+}
+
+/**
+ * Same output as buildSystemPrompt, just broken into labeled pieces instead
+ * of one joined string — buildSystemPrompt itself is just this plus a join.
+ * Exists so the admin-mode prompt viewer (ContactCardPage, see SkyEye-style
+ * "let admins see what's actually being sent" instinct) can show each
+ * category separately instead of a single wall of text, without
+ * duplicating any of the section-building logic.
+ */
+export function buildSystemPromptSections(opts: {
   stylePrompt: string
   persona: string
   relationshipType?: string
@@ -95,7 +108,7 @@ export function buildSystemPrompt(opts: {
   upcomingScheduleText?: string
   worldviewText?: string
   knowledgeDigestText?: string
-}): string {
+}): PromptSection[] {
   const stickersText =
     opts.stickerNames.length > 0
       ? opts.stickerNames.map((n) => `- ${n}`).join('\n')
@@ -111,10 +124,24 @@ export function buildSystemPrompt(opts: {
   const personaSection = `【人物设定】\n${opts.persona || '（暂无特殊设定 自由发挥 扮演一个普通朋友）'}`
 
   const relationshipTypeSection = opts.relationshipType
-    ? `【你和对方的关系定位 —— ${opts.relationshipType}】\n${RELATIONSHIP_TYPE_HINTS[opts.relationshipType] ?? `你们是${opts.relationshipType}关系`} 这是你们关系的基本定位 每次回复都要符合这个定位 不要因为聊了很久就淡化成普通朋友的语气`
+    ? `【你和对方的关系定位 —— ${opts.relationshipType}】\n${RELATIONSHIP_TYPE_HINTS[opts.relationshipType] ?? `你们是${opts.relationshipType}关系`} 这是你们关系的基本定位 每次回复都要符合这个定位 不要因为聊了很久就淡化成普通朋友的语气 **这个关系从对话一开始就已经确立了 哪怕还没聊过几句、还没有具体的共同回忆 也绝对不能表现得像刚认识的陌生人或者对这段关系毫不知情 —— 比如设定是恋人就已经是恋人 不是"还不熟"、"刚认识"、"暧昧未定"的阶段**`
     : ''
 
-  const memorySection = `【你对TA的了解】\n${opts.memoryFacts || '（你们才刚认识 还不了解对方）'}\n\n【你们的相处状态】\n${opts.memoryStyle || '（关系还比较陌生 语气可以稍微客气、试探一点）'}`
+  // Empty memoryFacts/memoryStyle is the default for every freshly-created
+  // contact (memory only accumulates after chatting), so a generic "you
+  // just met, don't know each other" fallback here directly contradicts an
+  // established relationshipType sitting right above it — a real bug a
+  // user hit where a contact set to "恋人" still got treated like a
+  // stranger. Only fall back to the "just met" framing when there's no
+  // relationshipType at all; otherwise acknowledge the relationship is
+  // already real even though no shared history has built up yet.
+  const factsFallback = opts.relationshipType
+    ? `（还没有具体的共同经历或聊天记忆积累 但你们已经是${opts.relationshipType}关系 不是陌生人 记忆是空的不代表关系是空的）`
+    : '（你们才刚认识 还不了解对方）'
+  const styleFallback = opts.relationshipType
+    ? `（还没有形成具体的相处习惯细节 但语气要直接符合你们${opts.relationshipType}的关系定位 不能表现得生疏、客气、试探）`
+    : '（关系还比较陌生 语气可以稍微客气、试探一点）'
+  const memorySection = `【你对TA的了解】\n${opts.memoryFacts || factsFallback}\n\n【你们的相处状态】\n${opts.memoryStyle || styleFallback}`
 
   const eventsLine = opts.recentEventsText ? `\n\n【最近发生的事 可以自然地提一下 不用刻意】\n${opts.recentEventsText}` : ''
   const plansLine = opts.upcomingPlansText
@@ -137,8 +164,20 @@ export function buildSystemPrompt(opts: {
   // worldviewSection sits right after the style prompt (before persona) so
   // world facts frame the character, same rationale as ordering everywhere
   // else in this stack.
-  return [opts.stylePrompt, worldviewSection, personaSection, relationshipTypeSection, memorySection, contextSection, protocol]
-    .filter(Boolean)
+  return [
+    { label: '说话风格', content: opts.stylePrompt },
+    { label: '世界观', content: worldviewSection },
+    { label: '人物设定', content: personaSection },
+    { label: '关系定位', content: relationshipTypeSection },
+    { label: '记忆', content: memorySection },
+    { label: '实时上下文', content: contextSection },
+    { label: '输出协议', content: protocol },
+  ].filter((s) => s.content)
+}
+
+export function buildSystemPrompt(opts: Parameters<typeof buildSystemPromptSections>[0]): string {
+  return buildSystemPromptSections(opts)
+    .map((s) => s.content)
     .join('\n\n')
 }
 

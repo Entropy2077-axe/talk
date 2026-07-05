@@ -97,9 +97,16 @@ export function buildGroupSystemPrompt(opts: {
       const scheduleText = describeCurrentSchedule(c, new Date())
       const scheduleLine = scheduleText ? `\n${c.name}当前的状态: ${scheduleText}` : ''
       const relationshipLine = c.relationshipType
-        ? `\n${c.name}和用户的关系定位: ${c.relationshipType} —— ${RELATIONSHIP_TYPE_HINTS[c.relationshipType] ?? `是${c.relationshipType}关系`} 每次发言都要符合这个定位 不要因为群里人多就淡化成普通朋友的语气`
+        ? `\n${c.name}和用户的关系定位: ${c.relationshipType} —— ${RELATIONSHIP_TYPE_HINTS[c.relationshipType] ?? `是${c.relationshipType}关系`} 每次发言都要符合这个定位 不要因为群里人多就淡化成普通朋友的语气 **这个关系从一开始就已经确立 哪怕还没聊过几句 也不能表现得像刚认识的陌生人**`
         : ''
-      return `发言人${i + 1}: ${c.name}\n人设: ${c.systemPrompt || '（暂无特殊设定 自由发挥）'}${relationshipLine}\n${c.name}对用户的了解: ${c.memoryFacts || '（还不了解太多）'}\n${c.name}和用户的相处状态: ${c.memoryStyle || '（关系还比较陌生）'}${plansLine}${scheduleLine}`
+      // Same "empty memory defaults to a just-met framing that contradicts
+      // an established relationshipType" fix as buildSystemPrompt (1:1) —
+      // see the comment there.
+      const factsFallback = c.relationshipType ? `（还没有具体的聊天记忆积累 但已经是${c.relationshipType}关系 不是陌生人）` : '（还不了解太多）'
+      const styleFallback = c.relationshipType
+        ? `（还没有具体的相处习惯细节 但语气要符合${c.relationshipType}的关系定位 不能表现得生疏客气）`
+        : '（关系还比较陌生）'
+      return `发言人${i + 1}: ${c.name}\n人设: ${c.systemPrompt || '（暂无特殊设定 自由发挥）'}${relationshipLine}\n${c.name}对用户的了解: ${c.memoryFacts || factsFallback}\n${c.name}和用户的相处状态: ${c.memoryStyle || styleFallback}${plansLine}${scheduleLine}`
     })
     .join('\n\n')
 

@@ -8,18 +8,20 @@ import { Avatar } from '../components/Avatar'
 import { AvatarPicker } from '../components/AvatarPicker'
 import { ActionSheet } from '../components/ActionSheet'
 import { displayName } from '../lib/contact'
-import { activeUpcomingPlans, resetMemory } from '../lib/memory'
+import { activeUpcomingPlans, activeUpcomingPlansText, resetMemory } from '../lib/memory'
 import { cascadeDeleteContactSocialData } from '../lib/moments'
 import { removeContactFromAllGroups } from '../lib/groupChat'
-import { pruneExpiredOverrides } from '../lib/schedule'
-import { WEEKDAYS } from '../lib/time'
-import { RELATIONSHIP_OPTIONS } from '../lib/prompt'
+import { pruneExpiredOverrides, describeCurrentSchedule, describeUpcomingScheduleText } from '../lib/schedule'
+import { WEEKDAYS, describeCurrentTime } from '../lib/time'
+import { RELATIONSHIP_OPTIONS, AVAILABLE_LINK_APPS, buildSystemPromptSections } from '../lib/prompt'
+import { buildUserProfileText } from '../lib/chatEngine'
+import { knowledgeDigestText } from '../lib/knowledgeBase'
 import { useSettingsStore } from '../store/useSettingsStore'
 
 export function ContactCardPage() {
   const { contactId } = useParams()
   const navigate = useNavigate()
-  const pexelsApiKey = useSettingsStore((s) => s.pexelsApiKey)
+  const settings = useSettingsStore()
   const [menuOpen, setMenuOpen] = useState(false)
   const [editingRemark, setEditingRemark] = useState(false)
   const [remarkDraft, setRemarkDraft] = useState('')
@@ -32,6 +34,8 @@ export function ContactCardPage() {
     () => (contactId ? db.conversations.where('contactId').equals(contactId).first() : undefined),
     [contactId],
   )
+  const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? []
+  const knowledgeEntries = useLiveQuery(() => db.knowledgeEntries.toArray(), []) ?? []
   if (contact === undefined) return null
   if (contact === null || !contactId) {
     return (
@@ -72,6 +76,34 @@ export function ContactCardPage() {
   const hasMemory = contact.memoryFacts || contact.memoryStyle || activePlans.length > 0
   const schedule = contact.schedule ?? []
   const activeOverrides = pruneExpiredOverrides(contact.scheduleOverrides ?? [], new Date())
+
+  // Admin-mode-only: shows exactly what would be sent as the system prompt
+  // right now, for debugging persona/relationship issues. Mirrors
+  // chatEngine.ts's runAiTurn data-gathering, but must NOT replicate its
+  // pendingEvents-clearing side effect — this is a read-only preview, not
+  // an actual turn, so pendingEvents here is read straight off the live
+  // contact instead of going through the "read once then clear" flow.
+  const now = new Date()
+  const pendingEvents = contact.pendingEvents ?? []
+  const promptSections = settings.adminModeEnabled
+    ? buildSystemPromptSections({
+        stylePrompt: settings.globalSystemPrompt,
+        persona: contact.systemPrompt,
+        relationshipType: contact.relationshipType,
+        memoryFacts: contact.memoryFacts,
+        memoryStyle: contact.memoryStyle,
+        stickerNames: stickers.map((s) => s.name),
+        linkApps: AVAILABLE_LINK_APPS,
+        currentTimeText: describeCurrentTime(now),
+        userProfileText: buildUserProfileText(settings),
+        recentEventsText: pendingEvents.length > 0 ? pendingEvents.join('；') : undefined,
+        upcomingPlansText: activeUpcomingPlansText(contact, now) || undefined,
+        currentScheduleText: describeCurrentSchedule(contact, now) || undefined,
+        upcomingScheduleText: describeUpcomingScheduleText(contact, now) || undefined,
+        worldviewText: settings.worldview || undefined,
+        knowledgeDigestText: knowledgeDigestText(knowledgeEntries) || undefined,
+      })
+    : []
 
   return (
     <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
@@ -193,6 +225,22 @@ export function ContactCardPage() {
         )}
       </section>
 
+      {settings.adminModeEnabled && (
+        <section className="mt-3 bg-white px-4 py-4">
+          <h3 className="mb-2 text-xs font-medium text-gray-400">当前系统提示词（管理员模式，按类别分开）</h3>
+          <div className="space-y-3">
+            {promptSections.map((s) => (
+              <div key={s.label} className="rounded-lg bg-gray-50 p-2.5">
+                <h4 className="mb-1 text-xs font-medium text-gray-500">{s.label}</h4>
+                <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-gray-700">
+                  {s.content}
+                </pre>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <div className="mt-3 flex flex-col gap-2 bg-white px-4 py-4">
         <button onClick={handleChat} className="w-full rounded-lg bg-gray-900 py-2.5 text-sm text-white">
           发消息
@@ -243,7 +291,7 @@ export function ContactCardPage() {
             })
           }
           onClose={() => setPickingAvatar(false)}
-          pexelsApiKey={pexelsApiKey}
+          pexelsApiKey={settings.pexelsApiKey}
         />
       )}
 
