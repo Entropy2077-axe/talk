@@ -14,11 +14,46 @@ const LEVEL_COLOR: Record<string, string> = {
 
 const REDACTED_KEYS = ['apiKey', 'tavilyApiKey']
 
+/** Real-device viewport/WebView numbers — added specifically to debug a device-specific "layout stretches, bottom nav vanishes" report (Honor/MagicOS, Android 14) that couldn't be reproduced via Playwright/emulator. Recomputes on resize/visualViewport-resize so it reflects whatever's happening live, not just the state at page-load. */
+function useLayoutDiagnostics() {
+  const [snapshot, setSnapshot] = useState(() => readLayoutSnapshot())
+
+  useEffect(() => {
+    const update = () => setSnapshot(readLayoutSnapshot())
+    update()
+    window.addEventListener('resize', update)
+    window.visualViewport?.addEventListener('resize', update)
+    const interval = setInterval(update, 1000)
+    return () => {
+      window.removeEventListener('resize', update)
+      window.visualViewport?.removeEventListener('resize', update)
+      clearInterval(interval)
+    }
+  }, [])
+
+  return snapshot
+}
+
+function readLayoutSnapshot() {
+  const shell = document.querySelector('.app-shell')
+  return {
+    'window.innerHeight': window.innerHeight,
+    'window.innerWidth': window.innerWidth,
+    'visualViewport.height': window.visualViewport?.height ?? '(不支持)',
+    'visualViewport.offsetTop': window.visualViewport?.offsetTop ?? '(不支持)',
+    '计算出的 --app-height': getComputedStyle(document.documentElement).getPropertyValue('--app-height'),
+    '.app-shell 实际高度': shell ? Math.round(shell.getBoundingClientRect().height) : '(找不到)',
+    devicePixelRatio: window.devicePixelRatio,
+    userAgent: navigator.userAgent,
+  }
+}
+
 export function SkyEyePage() {
   const logs = useConsoleCaptureStore((s) => s.logs)
   const clearLogs = useConsoleCaptureStore((s) => s.clear)
   const settings = useSettingsStore()
   const [stats, setStats] = useState<Record<string, number> | null>(null)
+  const layoutDiagnostics = useLayoutDiagnostics()
 
   useEffect(() => {
     async function loadStats() {
@@ -99,6 +134,18 @@ export function SkyEyePage() {
               ))}
             </div>
           )}
+        </section>
+
+        <section className="mt-3 bg-white px-4 py-4">
+          <h2 className="mb-2 text-xs font-medium text-gray-400">布局诊断（每秒自动刷新，遇到布局问题时把这块内容截图发给开发者）</h2>
+          <div className="space-y-1 rounded-lg bg-gray-50 p-2 font-mono text-[11px] leading-relaxed text-gray-600">
+            {Object.entries(layoutDiagnostics).map(([label, value]) => (
+              <p key={label} className="break-all">
+                <span className="text-gray-400">{label}: </span>
+                {String(value)}
+              </p>
+            ))}
+          </div>
         </section>
 
         <section className="mt-3 bg-white px-4 py-4">
