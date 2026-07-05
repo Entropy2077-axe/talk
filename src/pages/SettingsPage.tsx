@@ -137,7 +137,10 @@ export function SettingsPage() {
         <label className="mb-1 block text-xs text-gray-500">API Key</label>
         <input
           value={apiKeyDraft}
-          onChange={(e) => setApiKeyDraft(e.target.value)}
+          onChange={(e) => {
+            setApiKeyDraft(e.target.value)
+            setTestResult(null)
+          }}
           onBlur={persistConnection}
           type="password"
           placeholder="sk-..."
@@ -147,7 +150,10 @@ export function SettingsPage() {
         <label className="mb-1 block text-xs text-gray-500">Base URL</label>
         <input
           value={baseUrlDraft}
-          onChange={(e) => setBaseUrlDraft(e.target.value)}
+          onChange={(e) => {
+            setBaseUrlDraft(e.target.value)
+            setTestResult(null)
+          }}
           onBlur={persistConnection}
           className="mb-3 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
         />
@@ -160,6 +166,7 @@ export function SettingsPage() {
               onChange={(e) => {
                 setModelDraft(e.target.value)
                 setSettings({ model: e.target.value })
+                setTestResult(null)
               }}
               className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"
             >
@@ -172,7 +179,10 @@ export function SettingsPage() {
           ) : (
             <input
               value={modelDraft}
-              onChange={(e) => setModelDraft(e.target.value)}
+              onChange={(e) => {
+                setModelDraft(e.target.value)
+                setTestResult(null)
+              }}
               onBlur={persistConnection}
               className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"
             />
@@ -236,7 +246,10 @@ export function SettingsPage() {
         <label className="mb-1 block text-xs text-gray-500">Tavily API Key</label>
         <input
           value={tavilyKeyDraft}
-          onChange={(e) => setTavilyKeyDraft(e.target.value)}
+          onChange={(e) => {
+            setTavilyKeyDraft(e.target.value)
+            setTavilyTestResult(null)
+          }}
           onBlur={() => setSettings({ tavilyApiKey: tavilyKeyDraft.trim() })}
           type="password"
           placeholder="tvly-..."
@@ -265,7 +278,10 @@ export function SettingsPage() {
         <label className="mb-1 block text-xs text-gray-500">Pexels API Key</label>
         <input
           value={pexelsKeyDraft}
-          onChange={(e) => setPexelsKeyDraft(e.target.value)}
+          onChange={(e) => {
+            setPexelsKeyDraft(e.target.value)
+            setPexelsTestResult(null)
+          }}
           onBlur={() => setSettings({ pexelsApiKey: pexelsKeyDraft.trim() })}
           type="password"
           placeholder="Pexels API Key"
