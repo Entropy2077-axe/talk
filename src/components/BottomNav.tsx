@@ -31,7 +31,7 @@ export function BottomNav() {
   }, [conversations, messages])
 
   return (
-    <nav className="flex shrink-0 border-t border-gray-100 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+    <nav className="flex shrink-0 border-t border-gray-100 bg-white pb-[env(safe-area-inset-bottom)]">
       {TABS.map(({ to, label, icon: Icon }) => (
         <NavLink
           key={to}
