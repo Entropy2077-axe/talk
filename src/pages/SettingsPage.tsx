@@ -5,6 +5,8 @@ import { ActionSheet } from '../components/ActionSheet'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { listModels, testConnection } from '../lib/deepseek'
 import { DEFAULT_STYLE_PROMPT } from '../lib/prompt'
+import { tavilySearch } from '../lib/webSearch'
+import { searchPexelsPhoto } from '../lib/photoSearch'
 import { db } from '../db/db'
 
 export function SettingsPage() {
@@ -45,6 +47,10 @@ export function SettingsPage() {
   const [pullError, setPullError] = useState('')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const [tavilyTesting, setTavilyTesting] = useState(false)
+  const [tavilyTestResult, setTavilyTestResult] = useState<{ ok: boolean; message: string } | null>(null)
+  const [pexelsTesting, setPexelsTesting] = useState(false)
+  const [pexelsTestResult, setPexelsTestResult] = useState<{ ok: boolean; message: string } | null>(null)
 
   function persistConnection() {
     setSettings({ apiKey: apiKeyDraft.trim(), baseUrl: baseUrlDraft.trim(), model: modelDraft.trim() })
@@ -71,6 +77,36 @@ export function SettingsPage() {
     const result = await testConnection(apiKeyDraft.trim(), baseUrlDraft.trim(), modelDraft.trim())
     setTestResult(result)
     setTesting(false)
+  }
+
+  async function handleTavilyTest() {
+    setTavilyTesting(true)
+    setTavilyTestResult(null)
+    setSettings({ tavilyApiKey: tavilyKeyDraft.trim() })
+    try {
+      const results = await tavilySearch(tavilyKeyDraft.trim(), 'test')
+      setTavilyTestResult({ ok: true, message: `连接成功 搜到${results.length}条结果` })
+    } catch (err) {
+      setTavilyTestResult({ ok: false, message: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setTavilyTesting(false)
+    }
+  }
+
+  async function handlePexelsTest() {
+    setPexelsTesting(true)
+    setPexelsTestResult(null)
+    setSettings({ pexelsApiKey: pexelsKeyDraft.trim() })
+    try {
+      const photo = await searchPexelsPhoto(pexelsKeyDraft.trim(), 'cat', 'square')
+      setPexelsTestResult(
+        photo ? { ok: true, message: '连接成功 已搜到示例图片' } : { ok: false, message: '连接成功但没搜到结果 可能是key本身有问题' },
+      )
+    } catch (err) {
+      setPexelsTestResult({ ok: false, message: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setPexelsTesting(false)
+    }
   }
 
   return (
@@ -187,8 +223,21 @@ export function SettingsPage() {
           onBlur={() => setSettings({ tavilyApiKey: tavilyKeyDraft.trim() })}
           type="password"
           placeholder="tvly-..."
-          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+          className="mb-2 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
         />
+        <button
+          onClick={handleTavilyTest}
+          disabled={tavilyTesting || !tavilyKeyDraft}
+          className="w-full rounded-lg bg-gray-900 py-2 text-sm text-white disabled:opacity-50"
+        >
+          {tavilyTesting ? '测试中…' : '测试连接'}
+        </button>
+        {tavilyTestResult && (
+          <p className={`mt-2 text-xs ${tavilyTestResult.ok ? 'text-green-600' : 'text-red-500'}`}>
+            {tavilyTestResult.ok ? '✓ ' : '✗ '}
+            {tavilyTestResult.message}
+          </p>
+        )}
         <p className="mt-2 text-[11px] text-gray-400">
           去 tavily.com 免费注册可以拿到一个key 只用来定时给"世界设定"页面的知识库搜索最新的网络热梗/番剧/游戏资讯 平时聊天不会用到
         </p>
@@ -203,8 +252,21 @@ export function SettingsPage() {
           onBlur={() => setSettings({ pexelsApiKey: pexelsKeyDraft.trim() })}
           type="password"
           placeholder="Pexels API Key"
-          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+          className="mb-2 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
         />
+        <button
+          onClick={handlePexelsTest}
+          disabled={pexelsTesting || !pexelsKeyDraft}
+          className="w-full rounded-lg bg-gray-900 py-2 text-sm text-white disabled:opacity-50"
+        >
+          {pexelsTesting ? '测试中…' : '测试连接'}
+        </button>
+        {pexelsTestResult && (
+          <p className={`mt-2 text-xs ${pexelsTestResult.ok ? 'text-green-600' : 'text-red-500'}`}>
+            {pexelsTestResult.ok ? '✓ ' : '✗ '}
+            {pexelsTestResult.message}
+          </p>
+        )}
         <p className="mt-2 text-[11px] text-gray-400">
           去 pexels.com/api 免费注册可以拿到一个key 用于创建联系人时自动配一张符合性格的头像照片、以及朋友圈动态偶尔配的插图 动漫风格头像走的是另一个不需要key的免费接口
         </p>

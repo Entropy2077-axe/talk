@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { Route, Routes } from 'react-router-dom'
+import { App as CapacitorApp } from '@capacitor/app'
 import { useSettingsStore } from './store/useSettingsStore'
 import { refreshMoments } from './lib/moments'
 import { AUTONOMOUS_TICK_INTERVAL_MS, maybeTriggerProactiveMessage } from './lib/proactiveChat'
@@ -52,8 +53,35 @@ function useAutonomousBehaviorTimer() {
   }, [enabled])
 }
 
+/**
+ * Without this, Android's hardware/gesture back button just closes the
+ * whole app from any screen — Capacitor's default is to let the native
+ * WebView's own back-navigation stack drive it, but this app is a
+ * HashRouter SPA where "navigate back" means moving through the hash
+ * history, not the WebView's page-load history. `canGoBack` is Capacitor's
+ * own answer to "is there anywhere to go back to" (tracked natively from
+ * the WebView's history), so this defers to it rather than guessing from
+ * the current route. No-ops harmlessly on web (the browser's own back
+ * button/gesture already works there; this listener just never fires).
+ */
+function useAndroidBackButton() {
+  useEffect(() => {
+    const listenerPromise = CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+      if (canGoBack) {
+        window.history.back()
+      } else {
+        CapacitorApp.exitApp()
+      }
+    })
+    return () => {
+      listenerPromise.then((l) => l.remove())
+    }
+  }, [])
+}
+
 function App() {
   useAutonomousBehaviorTimer()
+  useAndroidBackButton()
 
   return (
     <div className="app-shell">

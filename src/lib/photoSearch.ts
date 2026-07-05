@@ -18,13 +18,21 @@ export async function searchPexelsPhoto(
   const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=1&orientation=${orientation}`
   const res = await fetch(url, { headers: { Authorization: apiKey } })
   if (!res.ok) {
+    console.warn(`[photo] Pexels搜索失败 query="${query}" HTTP ${res.status}`)
     throw new Error(`Pexels搜索失败 HTTP ${res.status}`)
   }
   const json = await res.json()
   const photo = json?.photos?.[0]
-  if (!photo) return null
+  if (!photo) {
+    console.warn(`[photo] Pexels搜索无结果 query="${query}"`)
+    return null
+  }
   const src = orientation === 'square' ? (photo.src?.medium ?? photo.src?.small) : (photo.src?.large ?? photo.src?.medium)
-  if (!src) return null
+  if (!src) {
+    console.warn(`[photo] Pexels返回结果但没有可用图片链接 query="${query}"`)
+    return null
+  }
+  console.log(`[photo] Pexels搜索成功 query="${query}" photographer=${photo.photographer ?? '未知'}`)
   return {
     url: src,
     photographer: typeof photo.photographer === 'string' ? photo.photographer : undefined,
@@ -39,9 +47,14 @@ export async function randomAnimeAvatar(): Promise<PhotoResult | null> {
   const category = ANIME_CATEGORIES[Math.floor(Math.random() * ANIME_CATEGORIES.length)]
   const res = await fetch(`https://api.waifu.pics/sfw/${category}`)
   if (!res.ok) {
+    console.warn(`[photo] waifu.pics请求失败 category=${category} HTTP ${res.status}`)
     throw new Error(`waifu.pics请求失败 HTTP ${res.status}`)
   }
   const json = await res.json()
-  if (typeof json?.url !== 'string') return null
+  if (typeof json?.url !== 'string') {
+    console.warn(`[photo] waifu.pics返回结果没有图片链接 category=${category}`)
+    return null
+  }
+  console.log(`[photo] waifu.pics获取成功 category=${category}`)
   return { url: json.url }
 }
