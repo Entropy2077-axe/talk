@@ -30,7 +30,7 @@ export function RelationshipsPage() {
   const contactById = useMemo(() => new Map(contactsRaw.map((c) => [c.id, c])), [contactsRaw])
 
   return (
-    <div className="flex min-h-full flex-col bg-[#f4f4f6]">
+    <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
       <TopBar
         title="关系网"
         showBack
@@ -47,6 +47,7 @@ export function RelationshipsPage() {
           </button>
         }
       />
+      <div className="flex-1 overflow-y-auto">
 
       <p className="px-4 pt-3 pb-1 text-xs text-gray-400">
         跟据聊天内容自动评估 只影响语气不会改变TA的性格
@@ -98,6 +99,7 @@ export function RelationshipsPage() {
           ))}
         </div>
       )}
+      </div>
     </div>
   )
 }

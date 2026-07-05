@@ -42,10 +42,9 @@ export function WarehousePage() {
   }
 
   return (
-    <div className="relative flex min-h-full flex-col bg-[#f4f4f6]">
+    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
       <TopBar title="仓库" showBack />
-
-      <div className="flex-1 px-4 py-4">
+      <div className="flex-1 overflow-y-auto px-4 py-4">
         {items.length === 0 ? (
           <p className="py-10 text-center text-sm text-gray-400">仓库还是空的 去商城逛逛吧</p>
         ) : (

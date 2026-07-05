@@ -146,7 +146,7 @@ export function MomentsPage() {
   }
 
   return (
-    <div className="relative flex min-h-full flex-col bg-[#ededed]">
+    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#ededed]">
       <TopBar
         title="朋友圈"
         showBack
@@ -170,6 +170,7 @@ export function MomentsPage() {
           </div>
         }
       />
+      <div className="flex-1 overflow-y-auto">
 
       <div className="relative shrink-0" style={{ height: '40vh' }} onClick={() => coverInput.current?.click()}>
         {settings.momentsCoverPhoto ? (
@@ -350,6 +351,7 @@ export function MomentsPage() {
             )
           })
         )}
+      </div>
       </div>
     </div>
   )

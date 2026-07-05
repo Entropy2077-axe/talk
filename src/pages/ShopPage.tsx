@@ -69,12 +69,13 @@ export function ShopPage() {
   }
 
   return (
-    <div className="relative flex min-h-full flex-col bg-[#f4f4f6]">
+    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
       <TopBar
         title="商城"
         showBack
         right={<span className="pr-1 text-sm text-gray-500">{formatCurrency(settings.walletBalance)}</span>}
       />
+      <div className="flex-1 overflow-y-auto">
 
       <div className="flex gap-2 px-4 pt-3">
         <input
@@ -132,6 +133,7 @@ export function ShopPage() {
             ))}
           </div>
         )}
+      </div>
       </div>
 
       {toast && (

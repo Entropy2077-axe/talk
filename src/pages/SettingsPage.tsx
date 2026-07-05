@@ -74,8 +74,9 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="flex min-h-full flex-col bg-[#f4f4f6]">
+    <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
       <TopBar title="设置" showBack />
+      <div className="flex-1 overflow-y-auto">
 
       <section className="mt-3 bg-white px-4 py-3">
         <h2 className="mb-2 text-xs font-medium text-gray-400">API 配置（DeepSeek）</h2>
@@ -292,6 +293,7 @@ export function SettingsPage() {
           数据存在你这台设备的浏览器本地 这个操作会删除所有联系人、会话和聊天记录 不可恢复
         </p>
       </section>
+      </div>
 
       {confirmingWipe && (
         <ActionSheet

@@ -61,8 +61,9 @@ export function TodoPage() {
   }
 
   return (
-    <div className="relative flex min-h-full flex-col bg-[#f4f4f6]">
+    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
       <TopBar title="待办" right={<span className="pr-1 text-sm text-gray-500">{formatCurrency(walletBalance)}</span>} />
+      <div className="flex-1 overflow-y-auto">
 
       <section className="mt-3 bg-white px-4 py-4">
         <h2 className="mb-2 text-xs font-medium text-gray-400">我的待办</h2>
@@ -147,6 +148,7 @@ export function TodoPage() {
           </div>
         )}
       </section>
+      </div>
     </div>
   )
 }

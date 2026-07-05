@@ -91,8 +91,9 @@ export function WorldSettingsPage() {
   }
 
   return (
-    <div className="flex min-h-full flex-col bg-[#f4f4f6]">
+    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
       <TopBar title="世界设定" showBack />
+      <div className="flex-1 overflow-y-auto">
 
       <section className="mt-3 bg-white px-4 py-4">
         <div className="mb-2 flex items-center justify-between">
@@ -309,6 +310,7 @@ export function WorldSettingsPage() {
           </div>
         )}
       </section>
+      </div>
 
       {savingName && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/30 p-8">

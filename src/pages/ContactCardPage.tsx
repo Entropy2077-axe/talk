@@ -31,7 +31,7 @@ export function ContactCardPage() {
   if (contact === undefined) return null
   if (contact === null || !contactId) {
     return (
-      <div className="flex min-h-full flex-col bg-[#f4f4f6]">
+      <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
         <TopBar title="联系人" showBack />
         <p className="px-4 py-10 text-center text-sm text-gray-400">该联系人已被删除</p>
       </div>
@@ -70,8 +70,9 @@ export function ContactCardPage() {
   const activeOverrides = pruneExpiredOverrides(contact.scheduleOverrides ?? [], new Date())
 
   return (
-    <div className="relative flex min-h-full flex-col bg-[#f4f4f6]">
+    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
       <TopBar title="联系人名片" showBack />
+      <div className="flex-1 overflow-y-auto">
 
       <section className="mt-3 flex flex-col items-center gap-1 bg-white px-4 py-8">
         <button onClick={() => setPickingAvatar(true)}>
@@ -185,6 +186,7 @@ export function ContactCardPage() {
         <button onClick={() => setMenuOpen(true)} className="w-full rounded-lg bg-gray-100 py-2.5 text-sm text-red-500">
           删除联系人
         </button>
+      </div>
       </div>
 
       {menuOpen && (
