@@ -38,7 +38,7 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
       .filter((m) => m.type === 'text' && m.content.toLowerCase().includes(q.toLowerCase()))
       .map((m) => {
         const conv = convById.get(m.conversationId)
-        const contact = conv ? contactById.get(conv.contactId) : undefined
+        const contact = conv?.contactId ? contactById.get(conv.contactId) : undefined
         return { message: m, contactName: contact ? displayName(contact) : '未知' }
       })
       .sort((a, b) => b.message.createdAt - a.message.createdAt)

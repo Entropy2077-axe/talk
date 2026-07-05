@@ -4,12 +4,14 @@ import { db } from '../db/db'
 import { chatCompletion, coalesceConsecutiveRoles, type ChatMessage } from './deepseek'
 import { parseAiResponse, typingDelayMs } from './aiProtocol'
 import { buildSystemPrompt, AVAILABLE_LINK_APPS } from './prompt'
-import { CONTEXT_WINDOW_SIZE, maybeUpdateMemory } from './memory'
+import { CONTEXT_WINDOW_SIZE, activeUpcomingPlansText, maybeUpdateMemory } from './memory'
 import { describeCurrentTime, ageFromBirthday } from './time'
+import { describeCurrentSchedule, describeUpcomingScheduleText, pruneExpiredOverrides } from './schedule'
+import { knowledgeDigestText, processKnowledgeQueries } from './knowledgeBase'
 import { displayName } from './contact'
 import { previewForMessage } from './messagePreview'
 import { useChatUiStore } from '../store/useChatUiStore'
-import type { AiBubble, AppSettings, Contact, Message, Sticker } from '../types'
+import type { AiBubble, AppSettings, Contact, Message, ScheduleOverride, Sticker } from '../types'
 
 /**
  * Per-conversation AI-turn state, deliberately kept in a module-level
@@ -65,7 +67,7 @@ function clearPending(conversationId: string) {
   abortByConversation.get(conversationId)?.abort()
 }
 
-function buildUserProfileText(settings: AppSettings): string {
+export function buildUserProfileText(settings: AppSettings): string {
   const parts: string[] = [`昵称: ${settings.userNickname || '未设置'}`]
   if (settings.userGender) parts.push(`性别: ${settings.userGender}`)
   const age = ageFromBirthday(settings.userBirthday)
@@ -137,6 +139,7 @@ async function runAiTurn(
 ): Promise<void> {
   const engine = useChatEngineStore.getState()
   engine.patch(conversationId, { aiTyping: true, error: '' })
+  console.log(`[chat] 开始生成回复 对方=${displayName(contact)} conversationId=${conversationId}`)
   try {
     const history = await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt')
 
@@ -145,6 +148,8 @@ async function runAiTurn(
     // than sitting there forever or requiring a proactive-message system.
     const pendingEvents = contact.pendingEvents ?? []
     if (pendingEvents.length > 0) await db.contacts.update(contact.id, { pendingEvents: [] })
+
+    const knowledgeEntries = await db.knowledgeEntries.toArray()
 
     const systemPrompt = buildSystemPrompt({
       stylePrompt: settings.globalSystemPrompt,
@@ -156,6 +161,11 @@ async function runAiTurn(
       currentTimeText: describeCurrentTime(new Date()),
       userProfileText: buildUserProfileText(settings),
       recentEventsText: pendingEvents.length > 0 ? pendingEvents.join('；') : undefined,
+      upcomingPlansText: activeUpcomingPlansText(contact, new Date()) || undefined,
+      currentScheduleText: describeCurrentSchedule(contact, new Date()) || undefined,
+      upcomingScheduleText: describeUpcomingScheduleText(contact, new Date()) || undefined,
+      worldviewText: settings.worldview || undefined,
+      knowledgeDigestText: knowledgeDigestText(knowledgeEntries) || undefined,
     })
     const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
     const chatMessages: ChatMessage[] = coalesceConsecutiveRoles([
@@ -165,6 +175,7 @@ async function runAiTurn(
         if (m.type === 'link') return { role: m.role, content: `[分享了一个链接: ${m.content}]` }
         if (m.type === 'commission') return { role: m.role, content: `[发布了委托: ${m.content}]` }
         if (m.type === 'gift') return { role: m.role, content: `[送出了礼物: ${m.content}]` }
+        if (m.type === 'scheduleChange') return { role: m.role, content: `[达成新的日程约定: ${m.content}]` }
         return { role: m.role, content: m.content }
       }),
     ])
@@ -180,19 +191,21 @@ async function runAiTurn(
     })
 
     if (streamByConversation.get(conversationId) !== streamId) return
-    const bubbles = parseAiResponse(raw)
+    const { bubbles, knowledgeQueries } = parseAiResponse(raw)
+    console.log(`[chat] 收到回复(${raw.length}字) 解析出${bubbles.length}条气泡 对方=${displayName(contact)}`)
     if (bubbles.length === 0) {
+      console.warn(`[chat] 本轮没有正常回复 对方=${displayName(contact)} 原始内容: ${raw.slice(0, 200)}`)
       engine.patch(conversationId, { error: '对方这次没有正常回复 可以再发一条试试', aiTyping: false })
       return
     }
+    processKnowledgeQueries(knowledgeQueries, settings)
     revealBubbles(conversationId, contact, settings, bubbles, streamId)
   } catch (err) {
     if (streamByConversation.get(conversationId) !== streamId) return
     if (err instanceof DOMException && err.name === 'AbortError') return
-    engine.patch(conversationId, {
-      error: err instanceof Error ? err.message : String(err),
-      aiTyping: false,
-    })
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(`[chat] 生成回复出错 对方=${displayName(contact)}:`, message)
+    engine.patch(conversationId, { error: message, aiTyping: false })
   }
 }
 
@@ -224,10 +237,32 @@ function revealBubbles(
         })
       }
 
+      if (bubble.type === 'scheduleChange') {
+        // Re-fetch rather than reusing the `contact` this whole turn was
+        // handed — that snapshot predates this write, and stashing a stale
+        // scheduleOverrides array here would silently drop the exception
+        // (same staleness bug fixed in proactiveChat.ts's pendingEvents write).
+        const fresh = await db.contacts.get(contact.id)
+        const pruned = pruneExpiredOverrides(fresh?.scheduleOverrides ?? [], new Date())
+        const override: ScheduleOverride = {
+          id: uuid(),
+          date: bubble.date,
+          startHour: bubble.startHour,
+          endHour: bubble.endHour,
+          phoneAccess: bubble.phoneAccess,
+          location: bubble.location,
+          activity: bubble.activity,
+          summary: bubble.summary,
+          createdAt: Date.now(),
+        }
+        await db.contacts.update(contact.id, { scheduleOverrides: [...pruned, override] })
+      }
+
       let content: string
       if (bubble.type === 'text') content = bubble.content
       else if (bubble.type === 'sticker') content = bubble.name
       else if (bubble.type === 'commission') content = bubble.title
+      else if (bubble.type === 'scheduleChange') content = bubble.summary
       else content = bubble.label
 
       const msg: Message = {
@@ -238,6 +273,18 @@ function revealBubbles(
         content,
         link: bubble.type === 'link' ? { app: bubble.app, label: bubble.label, data: bubble.data } : undefined,
         commission: commissionId ? { commissionId } : undefined,
+        scheduleChange:
+          bubble.type === 'scheduleChange'
+            ? {
+                date: bubble.date,
+                startHour: bubble.startHour,
+                endHour: bubble.endHour,
+                phoneAccess: bubble.phoneAccess,
+                location: bubble.location,
+                activity: bubble.activity,
+                summary: bubble.summary,
+              }
+            : undefined,
         createdAt: Date.now(),
       }
       await db.messages.add(msg)

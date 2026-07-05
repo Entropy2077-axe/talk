@@ -1,4 +1,4 @@
-const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+export const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
 export function formatListTime(ts: number): string {
   const now = new Date()
@@ -42,6 +42,12 @@ export function ageFromBirthday(birthday: string): number | null {
     now.getMonth() > b.getMonth() || (now.getMonth() === b.getMonth() && now.getDate() >= b.getDate())
   if (!hasHadBirthdayThisYear) age -= 1
   return age
+}
+
+/** Local (not UTC) "YYYY-MM-DD" key, used to compare against PlanItem.date for expiry. */
+export function toDateKey(date: Date): string {
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
 /** Full, model-facing description of "right now" — recomputed fresh for every request. */

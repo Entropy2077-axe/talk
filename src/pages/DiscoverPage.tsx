@@ -2,23 +2,27 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { TopBar } from '../components/TopBar'
 import { SearchOverlay } from '../components/SearchOverlay'
+import { useSettingsStore } from '../store/useSettingsStore'
 
-const ENTRIES = [
+const BASE_ENTRIES = [
   { to: '/moments', icon: '📸', label: '朋友圈' },
   { to: '/shop', icon: '🛍️', label: '商城' },
   { to: '/warehouse', icon: '📦', label: '仓库' },
   { to: '/relationships', icon: '🕸️', label: '关系网' },
+  { to: '/world-settings', icon: '🌐', label: '世界设定' },
 ]
 
 export function DiscoverPage() {
   const [searching, setSearching] = useState(false)
   const navigate = useNavigate()
+  const adminModeEnabled = useSettingsStore((s) => s.adminModeEnabled)
+  const entries = adminModeEnabled ? [...BASE_ENTRIES, { to: '/sky-eye', icon: '🔭', label: '天眼' }] : BASE_ENTRIES
   return (
     <div className="relative flex min-h-full flex-col">
       <TopBar title="发现" showSearch onSearchClick={() => setSearching(true)} />
 
       <div className="mx-4 mt-3 space-y-2">
-        {ENTRIES.map((entry) => (
+        {entries.map((entry) => (
           <button
             key={entry.to}
             onClick={() => navigate(entry.to)}

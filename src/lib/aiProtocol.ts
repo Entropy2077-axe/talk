@@ -12,21 +12,65 @@ import type { AiBubble, AiResponse } from '../types'
  * Returns an empty array only when there is truly nothing to show (blank
  * response) — callers must treat `[]` as "no reply".
  */
-export function parseAiResponse(raw: string): AiBubble[] {
+export interface ParsedAiTurn {
+  bubbles: AiBubble[]
+  /** Up to 2 topics the model flagged for the knowledge base to look up — see lib/knowledgeBase.ts. Always [] on the fallback (non-JSON) path since there's no structured field to read it from. */
+  knowledgeQueries: string[]
+}
+
+export function parseAiResponse(raw: string): ParsedAiTurn {
   const trimmedRaw = raw.trim()
-  if (!trimmedRaw) return []
+  if (!trimmedRaw) return { bubbles: [], knowledgeQueries: [] }
 
-  const jsonBubbles = tryParseJson(trimmedRaw)
-  if (jsonBubbles && jsonBubbles.length > 0) return jsonBubbles
+  const jsonResult = tryParseJson(trimmedRaw)
+  if (jsonResult && jsonResult.bubbles.length > 0) {
+    return { bubbles: recoverLeakedBubbles(jsonResult.bubbles), knowledgeQueries: jsonResult.knowledgeQueries }
+  }
 
-  return trimmedRaw
+  const fallbackBubbles: AiBubble[] = trimmedRaw
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
     .map((content) => ({ type: 'text', content }))
+  return { bubbles: recoverLeakedBubbles(fallbackBubbles), knowledgeQueries: [] }
 }
 
-function tryParseJson(trimmedRaw: string): AiBubble[] | null {
+/**
+ * The model occasionally, despite an explicit prompt instruction not to,
+ * mimics the bracketed history-placeholder format (e.g.
+ * "[发布了委托: 帮忙取快递]") as literal text content instead of actually using
+ * the structured commission JSON type — reproduced live: it happens most
+ * often for a *second* commission later in the same conversation, right
+ * after the model has seen its own earlier commission compressed into that
+ * exact bracket form in its own history (see chatEngine.ts's history
+ * mapping for the API call). The prompt instruction alone didn't reliably
+ * stop it, so this recovers the card structurally instead of depending
+ * entirely on prompt compliance — same philosophy as extractJsonObject and
+ * the reward-string coercion above.
+ */
+const COMMISSION_LEAK_PATTERN = /^\[发布了委托[:：]\s*(.+?)\s*\]$/
+
+function recoverLeakedBubbles(bubbles: AiBubble[]): AiBubble[] {
+  return bubbles.map((b): AiBubble => {
+    if (b.type !== 'text') return b
+    const match = b.content.match(COMMISSION_LEAK_PATTERN)
+    if (!match) return b
+    const title = match[1]
+    return { type: 'commission', title, description: title, reward: clampReward(NaN) }
+  })
+}
+
+export function parseKnowledgeQueriesField(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const result: string[] = []
+  for (const q of raw) {
+    if (typeof q === 'string' && q.trim()) result.push(q.trim())
+    if (result.length >= 2) break // cap at 2 regardless of how many the model listed
+  }
+  return result
+}
+
+function tryParseJson(trimmedRaw: string): { bubbles: AiBubble[]; knowledgeQueries: string[] } | null {
   let text = trimmedRaw
   // strip ```json ... ``` fences if the model added them despite instructions
   const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
@@ -74,13 +118,35 @@ function tryParseJson(trimmedRaw: string): AiBubble[] | null {
           reward: clampReward(rewardNum),
         })
       }
+    } else if (m.type === 'scheduleChange') {
+      const scheduleChange = parseScheduleChangeBubble(m as unknown as Record<string, unknown>)
+      if (scheduleChange) bubbles.push(scheduleChange)
     }
   }
-  return bubbles
+  return { bubbles, knowledgeQueries: parseKnowledgeQueriesField(parsed.knowledgeQueries) }
+}
+
+/** Validates a scheduleChange bubble the model emitted — drops it (falls back to just the surrounding text bubbles) rather than crashing on a malformed date/hour. */
+function parseScheduleChangeBubble(m: Record<string, unknown>): AiBubble | null {
+  const date = typeof m.date === 'string' ? m.date : ''
+  const startHour = typeof m.startHour === 'number' ? m.startHour : Number(m.startHour)
+  const endHour = typeof m.endHour === 'number' ? m.endHour : Number(m.endHour)
+  const phoneAccess = m.phoneAccess
+  const location = typeof m.location === 'string' ? m.location.trim() : ''
+  const activity = typeof m.activity === 'string' ? m.activity.trim() : ''
+  const summary = typeof m.summary === 'string' ? m.summary.trim() : ''
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null
+  if (!Number.isInteger(startHour) || !Number.isInteger(endHour)) return null
+  if (startHour < 0 || startHour > 23 || endHour < 1 || endHour > 24 || startHour === endHour) return null
+  if (phoneAccess !== 'available' && phoneAccess !== 'unavailable') return null
+  if (!location || !activity || !summary) return null
+
+  return { type: 'scheduleChange', date, startHour, endHour, phoneAccess, location, activity, summary }
 }
 
 /** Finds the first balanced {...} object in `text`, respecting quoted strings, and returns it as a substring. */
-function extractJsonObject(text: string): string | null {
+export function extractJsonObject(text: string): string | null {
   const start = text.indexOf('{')
   if (start === -1) return null
 

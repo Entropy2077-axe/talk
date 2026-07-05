@@ -10,6 +10,8 @@ interface SettingsState extends AppSettings {
 
 const envKey = import.meta.env.VITE_DEEPSEEK_API_KEY ?? ''
 const envBaseUrl = import.meta.env.VITE_DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com'
+const envTavilyKey = import.meta.env.VITE_TAVILY_API_KEY ?? ''
+const envPexelsKey = import.meta.env.VITE_PEXELS_API_KEY ?? ''
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
@@ -26,6 +28,11 @@ export const useSettingsStore = create<SettingsState>()(
       userBio: '',
       walletBalance: INITIAL_WALLET_BALANCE,
       momentsCoverPhoto: '',
+      autonomousBehaviorEnabled: false,
+      tavilyApiKey: envTavilyKey,
+      worldview: '',
+      adminModeEnabled: false,
+      pexelsApiKey: envPexelsKey,
       setSettings: (patch) => set(patch),
     }),
     { name: 'talk-settings' },

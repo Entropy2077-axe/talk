@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { v4 as uuid } from 'uuid'
@@ -8,8 +8,9 @@ import { MessageBubble } from '../components/MessageBubble'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { useChatUiStore } from '../store/useChatUiStore'
 import { DEFAULT_RUNTIME_STATE, sendMessage, useChatEngineStore } from '../lib/chatEngine'
+import { sendGroupMessage } from '../lib/groupChatEngine'
 import { displayName } from '../lib/contact'
-import type { Message } from '../types'
+import type { Contact, Message } from '../types'
 
 export function ChatPage() {
   const { conversationId } = useParams()
@@ -23,10 +24,22 @@ export function ChatPage() {
     () => (conversationId ? db.conversations.get(conversationId) : undefined),
     [conversationId],
   )
+  const isGroupConv = !!conversation?.groupId
   const contact = useLiveQuery(
-    () => (conversation ? db.contacts.get(conversation.contactId) : undefined),
+    () => (conversation && !conversation.groupId ? db.contacts.get(conversation.contactId!) : undefined),
     [conversation],
   )
+  const group = useLiveQuery(
+    () => (conversation?.groupId ? db.groups.get(conversation.groupId) : undefined),
+    [conversation],
+  )
+  const groupMembersRaw = useLiveQuery(
+    () => (group ? db.contacts.bulkGet(group.memberContactIds) : []),
+    [group],
+  )
+  const groupMembers = useMemo(() => (groupMembersRaw ?? []).filter((c): c is Contact => !!c), [groupMembersRaw])
+  const memberById = useMemo(() => new Map(groupMembers.map((c) => [c.id, c])), [groupMembers])
+
   const messages =
     useLiveQuery(
       () =>
@@ -48,7 +61,7 @@ export function ChatPage() {
   const [input, setInput] = useState('')
   const [toast, setToast] = useState('')
 
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
   const bubbleRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const [flashId, setFlashId] = useState<string | null>(highlightId)
 
@@ -60,12 +73,27 @@ export function ChatPage() {
     return () => setActiveConversation(null)
   }, [conversationId, setActiveConversation])
 
+  // Marks everything as read whenever this chat is open — runs on mount
+  // (clears existing unread) and again each time a new message streams in
+  // while the user is still looking at it (keeps it cleared in real time).
+  useEffect(() => {
+    if (!conversationId || messages.length === 0) return
+    db.conversations.update(conversationId, { lastReadAt: Date.now() })
+  }, [conversationId, messages.length])
+
   // useLayoutEffect (not useEffect) so the jump-to-bottom happens before the
   // browser paints — otherwise opening a long conversation briefly flashes
-  // the middle/top of the history before snapping to the bottom.
+  // the middle/top of the history before snapping to the bottom. `contact`
+  // and `group` are in the deps deliberately: `messages` resolves from its
+  // own independent useLiveQuery and can settle *before* contact/group does,
+  // and the scroll container only actually mounts (guards passed) once
+  // contact/group resolves too — without these in the deps, that final
+  // unlocking render doesn't re-fire the effect (messages.length already
+  // stopped changing by then) and the ref never gets scrolled at all.
   useLayoutEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
-  }, [conversationId, messages.length, aiTyping])
+    const el = scrollContainerRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [conversationId, messages.length, aiTyping, contact, group])
 
   useEffect(() => {
     if (!highlightId || messages.length === 0) return
@@ -78,7 +106,14 @@ export function ChatPage() {
 
   async function handleSend() {
     const text = input.trim()
-    if (!text || !conversationId || !contact) return
+    if (!text || !conversationId) return
+    if (isGroupConv) {
+      if (!group) return
+      setInput('')
+      await sendGroupMessage(conversationId, group, groupMembers, settings, stickers, text)
+      return
+    }
+    if (!contact) return
     setInput('')
     await sendMessage(conversationId, contact, settings, stickers, text)
   }
@@ -102,8 +137,8 @@ export function ChatPage() {
     await sendMessage(conversationId, contact, settings, stickers, accept ? `好 这个我接了` : `这个我接不了 抱歉`)
   }
 
-  if (conversation === undefined || contact === undefined) return null
-  if (conversation === null || contact === null) {
+  if (conversation === undefined) return null
+  if (conversation === null) {
     return (
       <div className="flex h-dvh flex-col overflow-hidden bg-[#ededed]">
         <TopBar title="对话" showBack />
@@ -111,17 +146,41 @@ export function ChatPage() {
       </div>
     )
   }
+  if (isGroupConv) {
+    if (group === undefined) return null
+    if (group === null) {
+      return (
+        <div className="flex h-dvh flex-col overflow-hidden bg-[#ededed]">
+          <TopBar title="群聊" showBack />
+          <p className="px-4 py-10 text-center text-sm text-gray-400">该群聊已被解散</p>
+        </div>
+      )
+    }
+  } else {
+    if (contact === undefined) return null
+    if (contact === null) {
+      return (
+        <div className="flex h-dvh flex-col overflow-hidden bg-[#ededed]">
+          <TopBar title="对话" showBack />
+          <p className="px-4 py-10 text-center text-sm text-gray-400">会话不存在</p>
+        </div>
+      )
+    }
+  }
+
+  const headerTitle = isGroupConv ? group!.name : displayName(contact!)
+  const headerInfoPath = isGroupConv ? `/group/${group!.id}` : `/contact/${contact!.id}`
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-[#ededed]">
       <TopBar
-        title={displayName(contact)}
+        title={headerTitle}
         showBack
         right={
           <button
-            onClick={() => navigate(`/contact/${contact.id}`)}
+            onClick={() => navigate(headerInfoPath)}
             className="flex h-9 w-9 items-center justify-center text-gray-500"
-            aria-label="联系人名片"
+            aria-label={isGroupConv ? '群聊信息' : '联系人名片'}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
               <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6" />
@@ -131,24 +190,31 @@ export function ChatPage() {
         }
       />
 
-      <div className="flex-1 overflow-y-auto pt-2">
-        {messages.map((m) => (
-          <MessageBubble
-            key={m.id}
-            ref={(el) => {
-              if (el) bubbleRefs.current.set(m.id, el)
-            }}
-            message={m}
-            contactName={displayName(contact)}
-            contactAvatar={contact.avatar}
-            contactAvatarColor={contact.avatarColor}
-            userAvatar={settings.userAvatar}
-            stickerUrl={m.type === 'sticker' ? stickerByName.get(m.content) : undefined}
-            highlighted={flashId === m.id}
-            onLinkClick={() => setToast('小程序功能正在开发中')}
-            onCommissionRespond={handleCommissionRespond}
-          />
-        ))}
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto pt-2">
+        {messages.map((m) => {
+          const speaker =
+            isGroupConv && m.role === 'assistant' && m.speakerContactId ? memberById.get(m.speakerContactId) : undefined
+          const bubbleName = isGroupConv ? (speaker ? displayName(speaker) : group!.name) : displayName(contact!)
+          const bubbleAvatar = isGroupConv ? (speaker ? speaker.avatar : group!.avatar) : contact!.avatar
+          const bubbleAvatarColor = isGroupConv ? (speaker ? speaker.avatarColor : group!.avatarColor) : contact!.avatarColor
+          return (
+            <MessageBubble
+              key={m.id}
+              ref={(el) => {
+                if (el) bubbleRefs.current.set(m.id, el)
+              }}
+              message={m}
+              contactName={bubbleName}
+              contactAvatar={bubbleAvatar}
+              contactAvatarColor={bubbleAvatarColor}
+              userAvatar={settings.userAvatar}
+              stickerUrl={m.type === 'sticker' ? stickerByName.get(m.content) : undefined}
+              highlighted={flashId === m.id}
+              onLinkClick={() => setToast('小程序功能正在开发中')}
+              onCommissionRespond={handleCommissionRespond}
+            />
+          )
+        })}
         {aiTyping && (
           <div className="flex items-center gap-2 px-3 py-1.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-xl" />
@@ -159,7 +225,6 @@ export function ChatPage() {
             </div>
           </div>
         )}
-        <div ref={bottomRef} />
       </div>
 
       {error && <p className="bg-red-50 px-4 py-1.5 text-xs text-red-500">{error}</p>}

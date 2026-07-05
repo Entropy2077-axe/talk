@@ -8,8 +8,11 @@ import { Avatar } from '../components/Avatar'
 import { AvatarPicker } from '../components/AvatarPicker'
 import { ActionSheet } from '../components/ActionSheet'
 import { displayName } from '../lib/contact'
-import { resetMemory } from '../lib/memory'
+import { activeUpcomingPlans, resetMemory } from '../lib/memory'
 import { cascadeDeleteContactSocialData } from '../lib/moments'
+import { removeContactFromAllGroups } from '../lib/groupChat'
+import { pruneExpiredOverrides } from '../lib/schedule'
+import { WEEKDAYS } from '../lib/time'
 
 export function ContactCardPage() {
   const { contactId } = useParams()
@@ -51,6 +54,7 @@ export function ContactCardPage() {
       await db.conversations.delete(conversation.id)
     }
     await cascadeDeleteContactSocialData(contactId!)
+    await removeContactFromAllGroups(contactId!)
     await db.contacts.delete(contactId!)
     navigate('/contacts', { replace: true })
   }
@@ -60,7 +64,10 @@ export function ContactCardPage() {
     setEditingRemark(false)
   }
 
-  const hasMemory = contact.memoryFacts || contact.memoryStyle
+  const activePlans = activeUpcomingPlans(contact.upcomingPlans ?? [], new Date())
+  const hasMemory = contact.memoryFacts || contact.memoryStyle || activePlans.length > 0
+  const schedule = contact.schedule ?? []
+  const activeOverrides = pruneExpiredOverrides(contact.scheduleOverrides ?? [], new Date())
 
   return (
     <div className="relative flex min-h-full flex-col bg-[#f4f4f6]">
@@ -72,6 +79,18 @@ export function ContactCardPage() {
         </button>
         <h2 className="mt-1 text-lg font-medium text-gray-900">{displayName(contact)}</h2>
         {contact.remark && <p className="text-xs text-gray-400">本名 {contact.name}</p>}
+        {contact.avatarPhotographer && (
+          <p className="text-[11px] text-gray-300">
+            头像照片来自 Pexels ·{' '}
+            {contact.avatarPhotographerUrl ? (
+              <a href={contact.avatarPhotographerUrl} target="_blank" rel="noreferrer" className="underline">
+                {contact.avatarPhotographer}
+              </a>
+            ) : (
+              contact.avatarPhotographer
+            )}
+          </p>
+        )}
       </section>
 
       <div className="mt-3 bg-white">
@@ -106,9 +125,56 @@ export function ContactCardPage() {
               <span className="text-xs text-gray-400">相处状态 </span>
               {contact.memoryStyle || '暂无'}
             </p>
+            {activePlans.length > 0 && (
+              <div>
+                <span className="text-xs text-gray-400">和你的约定 </span>
+                <ul className="mt-1 space-y-0.5">
+                  {activePlans.map((p) => (
+                    <li key={p.id}>{p.date ? `[${p.date}] ${p.text}` : p.text}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         ) : (
           <p className="text-sm text-gray-400">还没有形成记忆 多聊几句之后会自己记住一些关于你的事</p>
+        )}
+      </section>
+
+      <section className="mt-3 bg-white px-4 py-4">
+        <h3 className="mb-2 text-xs font-medium text-gray-400">日程（自动生成，仅展示）</h3>
+        {schedule.length === 0 ? (
+          <p className="text-sm text-gray-400">暂无日程安排</p>
+        ) : (
+          <div className="space-y-1.5">
+            {WEEKDAYS.map((label, day) => {
+              const blocks = [...schedule].filter((b) => b.dayOfWeek === day).sort((a, b) => a.startHour - b.startHour)
+              if (blocks.length === 0) return null
+              return (
+                <p key={day} className="text-sm leading-relaxed text-gray-600">
+                  <span className="font-medium text-gray-800">{label} </span>
+                  {blocks
+                    .map(
+                      (b) =>
+                        `${b.startHour}-${b.endHour}点 ${b.activity}(${b.location})${
+                          b.phoneAccess === 'unavailable' ? ' 📴' : ''
+                        }`,
+                    )
+                    .join('、')}
+                </p>
+              )
+            })}
+          </div>
+        )}
+        {activeOverrides.length > 0 && (
+          <div className="mt-3 border-t border-gray-100 pt-3">
+            <h4 className="mb-1 text-xs font-medium text-gray-400">近期例外安排</h4>
+            {activeOverrides.map((o) => (
+              <p key={o.id} className="text-sm text-gray-600">
+                [{o.date}] {o.summary}
+              </p>
+            ))}
+          </div>
         )}
       </section>
 

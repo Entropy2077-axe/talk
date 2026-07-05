@@ -90,6 +90,19 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
             </div>
           )}
 
+          {message.type === 'scheduleChange' && message.scheduleChange && (
+            <div className="w-56 rounded-xl border border-gray-200 bg-white p-3">
+              <div className="mb-1.5 flex items-center gap-1.5">
+                <span className="text-xs text-gray-400">📅 日程变更</span>
+                <span className="ml-auto text-xs text-gray-400">{message.scheduleChange.date}</span>
+              </div>
+              <p className="mb-1 text-[14px] font-medium text-gray-900">{message.scheduleChange.summary}</p>
+              <p className="text-[12.5px] leading-relaxed text-gray-500">
+                {message.scheduleChange.startHour}:00-{message.scheduleChange.endHour}:00 · {message.scheduleChange.location}
+              </p>
+            </div>
+          )}
+
           <span className="mt-0.5 px-1 text-[10px] text-gray-300">{formatBubbleTime(message.createdAt)}</span>
         </div>
       </div>

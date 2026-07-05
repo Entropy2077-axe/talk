@@ -4,11 +4,14 @@ import type {
   Contact,
   ContactRelationLink,
   Conversation,
+  Group,
   InventoryItem,
+  KnowledgeEntry,
   Message,
   Moment,
   MomentComment,
   MomentLike,
+  SavedWorldview,
   Sticker,
   Todo,
 } from '../types'
@@ -25,6 +28,9 @@ export class TalkDB extends Dexie {
   momentComments!: Table<MomentComment, string>
   momentLikes!: Table<MomentLike, string>
   contactRelations!: Table<ContactRelationLink, string>
+  groups!: Table<Group, string>
+  knowledgeEntries!: Table<KnowledgeEntry, string>
+  savedWorldviews!: Table<SavedWorldview, string>
 
   constructor() {
     super('talk-db')
@@ -53,6 +59,23 @@ export class TalkDB extends Dexie {
       momentComments: 'id, momentId, authorContactId',
       momentLikes: 'id, momentId, likerId',
       contactRelations: 'id, fromContactId, toContactId',
+    })
+    // Group chats: conversations gain an optional groupId (mutually
+    // exclusive with contactId) alongside a new groups table.
+    this.version(6).stores({
+      groups: 'id, createdAt',
+      conversations: 'id, contactId, groupId, updatedAt, pinned',
+    })
+    // Knowledge base (see lib/knowledgeBase.ts). Schedule itself is NOT a
+    // new table — a contact's weekly pattern/overrides are plain fields on
+    // Contact (same shape as pendingEvents/upcomingPlans), unrelated to the
+    // old version(2)/(3) locations+tasks map/calendar system that was
+    // deleted; don't confuse the two.
+    this.version(7).stores({
+      knowledgeEntries: 'id, fetchedAt',
+    })
+    this.version(8).stores({
+      savedWorldviews: 'id, createdAt',
     })
   }
 }

@@ -13,6 +13,8 @@ import { AVATAR_EMOJIS } from '../lib/avatarEmojis'
 import { pickRandomTrait } from '../lib/randomTraits'
 import { initialRelationshipFor } from '../lib/relationship'
 import { displayName } from '../lib/contact'
+import { pickAvatarCategory } from '../lib/avatarCategory'
+import { randomAnimeAvatar, searchPexelsPhoto } from '../lib/photoSearch'
 import { CONTACT_RELATION_LABELS, type ContactRelationLabel } from '../types'
 import {
   AGE_RANGE_OPTIONS,
@@ -22,6 +24,18 @@ import {
   buildPersonaGenerationPrompt,
   parsePersonaGeneration,
 } from '../lib/prompt'
+
+/** Contact creation has a few real async phases (persona LLM call, then optional photo fetch, then db writes) — reflect actual state transitions rather than a fake time-based animation. */
+const PROGRESS_LABELS: Record<'persona' | 'avatar' | 'saving', string> = {
+  persona: '正在为TA设计人设…',
+  avatar: '正在匹配头像…',
+  saving: '创建中…',
+}
+const PROGRESS_PERCENT: Record<'persona' | 'avatar' | 'saving', number> = {
+  persona: 30,
+  avatar: 70,
+  saving: 95,
+}
 
 interface RelationRow {
   key: string
@@ -41,8 +55,10 @@ export function ContactAddPage() {
   const [relationship, setRelationship] = useState('')
   const [extra, setExtra] = useState('')
   const [avatar, setAvatar] = useState(AVATAR_EMOJIS[Math.floor(Math.random() * AVATAR_EMOJIS.length)])
+  const [avatarManuallySet, setAvatarManuallySet] = useState(false)
   const [pickingAvatar, setPickingAvatar] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [progressStep, setProgressStep] = useState<'persona' | 'avatar' | 'saving' | null>(null)
   const [error, setError] = useState('')
   const [relationRows, setRelationRows] = useState<RelationRow[]>([])
 
@@ -86,7 +102,9 @@ export function ContactAddPage() {
     }
     setGenerating(true)
     setError('')
+    setProgressStep('persona')
     try {
+      const avatarCategory = pickAvatarCategory(tags)
       const raw = await chatCompletion({
         apiKey: settings.apiKey,
         baseUrl: settings.baseUrl,
@@ -94,13 +112,16 @@ export function ContactAddPage() {
         messages: [
           {
             role: 'system',
-            content: buildPersonaGenerationPrompt({
-              personalityTags: tags,
-              ageRange,
-              gender,
-              relationship,
-              extra,
-            }),
+            content: buildPersonaGenerationPrompt(
+              {
+                personalityTags: tags,
+                ageRange,
+                gender,
+                relationship,
+                extra,
+              },
+              avatarCategory,
+            ),
           },
           { role: 'user', content: '请生成' },
         ],
@@ -109,13 +130,40 @@ export function ContactAddPage() {
       const parsed = parsePersonaGeneration(raw)
       if (!parsed) throw new Error('生成结果解析失败 请重试一次')
 
+      // Auto-fetch a real photo avatar matching the code-chosen category —
+      // only if the user hasn't already manually picked their own emoji/upload.
+      // Best-effort: any failure (no Pexels key, network error, no results)
+      // just falls back to the random emoji already sitting in `avatar`.
+      let finalAvatar = avatar
+      let avatarPhotographer: string | undefined
+      let avatarPhotographerUrl: string | undefined
+      if (!avatarManuallySet) {
+        setProgressStep('avatar')
+        try {
+          const photo =
+            avatarCategory === 'anime'
+              ? await randomAnimeAvatar()
+              : await searchPexelsPhoto(settings.pexelsApiKey, parsed.avatarKeyword || avatarCategory, 'square')
+          if (photo) {
+            finalAvatar = photo.url
+            avatarPhotographer = photo.photographer
+            avatarPhotographerUrl = photo.photographerUrl
+          }
+        } catch {
+          // photo avatar is a nice-to-have; contact creation must still succeed
+        }
+      }
+
+      setProgressStep('saving')
       const id = uuid()
       const now = Date.now()
       await db.contacts.add({
         id,
         name: parsed.name,
-        avatar,
+        avatar: finalAvatar,
         avatarColor: randomAvatarColor(),
+        avatarPhotographer,
+        avatarPhotographerUrl,
         systemPrompt: parsed.persona,
         createdAt: now,
         memoryFacts: '',
@@ -123,6 +171,8 @@ export function ContactAddPage() {
         memoryUpdatedAt: 0,
         memoryMessageCursor: 0,
         relationship: initialRelationshipFor(relationship),
+        schedule: parsed.schedule,
+        scheduleOverrides: [],
       })
       await db.conversations.add({
         id: uuid(),
@@ -145,6 +195,7 @@ export function ContactAddPage() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setGenerating(false)
+      setProgressStep(null)
     }
   }
 
@@ -160,11 +211,14 @@ export function ContactAddPage() {
         <label className="mb-1 block text-xs text-gray-400">头像</label>
         <button
           onClick={() => setPickingAvatar(true)}
-          className="mb-4 flex items-center gap-3 rounded-lg border border-gray-200 px-3 py-2"
+          className="mb-1 flex items-center gap-3 rounded-lg border border-gray-200 px-3 py-2"
         >
           <Avatar avatar={avatar} size={44} />
           <span className="text-sm text-gray-500">点击选择</span>
         </button>
+        <p className="mb-4 text-xs text-gray-400">
+          不手动选的话 系统会按性格自动配一张动漫头像/风景照/网图人像/宠物照
+        </p>
 
         <label className="mb-2 block text-xs font-medium text-gray-400">性格倾向（可多选，也可以自己填）</label>
         <div className="mb-2 flex flex-wrap gap-2">
@@ -321,6 +375,17 @@ export function ContactAddPage() {
       </div>
 
       <div className="sticky bottom-0 border-t border-gray-100 bg-white p-3">
+        {generating && progressStep && (
+          <div className="mb-2">
+            <p className="mb-1 text-center text-xs text-gray-400">{PROGRESS_LABELS[progressStep]}</p>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+              <div
+                className="h-full rounded-full bg-gray-900 transition-all duration-500"
+                style={{ width: `${PROGRESS_PERCENT[progressStep]}%` }}
+              />
+            </div>
+          </div>
+        )}
         <button
           onClick={handleGenerate}
           disabled={generating}
@@ -330,7 +395,15 @@ export function ContactAddPage() {
         </button>
       </div>
 
-      {pickingAvatar && <AvatarPicker onSelect={setAvatar} onClose={() => setPickingAvatar(false)} />}
+      {pickingAvatar && (
+        <AvatarPicker
+          onSelect={(a) => {
+            setAvatar(a)
+            setAvatarManuallySet(true)
+          }}
+          onClose={() => setPickingAvatar(false)}
+        />
+      )}
     </div>
   )
 }

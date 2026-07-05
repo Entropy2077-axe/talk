@@ -1,4 +1,9 @@
+import { useMemo } from 'react'
 import { NavLink } from 'react-router-dom'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { db } from '../db/db'
+import { UnreadBadge } from './UnreadBadge'
+import { unreadCountFor } from '../lib/unread'
 
 const TABS = [
   { to: '/', label: '消息', icon: MessageIcon },
@@ -9,6 +14,22 @@ const TABS = [
 ]
 
 export function BottomNav() {
+  const conversations = useLiveQuery(() => db.conversations.toArray(), []) ?? []
+  const messages = useLiveQuery(() => db.messages.toArray(), []) ?? []
+
+  const totalUnread = useMemo(() => {
+    const messagesByConv = new Map<string, typeof messages>()
+    for (const m of messages) {
+      const arr = messagesByConv.get(m.conversationId) ?? []
+      arr.push(m)
+      messagesByConv.set(m.conversationId, arr)
+    }
+    return conversations.reduce(
+      (sum, c) => sum + unreadCountFor(c.lastReadAt, messagesByConv.get(c.id) ?? []),
+      0,
+    )
+  }, [conversations, messages])
+
   return (
     <nav className="flex shrink-0 border-t border-gray-100 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
       {TABS.map(({ to, label, icon: Icon }) => (
@@ -24,7 +45,10 @@ export function BottomNav() {
         >
           {({ isActive }) => (
             <>
-              <Icon active={isActive} />
+              <div className="relative">
+                <Icon active={isActive} />
+                {to === '/' && <UnreadBadge count={totalUnread} className="absolute -top-1 -right-2" />}
+              </div>
               <span>{label}</span>
             </>
           )}
