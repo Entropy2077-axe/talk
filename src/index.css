@@ -74,12 +74,26 @@ body {
   overscroll-behavior: none;
 }
 
-/* Center a phone-width shell on wide (PC) viewports; full-bleed on real mobile widths. */
+/*
+ * Center a phone-width shell on wide (PC) viewports; full-bleed on real
+ * mobile widths. This is `height`, not `min-height` — every route's own
+ * content is designed to scroll *inside* a bounded flex-1/overflow-y-auto
+ * region (TabLayout's Outlet wrapper for the 5 tab pages, or each
+ * standalone route's own inner scroll div), keeping TopBar/BottomNav fixed.
+ * `min-height` would let .app-shell itself grow to fit long content instead
+ * of capping at the viewport and forcing that overflow into the intended
+ * inner scroll region — confirmed via a real reproduction: with enough
+ * todos, .app-shell grew past the viewport and pushed BottomNav below the
+ * visible area, needing a page-level scroll to reach it (same shape of bug
+ * as the min-h-full clipping issue on standalone routes, just one level
+ * up the tree). No current route actually needs .app-shell to exceed
+ * viewport height, so there's no legitimate case this breaks.
+ */
 .app-shell {
   width: 100%;
   max-width: 480px;
   margin: 0 auto;
-  min-height: var(--app-height);
+  height: var(--app-height);
   background: #ffffff;
   display: flex;
   flex-direction: column;
@@ -89,7 +103,7 @@ body {
 
 @media (min-width: 481px) {
   .app-shell {
-    min-height: var(--app-height);
+    height: var(--app-height);
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 20px 60px rgba(0, 0, 0, 0.08);
   }
 }

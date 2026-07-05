@@ -32,7 +32,10 @@ export function TopBar({ title, showBack, showSearch, onSearchClick, right }: To
           </button>
         )}
       </div>
-      <h1 className="absolute left-1/2 -translate-x-1/2 text-[16px] font-medium text-gray-900">
+      <h1
+        className="absolute text-[16px] font-medium text-gray-900"
+        style={{ left: 'calc(50% - 6px)', transform: 'translateX(-50%)' }}
+      >
         {title}
       </h1>
       <div className="ml-auto flex min-w-14 items-center justify-end gap-1">

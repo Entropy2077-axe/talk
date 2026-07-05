@@ -18,7 +18,14 @@ export async function searchPexelsPhoto(
   const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=1&orientation=${orientation}`
   const res = await fetch(url, { headers: { Authorization: apiKey } })
   if (!res.ok) {
-    console.warn(`[photo] Pexels搜索失败 query="${query}" HTTP ${res.status}`)
+    const body = await res.text()
+    // Don't log the full key (even to the user's own console), but its
+    // length + last 4 chars is enough to tell "empty"/"truncated"/"totally
+    // different key" apart without exposing the whole thing.
+    const keyHint = apiKey ? `len=${apiKey.length} 末4位=${apiKey.slice(-4)}` : '(空)'
+    console.warn(
+      `[photo] Pexels搜索失败 query="${query}" HTTP ${res.status} key:${keyHint} body:${body.slice(0, 200)}`,
+    )
     throw new Error(`Pexels搜索失败 HTTP ${res.status}`)
   }
   const json = await res.json()
