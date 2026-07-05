@@ -62,7 +62,20 @@ export function SettingsPage() {
     try {
       const list = await listModels(apiKeyDraft.trim(), baseUrlDraft.trim())
       setModels(list)
-      if (list.length > 0 && !list.includes(modelDraft)) setModelDraft(list[0])
+      if (list.length > 0) {
+        // Both drafts need this, not just the main one — otherwise a stale
+        // model id (not in the freshly-pulled list) leaves the <select>
+        // showing the browser's "no match, default to first option" display
+        // while the actual stored setting silently stays on the old value.
+        if (!list.includes(modelDraft)) {
+          setModelDraft(list[0])
+          setSettings({ model: list[0] })
+        }
+        if (!list.includes(shopModelDraft)) {
+          setShopModelDraft(list[0])
+          setSettings({ shopModel: list[0] })
+        }
+      }
     } catch (err) {
       setPullError(err instanceof Error ? err.message : String(err))
     } finally {
