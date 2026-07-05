@@ -14,10 +14,12 @@ import { removeContactFromAllGroups } from '../lib/groupChat'
 import { pruneExpiredOverrides } from '../lib/schedule'
 import { WEEKDAYS } from '../lib/time'
 import { RELATIONSHIP_OPTIONS } from '../lib/prompt'
+import { useSettingsStore } from '../store/useSettingsStore'
 
 export function ContactCardPage() {
   const { contactId } = useParams()
   const navigate = useNavigate()
+  const pexelsApiKey = useSettingsStore((s) => s.pexelsApiKey)
   const [menuOpen, setMenuOpen] = useState(false)
   const [editingRemark, setEditingRemark] = useState(false)
   const [remarkDraft, setRemarkDraft] = useState('')
@@ -233,8 +235,15 @@ export function ContactCardPage() {
 
       {pickingAvatar && (
         <AvatarPicker
-          onSelect={(avatar) => db.contacts.update(contactId!, { avatar })}
+          onSelect={(avatar, photographer) =>
+            db.contacts.update(contactId!, {
+              avatar,
+              avatarPhotographer: photographer?.name,
+              avatarPhotographerUrl: photographer?.url,
+            })
+          }
           onClose={() => setPickingAvatar(false)}
+          pexelsApiKey={pexelsApiKey}
         />
       )}
 
