@@ -140,7 +140,7 @@ export function ChatPage() {
   if (conversation === undefined) return null
   if (conversation === null) {
     return (
-      <div className="flex h-dvh flex-col overflow-hidden bg-[#ededed]">
+      <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#ededed]">
         <TopBar title="对话" showBack />
         <p className="px-4 py-10 text-center text-sm text-gray-400">会话不存在</p>
       </div>
@@ -150,7 +150,7 @@ export function ChatPage() {
     if (group === undefined) return null
     if (group === null) {
       return (
-        <div className="flex h-dvh flex-col overflow-hidden bg-[#ededed]">
+        <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#ededed]">
           <TopBar title="群聊" showBack />
           <p className="px-4 py-10 text-center text-sm text-gray-400">该群聊已被解散</p>
         </div>
@@ -160,7 +160,7 @@ export function ChatPage() {
     if (contact === undefined) return null
     if (contact === null) {
       return (
-        <div className="flex h-dvh flex-col overflow-hidden bg-[#ededed]">
+        <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#ededed]">
           <TopBar title="对话" showBack />
           <p className="px-4 py-10 text-center text-sm text-gray-400">会话不存在</p>
         </div>
@@ -172,7 +172,7 @@ export function ChatPage() {
   const headerInfoPath = isGroupConv ? `/group/${group!.id}` : `/contact/${contact!.id}`
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-[#ededed]">
+    <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#ededed]">
       <TopBar
         title={headerTitle}
         showBack

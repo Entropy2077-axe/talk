@@ -2,6 +2,13 @@
 
 :root {
   color-scheme: light;
+  /* Real viewport height in px, kept in sync by main.tsx via window.innerHeight.
+     Some Android WebViews (Capacitor's included) don't compute 100dvh/100vh
+     reliably against the actual visible area once the system nav bar is
+     factored in, so anything that needs "the true screen height" should use
+     this instead of the dvh unit directly. 100dvh here is just the pre-JS
+     fallback for the first paint. */
+  --app-height: 100dvh;
 }
 
 * {
@@ -27,7 +34,7 @@ body {
   width: 100%;
   max-width: 480px;
   margin: 0 auto;
-  min-height: 100dvh;
+  min-height: var(--app-height);
   background: #ffffff;
   display: flex;
   flex-direction: column;
@@ -37,7 +44,7 @@ body {
 
 @media (min-width: 481px) {
   .app-shell {
-    min-height: 100dvh;
+    min-height: var(--app-height);
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 20px 60px rgba(0, 0, 0, 0.08);
   }
 }

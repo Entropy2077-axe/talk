@@ -200,7 +200,7 @@ export function ContactAddPage() {
   }
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
       <TopBar title="添加联系人" showBack />
 
       <div className="mt-3 flex-1 overflow-y-auto bg-white px-4 py-4">

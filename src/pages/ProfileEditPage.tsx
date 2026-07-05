@@ -30,7 +30,7 @@ export function ProfileEditPage() {
   }
 
   return (
-    <div className="relative flex h-dvh flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
       <TopBar title="编辑资料" showBack />
 
       <div className="flex-1 overflow-y-auto">
