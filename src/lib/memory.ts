@@ -1,7 +1,7 @@
 import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { chatCompletion } from './deepseek'
-import { clampWarmthDelta, applyWarmthDelta, warmthStage, warmthStageChanged, shouldUpdateBase } from './relationship'
+import { clampWarmthDelta, applyWarmthDelta, warmthStage, shouldUpdateBase } from './relationship'
 import { displayName } from './contact'
 import { describeCurrentTime, toDateKey } from './time'
 import type { AppSettings, Contact, Message, PlanItem } from '../types'
@@ -62,7 +62,7 @@ ${opts.existingPlansText || '（暂无）'}
 - facts和style有值得更新的才改 没有就原样返回 不要清空
 ${plansPromptFragment()}
 - warmthDelta: 根据这批聊天记录的语气和互动质量 好感度应该变化多少(-5到+5整数) 聊得好→正数 聊崩了→负数 平平无奇→0 不要因为好感度已经很高/很低就不敢给分
-- relationshipAssessment: 正常空字符串。只有当好感度跨越了关键阶段边界(warmth从${opts.warmth}变成了另一个阶段区间)时才写一句话描述当前关系实际状态(比如"虽然是恋人但最近闹得很僵"或"关系升温很快 已经比普通朋友亲密多了") 不超过30字。没跨阶段就留空`
+- relationshipAssessment: 每次都要写 描述当前关系实际状态 一句话 不超过30字 比如"虽然是恋人但最近闹得很僵"或"关系升温很快 比普通朋友亲密多了"或"维持现状 关系稳定"`
 }
 
 function formatMessagesForMemory(messages: Message[]): string {
@@ -178,15 +178,11 @@ export async function maybeUpdateMemory(
     const now = Date.now()
     const oldWarmth = contact.warmth ?? 0
     const newWarmth = applyWarmthDelta(oldWarmth, updated.warmthDelta)
-    const crossedStage = warmthStageChanged(oldWarmth, newWarmth)
 
-    // Only write a relationship assessment when the model gave one AND warmth
-    // actually crossed a stage boundary (both conditions, not either).
-    const dynamic = crossedStage ? updated.relationshipAssessment || '' : contact.relationshipDynamic
-
-    // If the assessment contains explicit status-change language, update base.
+    // Always apply the assessment — base changes can happen without a stage crossing.
+    const dynamic = updated.relationshipAssessment || contact.relationshipDynamic
     let base = contact.relationshipBase
-    const newBase = crossedStage ? shouldUpdateBase(dynamic, newWarmth) : null
+    const newBase = shouldUpdateBase(dynamic, newWarmth)
     if (newBase) base = newBase
 
     await db.contacts.update(contact.id, {

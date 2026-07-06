@@ -127,11 +127,6 @@ export function warmthPrompt(warmth: number): string {
   return warmthStage(warmth).prompt
 }
 
-/** Whether warmth has crossed a stage boundary. */
-export function warmthStageChanged(before: number, after: number): boolean {
-  return warmthStage(before).label !== warmthStage(after).label
-}
-
 // ---- relationship base / dynamic ----
 
 /**
