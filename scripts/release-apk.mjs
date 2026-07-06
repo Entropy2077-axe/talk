@@ -1,4 +1,5 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -201,6 +202,11 @@ function main() {
       }
 
       log(`APK ready: ${apkPath}`)
+      const apkStat = statSync(apkPath)
+      const apkSizeMB = (apkStat.size / (1024 * 1024)).toFixed(2)
+      const apkSha256 = createHash('sha256').update(readFileSync(apkPath)).digest('hex')
+      log(`  Size: ${apkSizeMB} MB`)
+      log(`  SHA256: ${apkSha256}`)
     } else {
       log('Skipped Gradle APK build because --skip-apk was provided.')
     }
