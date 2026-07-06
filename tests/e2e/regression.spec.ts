@@ -140,7 +140,54 @@ test('long todo list keeps bottom navigation pinned to the viewport bottom', asy
   expect(Math.abs(box!.y + box!.height - viewport!.height)).toBeLessThanOrEqual(1)
 })
 
-test('sky-eye redacts configured API keys from settings dump', async ({ page }) => {
+
+test('settings page scrolls to bottom revealing backup section and danger zone', async ({ page }) => {
+  await page.goto('/#/settings')
+  await clearDatabase(page)
+
+  const scrollContainer = page.locator('.overflow-y-auto')
+  await scrollContainer.last().evaluate((el) => {
+    el.scrollTop = el.scrollHeight
+  })
+
+  await expect(page.getByText('数据备份与恢复')).toBeInViewport()
+  await expect(page.getByText('危险操作')).toBeInViewport()
+  await expect(page.getByRole('button', { name: '导出备份' })).toBeInViewport()
+  await expect(page.getByRole('button', { name: '清空所有联系人与聊天记录' })).toBeInViewport()
+})
+
+test('messages page empty state keeps bottom nav pinned to viewport bottom', async ({ page }) => {
+  await page.goto('/#/')
+  await clearDatabase(page)
+  await page.reload()
+
+  const nav = page.locator('nav')
+  await expect(nav).toBeVisible()
+  const box = await nav.boundingBox()
+  const viewport = page.viewportSize()
+  expect(box).toBeTruthy()
+  expect(viewport).toBeTruthy()
+  expect(Math.abs(box!.y + box!.height - viewport!.height)).toBeLessThanOrEqual(1)
+})
+
+test('settings page backup json does not contain setSettings function field', async ({ page }) => {
+  await page.goto('/#/settings')
+  await seedBackupFixture(page)
+
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: '导出备份' }).click()
+  const download = await downloadPromise
+  const path = await download.path()
+  expect(path).toBeTruthy()
+
+  const backupText = await import('node:fs/promises').then((fs) => fs.readFile(path!, 'utf8'))
+  expect(backupText).not.toContain('setSettings')
+
+  const backup = JSON.parse(backupText)
+  expect(backup.format).toBe('talk-backup')
+})
+
+test('sky-eye settings dump shows all three api keys as redacted not raw values', async ({ page }) => {
   await page.goto('/#/sky-eye')
   await clearDatabase(page)
   await page.evaluate(async () => {
@@ -154,11 +201,16 @@ test('sky-eye redacts configured API keys from settings dump', async ({ page }) 
   await page.reload()
 
   const body = page.locator('body')
+  // Raw values must never appear
   await expect(body).not.toContainText('sk-visible-bug')
   await expect(body).not.toContainText('tvly-visible-bug')
   await expect(body).not.toContainText('pexels-visible-bug')
+  // Key names should be present
   await expect(body).toContainText('apiKey')
+  await expect(body).toContainText('tavilyApiKey')
   await expect(body).toContainText('pexelsApiKey')
+  // Redacted placeholder must appear for configured keys
+  await expect(body).toContainText('(已配置)')
 })
 
 test('release assets needed for icon and apk publishing are present', async () => {
