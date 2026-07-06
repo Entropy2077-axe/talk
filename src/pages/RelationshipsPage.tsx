@@ -15,10 +15,12 @@ const SORT_OPTIONS: { key: keyof RelationshipDimensions; label: string }[] = [
   { key: 'friction', label: '摩擦感' },
 ]
 
+const EMPTY_ARRAY: never[] = []
+
 export function RelationshipsPage() {
   const navigate = useNavigate()
-  const contactsRaw = useLiveQuery(() => db.contacts.toArray(), []) ?? []
-  const relations = useLiveQuery(() => db.contactRelations.toArray(), []) ?? []
+  const contactsRaw = useLiveQuery(() => db.contacts.toArray(), []) ?? EMPTY_ARRAY
+  const relations = useLiveQuery(() => db.contactRelations.toArray(), []) ?? EMPTY_ARRAY
   const [sortKey, setSortKey] = useState<keyof RelationshipDimensions>('affection')
   const [showLegend, setShowLegend] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)

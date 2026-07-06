@@ -7,10 +7,12 @@ import { Avatar } from '../components/Avatar'
 import { SearchOverlay } from '../components/SearchOverlay'
 import { displayName } from '../lib/contact'
 
+const EMPTY_ARRAY: never[] = []
+
 export function ContactsPage() {
   const [searching, setSearching] = useState(false)
   const navigate = useNavigate()
-  const contactsRaw = useLiveQuery(() => db.contacts.toArray(), []) ?? []
+  const contactsRaw = useLiveQuery(() => db.contacts.toArray(), []) ?? EMPTY_ARRAY
   const contacts = useMemo(
     () => [...contactsRaw].sort((a, b) => displayName(a).localeCompare(displayName(b), 'zh')),
     [contactsRaw],

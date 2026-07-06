@@ -13,9 +13,11 @@ const TABS = [
   { to: '/me', label: '我', icon: MeIcon },
 ]
 
+const EMPTY_ARRAY: never[] = []
+
 export function BottomNav() {
-  const conversations = useLiveQuery(() => db.conversations.toArray(), []) ?? []
-  const messages = useLiveQuery(() => db.messages.toArray(), []) ?? []
+  const conversations = useLiveQuery(() => db.conversations.toArray(), []) ?? EMPTY_ARRAY
+  const messages = useLiveQuery(() => db.messages.toArray(), []) ?? EMPTY_ARRAY
 
   const totalUnread = useMemo(() => {
     const messagesByConv = new Map<string, typeof messages>()

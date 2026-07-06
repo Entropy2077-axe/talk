@@ -9,11 +9,13 @@ import { formatCurrency } from '../lib/wallet'
 import { triggerAiTurn } from '../lib/chatEngine'
 import type { Todo } from '../types'
 
+const EMPTY_ARRAY: never[] = []
+
 export function TodoPage() {
-  const todos = useLiveQuery(() => db.todos.orderBy('createdAt').reverse().toArray(), []) ?? []
-  const commissions = useLiveQuery(() => db.commissions.toArray(), []) ?? []
-  const contacts = useLiveQuery(() => db.contacts.toArray(), []) ?? []
-  const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? []
+  const todos = useLiveQuery(() => db.todos.orderBy('createdAt').reverse().toArray(), []) ?? EMPTY_ARRAY
+  const commissions = useLiveQuery(() => db.commissions.toArray(), []) ?? EMPTY_ARRAY
+  const contacts = useLiveQuery(() => db.contacts.toArray(), []) ?? EMPTY_ARRAY
+  const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? EMPTY_ARRAY
   const settings = useSettingsStore()
   const { walletBalance, setSettings } = settings
   const [newTitle, setNewTitle] = useState('')

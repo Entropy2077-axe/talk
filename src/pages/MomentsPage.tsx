@@ -11,13 +11,15 @@ import { resizeImageDataUrl } from '../lib/image'
 import { formatListTime } from '../lib/time'
 import type { Contact, MomentComment, MomentLike } from '../types'
 
+const EMPTY_ARRAY: never[] = []
+
 export function MomentsPage() {
   const settings = useSettingsStore()
-  const moments = useLiveQuery(() => db.moments.orderBy('createdAt').reverse().toArray(), []) ?? []
-  const contacts = useLiveQuery(() => db.contacts.toArray(), []) ?? []
-  const likes = useLiveQuery(() => db.momentLikes.toArray(), []) ?? []
-  const comments = useLiveQuery(() => db.momentComments.toArray(), []) ?? []
-  const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? []
+  const moments = useLiveQuery(() => db.moments.orderBy('createdAt').reverse().toArray(), []) ?? EMPTY_ARRAY
+  const contacts = useLiveQuery(() => db.contacts.toArray(), []) ?? EMPTY_ARRAY
+  const likes = useLiveQuery(() => db.momentLikes.toArray(), []) ?? EMPTY_ARRAY
+  const comments = useLiveQuery(() => db.momentComments.toArray(), []) ?? EMPTY_ARRAY
+  const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? EMPTY_ARRAY
   const [refreshing, setRefreshing] = useState(false)
   const [message, setMessage] = useState('')
   const [composerOpen, setComposerOpen] = useState(false)

@@ -11,13 +11,15 @@ interface SearchOverlayProps {
   onClose: () => void
 }
 
+const EMPTY_ARRAY: never[] = []
+
 export function SearchOverlay({ onClose }: SearchOverlayProps) {
   const [query, setQuery] = useState('')
   const navigate = useNavigate()
 
-  const contacts = useLiveQuery(() => db.contacts.toArray(), []) ?? []
-  const conversations = useLiveQuery(() => db.conversations.toArray(), []) ?? []
-  const messages = useLiveQuery(() => db.messages.toArray(), []) ?? []
+  const contacts = useLiveQuery(() => db.contacts.toArray(), []) ?? EMPTY_ARRAY
+  const conversations = useLiveQuery(() => db.conversations.toArray(), []) ?? EMPTY_ARRAY
+  const messages = useLiveQuery(() => db.messages.toArray(), []) ?? EMPTY_ARRAY
 
   const q = query.trim()
 

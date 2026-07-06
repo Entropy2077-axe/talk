@@ -14,16 +14,18 @@ import { previewForMessage } from '../lib/messagePreview'
 import { unreadCountFor } from '../lib/unread'
 import type { Message } from '../types'
 
+const EMPTY_ARRAY: never[] = []
+
 export function MessagesPage() {
   const [searching, setSearching] = useState(false)
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const [showAddMenu, setShowAddMenu] = useState(false)
   const navigate = useNavigate()
 
-  const conversations = useLiveQuery(() => db.conversations.toArray(), []) ?? []
-  const contacts = useLiveQuery(() => db.contacts.toArray(), []) ?? []
-  const groups = useLiveQuery(() => db.groups.toArray(), []) ?? []
-  const messages = useLiveQuery(() => db.messages.toArray(), []) ?? []
+  const conversations = useLiveQuery(() => db.conversations.toArray(), []) ?? EMPTY_ARRAY
+  const contacts = useLiveQuery(() => db.contacts.toArray(), []) ?? EMPTY_ARRAY
+  const groups = useLiveQuery(() => db.groups.toArray(), []) ?? EMPTY_ARRAY
+  const messages = useLiveQuery(() => db.messages.toArray(), []) ?? EMPTY_ARRAY
 
   const rows = useMemo(() => {
     const contactById = new Map(contacts.map((c) => [c.id, c]))
