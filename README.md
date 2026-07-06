@@ -59,4 +59,21 @@ cd android
 
 - `npm run dev` — 启动开发服务器
 - `npm run build` — 类型检查 + 构建生产包
-- `npm run lint` — oxlint 代码检查
+- `npm run test:e2e` — Playwright 回归测试（需要先启动 dev server）
+
+## 发布 APK
+
+**必须用 `npm run release:apk`**，不要手动 `npm run build` + `cap sync`。
+
+脚本会自动：
+1. 把 `.env` 里的真实 key 替换为空值再构建（防止 key 被打进 APK）
+2. 构建完成后解压 APK 扫描，确认没有泄漏真实 key
+3. 恢复原始 `.env`
+
+发布出去的 APK 不含内置 key，用户首次打开后在"我 → 设置"里填写自己的 key 即可正常使用。
+
+## 数据备份
+
+设置页提供**导出备份**和**导入恢复**功能，覆盖联系人、聊天记录、朋友圈、表情包、仓库、知识库和当前设置。
+
+⚠️ **备份文件可能包含你填写的 API Key，请不要发给别人。**
