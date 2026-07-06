@@ -98,8 +98,8 @@ export function warmthPrompt(warmth: number): string {
 
 // ---- breakup detection ----
 
-const BREAKUP_PATTERN = /已经分手|已经解除|已经不再是|已经离婚|已经绝交|彻底闹掰|确认分开|分手了|已经分了/
-const UPGRADE_PATTERN = /已经在一起|确认恋爱|确认成为恋人|确认交往|已经是恋人/
+const BREAKUP_PATTERN = /已经分手|已经解除|已经不再是|已经离婚|已经绝交|彻底闹掰|确认分开|分手了|已经分了|关系破裂|闹翻了|掰了|结束了|到此为止|不想再继续|彻底完了|没戏了|拉黑了|删好友了|断绝|一刀两断|恩断义绝|决裂|一拍两散|形同陌路/
+const UPGRADE_PATTERN = /已经在一起|确认恋爱|确认成为恋人|确认交往|已经是恋人|在一起了|确定了关系|从暧昧升级|正式交往|官宣|表白.*接受了|表白.*答应了/
 
 /** True if the assessment text describes a recent breakup/separation. */
 export function containsBreakupLanguage(dynamic: string): boolean {
