@@ -59,7 +59,7 @@ cd android
 
 - `npm run dev` — 启动开发服务器
 - `npm run build` — 类型检查 + 构建生产包
-- `npm run test:e2e` — Playwright 回归测试（需要先启动 dev server）
+- `npm run test:e2e` — Playwright 回归测试（会自动启动或复用 dev server）
 
 ## 发布 APK
 
