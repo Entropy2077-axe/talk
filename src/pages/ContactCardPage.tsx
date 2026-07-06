@@ -14,7 +14,7 @@ import { removeContactFromAllGroups } from '../lib/groupChat'
 import { pruneExpiredOverrides, describeCurrentSchedule, describeUpcomingScheduleText } from '../lib/schedule'
 import { WEEKDAYS, describeCurrentTime } from '../lib/time'
 import { RELATIONSHIP_OPTIONS, AVAILABLE_LINK_APPS, buildSystemPromptSections } from '../lib/prompt'
-import { warmthLabel, warmthPrompt } from '../lib/relationship'
+import { warmthLabel } from '../lib/relationship'
 import { buildUserProfileText } from '../lib/chatEngine'
 import { knowledgeDigestText } from '../lib/knowledgeBase'
 import { useSettingsStore } from '../store/useSettingsStore'
@@ -93,7 +93,6 @@ export function ContactCardPage() {
         relationshipBase: contact.relationshipBase || '朋友',
         relationshipDynamic: contact.relationshipDynamic || '',
         warmth: contact.warmth ?? 0,
-        warmthPrompt: warmthPrompt(contact.warmth ?? 0),
         memoryFacts: contact.memoryFacts,
         memoryStyle: contact.memoryStyle,
         stickerNames: stickers.map((s) => s.name),

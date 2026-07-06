@@ -16,7 +16,8 @@ export interface Contact {
   // ---- relationship (single-dimension warmth, -100 hostile ~ +100 bonded) ----
   warmth: number
   relationshipBase: string // label the user picked at creation: 恋人/朋友/家人/... — only changes by explicit user action or explicit model assessment (e.g. "已经分手了")
-  relationshipDynamic: string // short natural-language summary of what the relationship currently feels like, updated by the utility model when warmth crosses a stage boundary; empty until the first assessment
+  relationshipDynamic: string // short natural-language summary of what the relationship currently feels like, updated by the utility model on every memory update
+  personalityTrait?: string // reserved for future character archetypes: 'yandere'(病娇), 'airhead'(天然呆), etc. Affects warmth change rate via traitWarmthModifier. Empty = normal.
   // ---- moments (朋友圈) ----
   lastMomentAt?: number // when this contact last posted a moment, used for the "hasn't posted in 10 min" eligibility check
   pendingEvents?: string[] // short notes about notable things to naturally mention next chat (e.g. "对方刚给你的朋友圈点了赞"), cleared once used

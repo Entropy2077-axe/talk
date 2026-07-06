@@ -11,7 +11,6 @@ import { knowledgeDigestText, processKnowledgeQueries } from './knowledgeBase'
 import { displayName } from './contact'
 import { previewForMessage } from './messagePreview'
 import { useChatUiStore } from '../store/useChatUiStore'
-import { warmthPrompt } from './relationship'
 import type { AiBubble, AppSettings, Contact, Message, MessageType, ScheduleOverride, Sticker } from '../types'
 
 /**
@@ -221,7 +220,6 @@ async function runAiTurn(
       relationshipBase: contact.relationshipBase || '朋友',
       relationshipDynamic: contact.relationshipDynamic || '',
       warmth: contact.warmth ?? 0,
-      warmthPrompt: warmthPrompt(contact.warmth ?? 0),
       memoryFacts: contact.memoryFacts,
       memoryStyle: contact.memoryStyle,
       stickerNames: stickers.map((s) => s.name),

@@ -1,4 +1,5 @@
 import { validateScheduleBlocks } from './schedule'
+import { relationshipLine } from './relationship'
 import type { AvatarCategory } from './avatarCategory'
 import type { ScheduleBlock } from '../types'
 
@@ -61,7 +62,6 @@ export function buildSystemPromptSections(opts: {
   relationshipBase: string
   relationshipDynamic: string
   warmth: number
-  warmthPrompt: string
   memoryFacts: string
   memoryStyle: string
   stickerNames: string[]
@@ -87,8 +87,8 @@ export function buildSystemPromptSections(opts: {
 
   // --- Section 1: Who you are ---
   const worldviewPrefix = opts.worldviewText ? `这个世界: ${opts.worldviewText}。` : ''
-  const dynamicPart = opts.relationshipDynamic ? ` 当前实际状态: ${opts.relationshipDynamic}` : ''
-  const whoSection = `${opts.stylePrompt}\n\n【你是谁】\n${worldviewPrefix}${opts.persona || '（自由发挥 扮演一个普通朋友）'}\n\n【你和对方的关系】\n你们是${opts.relationshipBase}关系。${opts.warmthPrompt}。${dynamicPart}`.trim()
+  const relLine = relationshipLine(opts.relationshipBase, opts.relationshipDynamic, opts.warmth)
+  const whoSection = `${opts.stylePrompt}\n\n【你是谁】\n${worldviewPrefix}${opts.persona || '（自由发挥 扮演一个普通朋友）'}\n\n【你和对方的关系】\n${relLine}`.trim()
 
   // --- Section 2: Memory ---
   const factsFallback = `（还没有具体的共同经历 但你们已经是${opts.relationshipBase}关系 不是陌生人）`
