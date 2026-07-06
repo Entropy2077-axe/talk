@@ -12,7 +12,7 @@ const LEVEL_COLOR: Record<string, string> = {
   error: 'text-red-600',
 }
 
-const REDACTED_KEYS = ['apiKey', 'tavilyApiKey']
+const REDACTED_KEYS = ['apiKey', 'tavilyApiKey', 'pexelsApiKey']
 
 /** Real-device viewport/WebView numbers — added specifically to debug a device-specific "layout stretches, bottom nav vanishes" report (Honor/MagicOS, Android 14) that couldn't be reproduced via Playwright/emulator. Recomputes on resize/visualViewport-resize so it reflects whatever's happening live, not just the state at page-load. */
 function useLayoutDiagnostics() {

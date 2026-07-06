@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test:e2e": "node scripts/run-e2e.mjs",
     "preview": "vite preview",
     "icon:android": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-android-icon.ps1",
     "release:apk": "node scripts/release-apk.mjs"
