@@ -4,6 +4,7 @@ import { db } from '../db/db'
 import { Avatar } from './Avatar'
 import { formatBubbleTime } from '../lib/time'
 import { formatCurrency } from '../lib/wallet'
+import { useSettingsStore } from '../store/useSettingsStore'
 import type { Message } from '../types'
 
 interface MessageBubbleProps {
@@ -36,7 +37,10 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
 ) {
   const isUser = message.role === 'user'
   const [expanded, setExpanded] = useState(false)
-  const debugPayload = {
+  const aiTurnDebug = useLiveQuery(() => (message.debugAiTurnId ? db.aiTurns.get(message.debugAiTurnId) : undefined), [
+    message.debugAiTurnId,
+  ])
+  const debugPayload = aiTurnDebug ?? {
     message,
     parsedBubble: message.debugParsedBubble,
     rawAiResponse: message.debugRawAiResponse,
@@ -121,7 +125,7 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
                 {expanded ? '收起 JSON' : '展开 JSON'}
               </button>
               {expanded && (
-                <pre className="mt-1 max-h-48 w-64 overflow-auto rounded-lg bg-gray-50 p-2 font-mono text-[10px] leading-relaxed text-gray-600">
+                <pre className="mt-1 max-h-64 w-[min(20rem,calc(100vw-6rem))] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-2 font-mono text-[10px] leading-relaxed text-gray-600">
                   {JSON.stringify(debugPayload, null, 2)}
                 </pre>
               )}
@@ -141,13 +145,17 @@ function CommissionCard({
   onRespond?: (commissionId: string, accept: boolean) => void
 }) {
   const commission = useLiveQuery(() => db.commissions.get(commissionId), [commissionId])
+  const currencySettings = useSettingsStore((s) => ({
+    currencyIconMode: s.currencyIconMode,
+    customCurrencyEmoji: s.customCurrencyEmoji,
+  }))
   if (!commission) return null
 
   return (
     <div className="w-56 rounded-xl border border-gray-200 bg-white p-3">
       <div className="mb-1.5 flex items-center gap-1.5">
         <span className="text-xs text-gray-400">📋 委托</span>
-        <span className="ml-auto text-xs font-medium text-[#aa3bff]">{formatCurrency(commission.reward)}</span>
+        <span className="ml-auto text-xs font-medium text-[#aa3bff]">{formatCurrency(commission.reward, currencySettings)}</span>
       </div>
       <p className="mb-1 text-[14px] font-medium text-gray-900">{commission.title}</p>
       <p className="mb-2 text-[12.5px] leading-relaxed text-gray-500">{commission.description}</p>

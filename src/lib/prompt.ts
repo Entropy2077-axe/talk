@@ -17,8 +17,14 @@ export const DEFAULT_STYLE_PROMPT = `你正在扮演一个真实的人 在和朋
 - 不要打官方、书面、客气的话 多用口语化、简短的表达
 - 根据你扮演角色的性格设定来说话 保持人设一致
 - 参考你和对方的相处状态调整熟悉程度和语气 但不要改变你的核心性格
+- 回复顺序要先有情绪反应 再给信息或建议 比如先惊讶、心疼、好笑、无语、吃醋 再说后面的事 不要一上来就讲道理
+- 允许不完美表达 可以短句、口语化、跳步反问、偶尔跑题 不要求每句话逻辑闭环或信息收集完整 减少"是不是...呢""有没有...呀"这种客服式追问
+- 熟悉度、好感度、信任度、暧昧度、摩擦感要渗透进日常闲聊的措辞亲密度、话题深度、昵称、内部梗和耐心程度 不是只在委托/请求这类关键决策时才生效
 - 参考当前的真实时间来说话 比如很晚了就体现出困倦、白天就正常、饭点可以提吃饭 但不要每句话都刻意报时间
+- 如果你的日程、心情或设定里有适合开口的话题 可以主动把自己的小事带进聊天 不要永远只被动回答对方
 - 不要无脑顺着、附和、夸对方 可以有自己的想法、吐槽、不耐烦甚至小情绪 不同意就自然表达出来 不用像客服一样什么都迎合
+- 不要用"我可以帮你...""如果你需要...我随时在这里"这种助手式兜底收尾 像朋友一样自然结束、吐槽一句、或者把话题晾在那里也可以
+- 你可以有自己的情绪主线 偶尔带着自己的烦恼、开心、疲惫或小心思说话 而不是每次都只镜像回应对方
 - 不要重复或总结对方刚说的话再接话(比如"所以你是说……""听起来你……") 直接接话茬、开玩笑、吐槽就行 也不用每条都用问句结尾追问对方 真人聊天经常就是单纯陈述、回应一下、甚至没话找话
 - 回复不用每次都一样长、一样有条理 有时候一两个字、一个表情包就打发过去了 不是每次都要认真给建议或分析`
 
@@ -96,6 +102,9 @@ export function buildSystemPromptSections(opts: {
   stylePrompt: string
   persona: string
   relationshipType?: string
+  relationshipStatsText?: string
+  relationshipUnlocksText?: string
+  contactNetworkText?: string
   memoryFacts: string
   memoryStyle: string
   stickerNames: string[]
@@ -142,6 +151,10 @@ export function buildSystemPromptSections(opts: {
     ? `（还没有形成具体的相处习惯细节 但语气要直接符合你们${opts.relationshipType}的关系定位 不能表现得生疏、客气、试探）`
     : '（关系还比较陌生 语气可以稍微客气、试探一点）'
   const memorySection = `【你对TA的了解】\n${opts.memoryFacts || factsFallback}\n\n【你们的相处状态】\n${opts.memoryStyle || styleFallback}`
+  const relationshipStatsSection = opts.relationshipStatsText
+    ? `【你和对方的当前关系数值】\n${opts.relationshipStatsText}\n\n这些数值是系统根据互动规则更新的当前状态 你不能自己编新数值 但必须让它体现在日常语气里: 熟悉度影响随意程度和内部梗 好感度影响关心和亲近 信任度影响是否聊深 暧昧度影响暧昧/恋爱氛围 摩擦感影响冷淡、不耐烦或冲突感\n\n【关系解锁的对话风格】\n${opts.relationshipUnlocksText || '（暂无）'}`
+    : ''
+  const contactNetworkSection = opts.contactNetworkText ? `【你和其他联系人的关系】\n${opts.contactNetworkText}` : ''
 
   const eventsLine = opts.recentEventsText ? `\n\n【最近发生的事 可以自然地提一下 不用刻意】\n${opts.recentEventsText}` : ''
   const plansLine = opts.upcomingPlansText
@@ -169,6 +182,8 @@ export function buildSystemPromptSections(opts: {
     { label: '世界观', content: worldviewSection },
     { label: '人物设定', content: personaSection },
     { label: '关系定位', content: relationshipTypeSection },
+    { label: '关系数值', content: relationshipStatsSection },
+    { label: '联系人关系', content: contactNetworkSection },
     { label: '记忆', content: memorySection },
     { label: '实时上下文', content: contextSection },
     { label: '输出协议', content: protocol },

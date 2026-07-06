@@ -199,10 +199,20 @@ export interface Message {
   scheduleChange?: ScheduleChangePayload
   bubbleGroupId?: string // groups bubbles emitted from one AI response
   speakerContactId?: string // group chats only: which member persona spoke this assistant bubble
+  debugAiTurnId?: string // admin mode only: links this bubble to the full AI turn debug payload
   debugRawAiResponse?: string // admin mode only: raw JSON/text returned by the AI for the turn that produced this bubble
   debugParsedBubble?: AiBubble | GroupAiBubble // admin mode only: parsed bubble payload used to render this message
   createdAt: number
   pending?: boolean // true while an assistant bubble is still "typing" (not yet delivered)
+}
+
+export interface AiTurnDebug {
+  id: string
+  conversationId: string
+  raw: string
+  parsed: unknown
+  knowledgeQueries: string[]
+  createdAt: number
 }
 
 export interface Sticker {
@@ -225,6 +235,7 @@ export interface Commission {
   createdAt: number
   respondedAt?: number
   completedAt?: number
+  lastReminderAt?: number
 }
 
 export interface Todo {
@@ -282,6 +293,8 @@ export interface AppSettings {
   // ---- appearance ----
   themeMode?: 'light' | 'dark'
   chatBackground?: string // empty = default; otherwise a CSS color or data URL used behind chat messages
+  currencyIconMode?: 'coin' | 'emoji' | 'yen' | 'dollar'
+  customCurrencyEmoji?: string
 }
 
 /** A dated fact about current internet culture (memes/anime/games), gathered by the knowledge-base refresh job — see lib/knowledgeBase.ts. */

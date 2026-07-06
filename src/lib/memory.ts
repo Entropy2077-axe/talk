@@ -1,7 +1,7 @@
 import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { chatCompletion } from './deepseek'
-import { RELATIONSHIP_DIMENSIONS, applyRelationshipDelta, type RelationshipDelta } from './relationship'
+import { RELATIONSHIP_DIMENSIONS } from './relationship'
 import { displayName } from './contact'
 import { describeCurrentTime, toDateKey } from './time'
 import type { Contact, Message, PlanItem, RelationshipDimensions } from '../types'
@@ -67,13 +67,12 @@ ${existingPlansText || '（暂无）'}
 ${dimensionLines}
 
 接下来会给你一批新的聊天记录（"对方"是用户 "你"是角色扮演AI自己） 请你更新记忆并评估关系变化 输出格式:
-{"facts": "...", "style": "...", "relationshipDelta": {"familiarity": 0, "affection": 0, "trust": 0, "romance": 0, "friction": 0}, "plans": [{"text": "...", "date": "YYYY-MM-DD或空字符串"}]}
+{"facts": "...", "style": "...", "plans": [{"text": "...", "date": "YYYY-MM-DD或空字符串"}]}
 
 要求:
 - facts是关于对方(用户)的客观信息 比如名字、年龄、职业、住址、喜好、讨厌的东西、重要的人和事、正在经历的事情等 只记录聊天里明确提到的 不要编造 用简短的、分号分隔的短语罗列 总长度控制在200字以内 新信息和旧信息冲突时以新的为准 不再重要或已过时的旧信息可以删除 保持精简
 - style是这个AI应该如何调整语气和熟悉程度来更贴合这位对话对象 比如"关系变熟了 可以更随便"、"对方喜欢简短回复 你也保持简短"、"对方情绪低落时会安静倾听不追问" 这类相处细节 绝对不能改变角色的核心性格 只是语气和熟悉度上的贴合 总长度控制在150字以内
 - facts和style都必须是非空字符串 如果这批新记录里确实没有值得更新的内容 就把已有记忆原样返回 不要清空
-- relationshipDelta是根据这批新聊天记录 对五个关系维度打出的**变化量**（不是新的绝对值） 每个维度取 -10 到 10 之间的整数 0表示这批对话没有明显影响这个维度 比如对方主动分享隐私和感受 familiarity和trust应该上升 对方说了让人开心或贴心的话 affection上升 出现调情、暧昧的互动 romance上升 对方表现出不耐烦、被冷落、起冲突 friction上升 平淡日常闲聊多数维度应该是0或很小的变化 不要因为聊天条数多就无脑加分 要真实评估这批内容本身的性质
 ${plansPromptFragment()}
 - 只输出JSON 不要有markdown代码块标记`
 }
@@ -108,25 +107,16 @@ function parsePlansField(raw: unknown): ParsedPlan[] {
   return result
 }
 
-function parseMemoryResponse(
-  raw: string,
-): { facts: string; style: string; relationshipDelta: RelationshipDelta; plans: ParsedPlan[] } | null {
+function parseMemoryResponse(raw: string): { facts: string; style: string; plans: ParsedPlan[] } | null {
   let text = raw.trim()
   const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
   if (fenceMatch) text = fenceMatch[1].trim()
   try {
     const parsed = JSON.parse(text)
     if (typeof parsed?.facts === 'string' && typeof parsed?.style === 'string') {
-      const rawDelta = parsed.relationshipDelta && typeof parsed.relationshipDelta === 'object' ? parsed.relationshipDelta : {}
-      const relationshipDelta: RelationshipDelta = {}
-      for (const { key } of RELATIONSHIP_DIMENSIONS) {
-        const v = rawDelta[key]
-        if (typeof v === 'number' && Number.isFinite(v)) relationshipDelta[key] = v
-      }
       return {
         facts: parsed.facts.trim(),
         style: parsed.style.trim(),
-        relationshipDelta,
         plans: parsePlansField(parsed.plans),
       }
     }
@@ -191,7 +181,6 @@ export async function maybeUpdateMemory(
       memoryStyle: updated.style,
       memoryUpdatedAt: now,
       memoryMessageCursor: allMessages.length,
-      relationship: applyRelationshipDelta(contact.relationship, updated.relationshipDelta),
       upcomingPlans: mergePlans(contact.upcomingPlans ?? [], updated.plans, now),
     })
   } catch {

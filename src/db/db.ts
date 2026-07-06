@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie'
 import type {
+  AiTurnDebug,
   Commission,
   Contact,
   ContactRelationLink,
@@ -31,6 +32,7 @@ export class TalkDB extends Dexie {
   groups!: Table<Group, string>
   knowledgeEntries!: Table<KnowledgeEntry, string>
   savedWorldviews!: Table<SavedWorldview, string>
+  aiTurns!: Table<AiTurnDebug, string>
 
   constructor() {
     super('talk-db')
@@ -76,6 +78,9 @@ export class TalkDB extends Dexie {
     })
     this.version(8).stores({
       savedWorldviews: 'id, createdAt',
+    })
+    this.version(9).stores({
+      aiTurns: 'id, conversationId, createdAt',
     })
   }
 }

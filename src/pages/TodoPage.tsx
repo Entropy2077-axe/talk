@@ -64,7 +64,7 @@ export function TodoPage() {
 
   return (
     <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
-      <TopBar title="待办" right={<span className="pr-1 text-sm text-gray-500">{formatCurrency(walletBalance)}</span>} />
+      <TopBar title="待办" right={<span className="pr-1 text-sm text-gray-500">{formatCurrency(walletBalance, settings)}</span>} />
       <div className="flex-1 overflow-y-auto">
 
       <section className="mt-3 bg-white px-4 py-4">
@@ -140,7 +140,7 @@ export function TodoPage() {
                       {t.note && <p className="mt-0.5 text-xs text-gray-400">{t.note}</p>}
                       <p className="mt-1 text-xs text-gray-400">
                         {contact ? `来自 ${displayName(contact)}` : '来自未知联系人'}
-                        {commission && ` · ${formatCurrency(commission.reward)}`}
+                        {commission && ` · ${formatCurrency(commission.reward, settings)}`}
                       </p>
                     </div>
                   </div>

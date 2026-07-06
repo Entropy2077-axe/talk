@@ -1,4 +1,4 @@
-import type { RelationshipDimensions } from '../types'
+import type { AiBubble, RelationshipDimensions } from '../types'
 
 export const RELATIONSHIP_DIMENSIONS: { key: keyof RelationshipDimensions; label: string; description: string }[] = [
   { key: 'familiarity', label: '熟悉度', description: '你们互相了解多少 聊过的话题和经历越多越高' },
@@ -53,6 +53,69 @@ export function applyRelationshipDelta(
     }
   }
   return next
+}
+
+export function relationshipStatsText(rel: RelationshipDimensions): string {
+  return RELATIONSHIP_DIMENSIONS.map(({ key, label }) => `- ${label}: ${rel[key]}/100（${dimensionQualifier(rel[key])}）`).join('\n')
+}
+
+export function relationshipUnlocks(rel: RelationshipDimensions): string[] {
+  const unlocks: string[] = []
+  if (rel.affection >= 70) unlocks.push('更亲近的日常语气：可以更自然地关心、撒娇、使用昵称或内部梗')
+  if (rel.trust >= 70) unlocks.push('更深的话题：可以聊自己的脆弱、烦恼和真实想法')
+  if (rel.romance >= 60) unlocks.push('暧昧/恋爱语气：可以更明显地吃醋、心动、贴近，但仍符合角色性格')
+  if (rel.friction >= 60) unlocks.push('冲突语气：可以冷淡、顶嘴、催促或表达不满，不必强行友好')
+  if (rel.familiarity >= 60) unlocks.push('熟人默契：可以省略解释、接内部梗、用更短更随意的表达')
+  return unlocks
+}
+
+export function relationshipUnlocksText(rel: RelationshipDimensions): string {
+  const unlocks = relationshipUnlocks(rel)
+  return unlocks.length > 0 ? unlocks.map((u) => `- ${u}`).join('\n') : '（暂无额外解锁，保持基础关系语气）'
+}
+
+const THRESHOLDS = [30, 60, 80]
+
+export function crossedRelationshipMilestones(before: RelationshipDimensions, after: RelationshipDimensions): string[] {
+  const messages: string[] = []
+  for (const { key, label } of RELATIONSHIP_DIMENSIONS) {
+    for (const threshold of THRESHOLDS) {
+      if (before[key] < threshold && after[key] >= threshold) {
+        messages.push(`${label}达到 ${threshold}`)
+      }
+    }
+  }
+  return messages
+}
+
+export function inferRelationshipDeltaFromTurn(userText: string, bubbles: AiBubble[]): RelationshipDelta {
+  const text = `${userText}\n${bubbles
+    .map((b) => {
+      if (b.type === 'text') return b.content
+      if (b.type === 'commission') return `${b.title} ${b.description}`
+      return ''
+    })
+    .join('\n')}`.toLowerCase()
+  const delta: RelationshipDelta = {}
+  const add = (key: keyof RelationshipDimensions, amount: number) => {
+    delta[key] = (delta[key] ?? 0) + amount
+  }
+
+  if (userText.trim()) add('familiarity', 1)
+  if (/[谢谢|谢啦|辛苦|喜欢|开心|哈哈|嘿嘿|抱抱|爱你]/.test(text)) add('affection', 2)
+  if (/[秘密|难过|害怕|压力|焦虑|崩溃|心事|告诉你]/.test(text)) {
+    add('trust', 2)
+    add('familiarity', 1)
+  }
+  if (/[想你|亲|吻|抱抱|宝贝|老婆|老公|心动|暧昧]/.test(text)) add('romance', 2)
+  if (/[烦|闭嘴|算了|滚|讨厌|生气|不想理|别管]/.test(text)) add('friction', 3)
+  if (/[对不起|抱歉|不好意思]/.test(text)) add('friction', -1)
+  if (bubbles.some((b) => b.type === 'commission')) add('trust', 1)
+
+  for (const key of Object.keys(delta) as (keyof RelationshipDimensions)[]) {
+    delta[key] = Math.max(-3, Math.min(3, delta[key] ?? 0))
+  }
+  return delta
 }
 
 /** Reduces the five numeric dimensions to a single memorable label, the same way MBTI reduces axes to a type code. */

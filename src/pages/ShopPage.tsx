@@ -73,7 +73,7 @@ export function ShopPage() {
       <TopBar
         title="商城"
         showBack
-        right={<span className="pr-1 text-sm text-gray-500">{formatCurrency(settings.walletBalance)}</span>}
+        right={<span className="pr-1 text-sm text-gray-500">{formatCurrency(settings.walletBalance, settings)}</span>}
       />
       <div className="flex-1 overflow-y-auto">
 
@@ -102,7 +102,7 @@ export function ShopPage() {
       {!hasBrowsed && !loading && (
         <button
           onClick={() => generate(null)}
-          className="mx-4 mt-3 rounded-lg bg-white py-2.5 text-sm text-gray-600 shadow-sm"
+          className="mx-4 mt-3 w-[calc(100%-2rem)] rounded-lg bg-white py-2.5 text-sm text-gray-600 shadow-sm"
         >
           随便逛逛
         </button>
@@ -121,7 +121,7 @@ export function ShopPage() {
                 <p className="truncate text-sm font-medium text-gray-900">{p.name}</p>
                 <p className="mt-0.5 line-clamp-2 text-xs text-gray-400">{p.description}</p>
                 <div className="mt-2 flex items-center justify-between">
-                  <span className="text-xs font-medium text-[#aa3bff]">{formatCurrency(p.price)}</span>
+                  <span className="text-xs font-medium text-[#aa3bff]">{formatCurrency(p.price, settings)}</span>
                   <button
                     onClick={() => handleBuy(p)}
                     className="rounded-lg bg-gray-900 px-2.5 py-1 text-xs text-white"

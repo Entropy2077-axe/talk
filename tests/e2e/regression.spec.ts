@@ -1,5 +1,6 @@
 import { expect, test, type Page } from 'playwright/test'
 import { existsSync } from 'node:fs'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 async function clearDatabase(page: Page) {
@@ -123,6 +124,21 @@ async function seedSearchAndGroupFixture(page: Page) {
         createdAt: 8,
       },
     ])
+    await db.aiTurns.add({
+      id: 'turn-a',
+      conversationId: 'conversation-a',
+      raw: '{"messages":[{"type":"text","content":"first bubble"},{"type":"text","content":"second bubble"}],"knowledgeQueries":["nebula"]}',
+      parsed: {
+        messages: [
+          { type: 'text', content: 'first bubble' },
+          { type: 'text', content: 'second bubble' },
+        ],
+        knowledgeQueries: ['nebula'],
+      },
+      knowledgeQueries: ['nebula'],
+      createdAt: 9,
+    })
+    await db.messages.update('message-a', { debugAiTurnId: 'turn-a' })
   })
 }
 
@@ -369,6 +385,118 @@ test('admin mode can expand assistant message debug json', async ({ page }) => {
   await page.reload()
 
   await page.getByRole('button', { name: '展开 JSON' }).click()
-  await expect(page.getByText('rawAiResponse')).toBeVisible()
-  await expect(page.getByText('debugParsedBubble')).toBeVisible()
+  await expect(page.getByText('"raw"')).toBeVisible()
+  await expect(page.getByText('"knowledgeQueries"')).toBeVisible()
+  await expect(page.getByText('second bubble')).toBeVisible()
+})
+
+test('settings page offers preset background colors and image crop before saving', async ({ page }, testInfo) => {
+  await page.goto('/#/settings')
+  await clearDatabase(page)
+
+  await page.getByLabel('应用背景色 #edf4ff').click()
+  const bg = await page.evaluate(async () => {
+    const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
+    return useSettingsStore.getState().chatBackground
+  })
+  expect(bg).toBe('#edf4ff')
+
+  const imagePath = join(testInfo.outputDir, 'bg.png')
+  await mkdir(testInfo.outputDir, { recursive: true })
+  await writeFile(
+    imagePath,
+    Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAGCAIAAADj5ND2AAAAFElEQVR4nGP8z8DwnwEJMDGgAcQBAJvGAwF4F6M8AAAAAElFTkSuQmCC',
+      'base64',
+    ),
+  )
+  await page.locator('input[accept="image/*"]').setInputFiles(imagePath)
+  await expect(page.getByText('裁剪聊天背景')).toBeVisible()
+})
+
+test('currency icon setting updates wallet formatting globally', async ({ page }) => {
+  await page.goto('/#/me')
+  await clearDatabase(page)
+  await page.evaluate(() => {
+    window.localStorage.setItem(
+      'talk-settings',
+      JSON.stringify({ state: { userNickname: 'Money User', userAvatar: '🙂', walletBalance: 88, currencyIconMode: 'yen' }, version: 0 }),
+    )
+  })
+  await page.reload()
+  await expect(page.getByText('¥ 88')).toBeVisible()
+})
+
+test('commission history event keeps reward in compressed context', async ({ page }) => {
+  await page.goto('/#/')
+  const content = await page.evaluate(async () => {
+    const { formatStructuredHistoryEvent } = await import('/src/lib/chatEngine.ts')
+    const message = {
+      id: 'm',
+      conversationId: 'c',
+      role: 'assistant' as const,
+      type: 'commission' as const,
+      content: '取快递',
+      commission: { commissionId: 'commission-a' },
+      createdAt: 1,
+    }
+    return formatStructuredHistoryEvent(message, 'commission', new Map([['commission-a', { reward: 20 }]])).content
+  })
+  expect(content).toContain('取快递')
+  expect(content).toContain('20')
+})
+
+test('overdue commissions can trigger a progress reminder', async ({ page }) => {
+  await page.goto('/#/')
+  await page.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts')
+    for (const table of db.tables) await table.clear()
+    await db.contacts.add({
+      id: 'contact-remind',
+      name: 'Reminder Alice',
+      avatar: '🙂',
+      avatarColor: '#e5f7ef',
+      systemPrompt: 'test',
+      createdAt: 1,
+      memoryFacts: '',
+      memoryStyle: '',
+      memoryUpdatedAt: 0,
+      memoryMessageCursor: 0,
+      relationship: { familiarity: 10, affection: 20, trust: 30, romance: 0, friction: 0 },
+    })
+    await db.conversations.add({ id: 'conversation-remind', contactId: 'contact-remind', pinned: false, createdAt: 1, updatedAt: 1 })
+    await db.commissions.add({
+      id: 'commission-remind',
+      contactId: 'contact-remind',
+      title: '取快递',
+      description: '楼下',
+      reward: 20,
+      status: 'accepted',
+      createdAt: Date.now() - 30 * 60 * 60 * 1000,
+      respondedAt: Date.now() - 30 * 60 * 60 * 1000,
+    })
+    const { maybeRemindOverdueCommissions } = await import('/src/lib/chatEngine.ts')
+    await maybeRemindOverdueCommissions()
+  })
+  const messages = await page.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts')
+    return db.messages.toArray()
+  })
+  expect(messages.some((m) => m.content.includes('进度'))).toBe(true)
+})
+
+test('relationship deltas are rule based and prompt includes human style rules', async ({ page }) => {
+  await page.goto('/#/')
+  const result = await page.evaluate(async () => {
+    const { inferRelationshipDeltaFromTurn } = await import('/src/lib/relationship.ts')
+    const { DEFAULT_STYLE_PROMPT } = await import('/src/lib/prompt.ts')
+    return {
+      delta: inferRelationshipDeltaFromTurn('谢谢你 我有点难过 想抱抱', [{ type: 'text', content: '过来' }]),
+      prompt: DEFAULT_STYLE_PROMPT,
+    }
+  })
+  expect(result.delta.affection).toBeGreaterThan(0)
+  expect(result.delta.trust).toBeGreaterThan(0)
+  expect(result.prompt).toContain('先有情绪反应')
+  expect(result.prompt).toContain('不要用"我可以帮你')
 })

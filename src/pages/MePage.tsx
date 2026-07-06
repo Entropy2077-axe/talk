@@ -8,7 +8,8 @@ import { checkForUpdate } from '../lib/updateCheck'
 
 export function MePage() {
   const navigate = useNavigate()
-  const { userAvatar, userNickname, walletBalance } = useSettingsStore()
+  const settings = useSettingsStore()
+  const { userAvatar, userNickname, walletBalance } = settings
   const [checking, setChecking] = useState(false)
   const [updateMessage, setUpdateMessage] = useState('')
   const [updateUrl, setUpdateUrl] = useState('')
@@ -43,7 +44,7 @@ export function MePage() {
         <Avatar avatar={userAvatar} size={60} />
         <div className="flex flex-col items-end gap-1">
           <span className="text-[16px] font-medium text-gray-900">{userNickname}</span>
-          <span className="text-xs text-gray-400">{formatCurrency(walletBalance)}</span>
+          <span className="text-xs text-gray-400">{formatCurrency(walletBalance, settings)}</span>
         </div>
       </button>
 

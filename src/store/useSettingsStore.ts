@@ -39,6 +39,8 @@ export const useSettingsStore = create<SettingsState>()(
       pexelsApiKey: envPexelsKey,
       themeMode: 'light',
       chatBackground: '',
+      currencyIconMode: 'coin',
+      customCurrencyEmoji: '💎',
       setSettings: (patch) => set(patch),
     }),
     { name: 'talk-settings' },

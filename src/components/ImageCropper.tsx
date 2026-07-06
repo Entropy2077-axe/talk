@@ -4,24 +4,30 @@ interface ImageCropperProps {
   src: string
   onConfirm: (dataUrl: string) => void
   onCancel: () => void
+  aspectRatio?: number
+  title?: string
 }
 
 const VIEWPORT = 260
-const OUTPUT = 320
+const OUTPUT_WIDTH = 720
 
-export function ImageCropper({ src, onConfirm, onCancel }: ImageCropperProps) {
+export function ImageCropper({ src, onConfirm, onCancel, aspectRatio = 1, title = '裁剪图片' }: ImageCropperProps) {
   const imgRef = useRef<HTMLImageElement>(null)
   const [natural, setNatural] = useState({ w: 1, h: 1 })
   const [scale, setScale] = useState(1)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
   const dragging = useRef<{ startX: number; startY: number; origin: { x: number; y: number } } | null>(null)
 
-  const baseScale = Math.max(VIEWPORT / natural.w, VIEWPORT / natural.h) || 1
+  const cropW = aspectRatio >= 1 ? VIEWPORT : VIEWPORT * aspectRatio
+  const cropH = aspectRatio >= 1 ? VIEWPORT / aspectRatio : VIEWPORT
+  const outputW = OUTPUT_WIDTH
+  const outputH = Math.round(outputW / aspectRatio)
+  const baseScale = Math.max(cropW / natural.w, cropH / natural.h) || 1
   const effectiveScale = baseScale * scale
   const displayedW = natural.w * effectiveScale
   const displayedH = natural.h * effectiveScale
-  const maxOffsetX = Math.max(0, (displayedW - VIEWPORT) / 2)
-  const maxOffsetY = Math.max(0, (displayedH - VIEWPORT) / 2)
+  const maxOffsetX = Math.max(0, (displayedW - cropW) / 2)
+  const maxOffsetY = Math.max(0, (displayedH - cropH) / 2)
 
   function clamp(o: { x: number; y: number }) {
     return {
@@ -47,26 +53,28 @@ export function ImageCropper({ src, onConfirm, onCancel }: ImageCropperProps) {
   function handleConfirm() {
     const img = imgRef.current
     if (!img) return
-    const imgX = (VIEWPORT - displayedW) / 2 + offset.x
-    const imgY = (VIEWPORT - displayedH) / 2 + offset.y
+    const imgX = (cropW - displayedW) / 2 + offset.x
+    const imgY = (cropH - displayedH) / 2 + offset.y
     const sx = -imgX / effectiveScale
     const sy = -imgY / effectiveScale
-    const sSize = VIEWPORT / effectiveScale
+    const sWidth = cropW / effectiveScale
+    const sHeight = cropH / effectiveScale
 
     const canvas = document.createElement('canvas')
-    canvas.width = OUTPUT
-    canvas.height = OUTPUT
+    canvas.width = outputW
+    canvas.height = outputH
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    ctx.drawImage(img, sx, sy, sSize, sSize, 0, 0, OUTPUT, OUTPUT)
+    ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, outputW, outputH)
     onConfirm(canvas.toDataURL('image/jpeg', 0.9))
   }
 
   return (
     <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/70 p-6">
+      <p className="mb-3 text-sm font-medium text-white">{title}</p>
       <div
         className="relative overflow-hidden rounded-2xl bg-black touch-none"
-        style={{ width: VIEWPORT, height: VIEWPORT }}
+        style={{ width: cropW, height: cropH }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

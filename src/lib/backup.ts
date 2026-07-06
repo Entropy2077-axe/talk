@@ -20,6 +20,7 @@ export const BACKUP_TABLES = [
   'groups',
   'knowledgeEntries',
   'savedWorldviews',
+  'aiTurns',
 ] as const
 
 export type BackupTableName = (typeof BACKUP_TABLES)[number]

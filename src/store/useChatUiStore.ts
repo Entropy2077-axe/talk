@@ -16,6 +16,9 @@ interface ChatUiState {
   notification: ChatNotification | null
   showNotification: (n: ChatNotification) => void
   dismissNotification: () => void
+  relationshipNotice: string
+  showRelationshipNotice: (message: string) => void
+  clearRelationshipNotice: () => void
 }
 
 /** Deliberately not persisted — this is ephemeral session/session-UI state, not a user setting. */
@@ -25,4 +28,7 @@ export const useChatUiStore = create<ChatUiState>((set) => ({
   notification: null,
   showNotification: (n) => set({ notification: n }),
   dismissNotification: () => set({ notification: null }),
+  relationshipNotice: '',
+  showRelationshipNotice: (message) => set({ relationshipNotice: message }),
+  clearRelationshipNotice: () => set({ relationshipNotice: '' }),
 }))

@@ -57,7 +57,7 @@ export function WarehousePage() {
                 <p className="truncate text-sm font-medium text-gray-900">{item.name}</p>
                 <p className="mt-0.5 line-clamp-2 text-xs text-gray-400">{item.description}</p>
                 <div className="mt-2 flex items-center justify-between">
-                  <span className="text-xs text-gray-400">{formatCurrency(item.price)}</span>
+                  <span className="text-xs text-gray-400">{formatCurrency(item.price, settings)}</span>
                   <button
                     onClick={() => setGifting(item)}
                     className="rounded-lg bg-gray-100 px-2.5 py-1 text-xs text-gray-700"

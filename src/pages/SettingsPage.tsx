@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { TopBar } from '../components/TopBar'
 import { ActionSheet } from '../components/ActionSheet'
+import { ImageCropper } from '../components/ImageCropper'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { listModels, testConnection } from '../lib/deepseek'
 import { DEFAULT_STYLE_PROMPT } from '../lib/prompt'
@@ -29,11 +30,14 @@ export function SettingsPage() {
     adminModeEnabled,
     themeMode,
     chatBackground,
+    currencyIconMode,
+    customCurrencyEmoji,
     setSettings,
   } = useSettingsStore()
   const [confirmingWipe, setConfirmingWipe] = useState(false)
   const [backupStatus, setBackupStatus] = useState('')
   const [restoringBackup, setRestoringBackup] = useState(false)
+  const [backgroundCropSrc, setBackgroundCropSrc] = useState('')
   const backupInputRef = useRef<HTMLInputElement | null>(null)
   const backgroundInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -87,7 +91,7 @@ export function SettingsPage() {
   async function handleBackgroundImage(file: File) {
     const reader = new FileReader()
     reader.onload = () => {
-      if (typeof reader.result === 'string') setSettings({ chatBackground: reader.result })
+      if (typeof reader.result === 'string') setBackgroundCropSrc(reader.result)
     }
     reader.readAsDataURL(file)
   }
@@ -99,6 +103,8 @@ export function SettingsPage() {
   const [promptDraft, setPromptDraft] = useState(globalSystemPrompt)
   const [tavilyKeyDraft, setTavilyKeyDraft] = useState(tavilyApiKey)
   const [pexelsKeyDraft, setPexelsKeyDraft] = useState(pexelsApiKey)
+  const presetBackgrounds = ['#f4f4f6', '#f7f0e8', '#eef6f1', '#edf4ff', '#f5efff', '#fff3f0', '#f3f6e8', '#eef7f7']
+  const currencyMode = currencyIconMode ?? 'coin'
 
   const [models, setModels] = useState<string[]>([])
   const [pulling, setPulling] = useState(false)
@@ -208,6 +214,19 @@ export function SettingsPage() {
         </div>
 
         <label className="mb-1 block text-xs text-gray-500">聊天背景色</label>
+        <div className="mb-2 flex flex-wrap gap-2">
+          {presetBackgrounds.map((color) => (
+            <button
+              key={color}
+              onClick={() => setSettings({ chatBackground: color })}
+              aria-label={`应用背景色 ${color}`}
+              className={`h-8 w-8 rounded-full border ${
+                chatBackground === color ? 'border-gray-900 ring-2 ring-gray-300' : 'border-gray-200'
+              }`}
+              style={{ backgroundColor: color }}
+            />
+          ))}
+        </div>
         <div className="mb-2 flex gap-2">
           <input
             type="color"
@@ -240,6 +259,37 @@ export function SettingsPage() {
           }}
         />
         <p className="text-[11px] text-gray-400">背景只保存在本机，导出备份时会一起带走。</p>
+      </section>
+
+      <section className="mt-3 bg-white px-4 py-3">
+        <h2 className="mb-2 text-xs font-medium text-gray-400">货币图标</h2>
+        <div className="grid grid-cols-4 gap-2">
+          {[
+            { mode: 'coin' as const, label: '🪙', text: '金币' },
+            { mode: 'emoji' as const, label: customCurrencyEmoji || '💎', text: 'emoji' },
+            { mode: 'yen' as const, label: '¥', text: '人民币' },
+            { mode: 'dollar' as const, label: '$', text: '美元' },
+          ].map((item) => (
+            <button
+              key={item.mode}
+              onClick={() => setSettings({ currencyIconMode: item.mode })}
+              className={`rounded-lg border px-2 py-2 text-center ${
+                currencyMode === item.mode ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-700'
+              }`}
+            >
+              <span className="block text-lg">{item.label}</span>
+              <span className="text-[11px]">{item.text}</span>
+            </button>
+          ))}
+        </div>
+        {currencyMode === 'emoji' && (
+          <input
+            value={customCurrencyEmoji ?? ''}
+            onChange={(e) => setSettings({ customCurrencyEmoji: e.target.value.slice(0, 4) })}
+            placeholder="输入一个表情"
+            className="mt-2 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+          />
+        )}
       </section>
 
       <section className="mt-3 bg-white px-4 py-3">
@@ -599,6 +649,18 @@ export function SettingsPage() {
         <ActionSheet
           onClose={() => setConfirmingWipe(false)}
           options={[{ label: '确认清空所有联系人与聊天记录', onSelect: handleWipeContacts, danger: true }]}
+        />
+      )}
+      {backgroundCropSrc && (
+        <ImageCropper
+          src={backgroundCropSrc}
+          aspectRatio={0.68}
+          title="裁剪聊天背景"
+          onCancel={() => setBackgroundCropSrc('')}
+          onConfirm={(dataUrl) => {
+            setSettings({ chatBackground: dataUrl })
+            setBackgroundCropSrc('')
+          }}
         />
       )}
     </div>

@@ -8,6 +8,7 @@ import {
   pickSpeakers,
   stripSpeakerNamePrefix,
 } from './groupChat'
+import { extractJsonObject } from './aiProtocol'
 import { CONTEXT_WINDOW_SIZE, maybeUpdateGroupMemory } from './memory'
 import { knowledgeDigestText, processKnowledgeQueries } from './knowledgeBase'
 import { describeCurrentTime } from './time'
@@ -36,6 +37,25 @@ function clearPending(conversationId: string) {
   timersByConversation.get(conversationId)?.forEach(clearTimeout)
   timersByConversation.set(conversationId, [])
   abortByConversation.get(conversationId)?.abort()
+}
+
+function parseGroupTurnDebugPayload(raw: string, bubbles: GroupAiBubble[], knowledgeQueries: string[]): unknown {
+  const trimmed = raw.trim()
+  const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const text = fenceMatch ? fenceMatch[1].trim() : trimmed
+  try {
+    return JSON.parse(text)
+  } catch {
+    const extracted = extractJsonObject(text)
+    if (extracted) {
+      try {
+        return JSON.parse(extracted)
+      } catch {
+        // fall through
+      }
+    }
+  }
+  return { raw, parsedBubbles: bubbles, knowledgeQueries }
 }
 
 export async function sendGroupMessage(
@@ -140,8 +160,17 @@ async function runGroupAiTurn(
       engine.patch(conversationId, { error: '群里这次没有人回复 可以再发一条试试', aiTyping: false })
       return
     }
+    const aiTurnId = uuid()
+    await db.aiTurns.add({
+      id: aiTurnId,
+      conversationId,
+      raw,
+      parsed: parseGroupTurnDebugPayload(raw, bubbles, knowledgeQueries),
+      knowledgeQueries,
+      createdAt: Date.now(),
+    })
     processKnowledgeQueries(knowledgeQueries, settings)
-    revealGroupBubbles(conversationId, group, members, speakers, bubbles, streamId, settings, raw)
+    revealGroupBubbles(conversationId, group, members, speakers, bubbles, streamId, settings, aiTurnId)
   } catch (err) {
     if (streamByConversation.get(conversationId) !== streamId) return
     if (err instanceof DOMException && err.name === 'AbortError') return
@@ -159,7 +188,7 @@ function revealGroupBubbles(
   bubbles: GroupAiBubble[],
   streamId: string,
   settings: AppSettings,
-  rawAiResponse: string,
+  aiTurnId: string,
 ): void {
   const timers: ReturnType<typeof setTimeout>[] = []
   let cumulative = 0
@@ -184,7 +213,7 @@ function revealGroupBubbles(
         type: bubble.type,
         content,
         speakerContactId: speaker?.id,
-        debugRawAiResponse: rawAiResponse,
+        debugAiTurnId: aiTurnId,
         debugParsedBubble: bubble,
         createdAt: Date.now(),
       }
