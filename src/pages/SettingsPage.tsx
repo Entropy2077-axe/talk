@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { TopBar } from '../components/TopBar'
 import { ActionSheet } from '../components/ActionSheet'
@@ -8,6 +8,8 @@ import { DEFAULT_STYLE_PROMPT } from '../lib/prompt'
 import { tavilySearch } from '../lib/webSearch'
 import { searchPexelsPhoto } from '../lib/photoSearch'
 import { db } from '../db/db'
+import { assertTalkBackup, backupFileName, createBackup, restoreBackup } from '../lib/backup'
+import type { AppSettings } from '../types'
 
 export function SettingsPage() {
   const navigate = useNavigate()
@@ -28,6 +30,9 @@ export function SettingsPage() {
     setSettings,
   } = useSettingsStore()
   const [confirmingWipe, setConfirmingWipe] = useState(false)
+  const [backupStatus, setBackupStatus] = useState('')
+  const [restoringBackup, setRestoringBackup] = useState(false)
+  const backupInputRef = useRef<HTMLInputElement | null>(null)
 
   async function handleWipeContacts() {
     await db.transaction('rw', db.contacts, db.conversations, db.messages, async () => {
@@ -36,6 +41,43 @@ export function SettingsPage() {
       await db.contacts.clear()
     })
     navigate('/contacts')
+  }
+
+  async function handleExportBackup() {
+    setBackupStatus('')
+    const settings = { ...useSettingsStore.getState() } as Partial<AppSettings> & { setSettings?: unknown }
+    delete settings.setSettings
+    const backup = await createBackup(settings)
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = backupFileName()
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    setBackupStatus('备份已导出。这个文件可能包含 API Key，请自己妥善保管。')
+  }
+
+  async function handleImportBackup(file: File) {
+    setBackupStatus('')
+    setRestoringBackup(true)
+    try {
+      const parsed: unknown = JSON.parse(await file.text())
+      assertTalkBackup(parsed)
+      if (!window.confirm('导入备份会覆盖当前这台设备里的聊天、联系人、朋友圈、设置等本地数据。确定继续吗？')) {
+        return
+      }
+      await restoreBackup(parsed)
+      setSettings(parsed.settings)
+      setBackupStatus('备份已恢复。建议返回消息页检查联系人和聊天记录。')
+    } catch (err) {
+      setBackupStatus(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRestoringBackup(false)
+      if (backupInputRef.current) backupInputRef.current.value = ''
+    }
   }
 
   const [apiKeyDraft, setApiKeyDraft] = useState(apiKey)
@@ -438,6 +480,36 @@ export function SettingsPage() {
             />
           </button>
         </div>
+      </section>
+
+      <section className="mt-3 bg-white px-4 py-3">
+        <h2 className="mb-2 text-xs font-medium text-gray-400">数据备份与恢复</h2>
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={handleExportBackup} className="rounded-lg bg-gray-900 py-2.5 text-sm text-white">
+            导出备份
+          </button>
+          <button
+            onClick={() => backupInputRef.current?.click()}
+            disabled={restoringBackup}
+            className="rounded-lg bg-gray-100 py-2.5 text-sm text-gray-700 disabled:opacity-50"
+          >
+            {restoringBackup ? '恢复中…' : '导入恢复'}
+          </button>
+        </div>
+        <input
+          ref={backupInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) void handleImportBackup(file)
+          }}
+        />
+        <p className="mt-2 text-[11px] leading-relaxed text-gray-400">
+          备份包含联系人、人设、聊天记录、朋友圈、表情包、仓库、知识库、世界观收藏和当前设置。设置里如果保存过 API Key，备份文件里也会带上，请不要发给别人。
+        </p>
+        {backupStatus && <p className="mt-2 text-xs text-gray-500">{backupStatus}</p>}
       </section>
 
       <section className="mt-3 bg-white px-4 py-3">

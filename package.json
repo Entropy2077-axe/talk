@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "icon:android": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-android-icon.ps1",
+    "release:apk": "node scripts/release-apk.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.1",
