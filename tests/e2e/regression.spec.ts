@@ -142,6 +142,53 @@ async function seedSearchAndGroupFixture(page: Page) {
   })
 }
 
+async function seedCommissionCardFixture(page: Page) {
+  await page.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts')
+    const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
+    for (const table of db.tables) await table.clear()
+    useSettingsStore.getState().setSettings({ adminModeEnabled: true, currencyIconMode: 'yen' })
+    await db.contacts.add({
+      id: 'contact-commission',
+      name: 'Commission Alice',
+      avatar: '🙂',
+      avatarColor: '#e5f7ef',
+      systemPrompt: 'test',
+      createdAt: 1,
+      memoryFacts: '',
+      memoryStyle: '',
+      memoryUpdatedAt: 0,
+      memoryMessageCursor: 0,
+      relationship: { familiarity: 10, affection: 20, trust: 30, romance: 0, friction: 0 },
+    })
+    await db.conversations.add({
+      id: 'conversation-commission',
+      contactId: 'contact-commission',
+      pinned: false,
+      createdAt: 2,
+      updatedAt: 3,
+    })
+    await db.commissions.add({
+      id: 'commission-card',
+      contactId: 'contact-commission',
+      title: '取快递',
+      description: '楼下驿站',
+      reward: 20,
+      status: 'pending',
+      createdAt: 3,
+    })
+    await db.messages.add({
+      id: 'message-commission',
+      conversationId: 'conversation-commission',
+      role: 'assistant',
+      type: 'commission',
+      content: '取快递',
+      commission: { commissionId: 'commission-card' },
+      createdAt: 4,
+    })
+  })
+}
+
 test('settings page exports a complete Talk backup json', async ({ page }) => {
   await page.goto('/#/settings')
   await seedBackupFixture(page)
@@ -412,6 +459,9 @@ test('settings page offers preset background colors and image crop before saving
   )
   await page.locator('input[accept="image/*"]').setInputFiles(imagePath)
   await expect(page.getByText('裁剪聊天背景')).toBeVisible()
+  await expect(page.getByTestId('frame-cropper-stage')).toBeVisible()
+  await expect(page.locator('input[type="range"]')).toHaveCount(0)
+  await expect(page.getByText('拖拽框选区域')).toBeVisible()
 })
 
 test('currency icon setting updates wallet formatting globally', async ({ page }) => {
@@ -429,7 +479,7 @@ test('currency icon setting updates wallet formatting globally', async ({ page }
 
 test('commission history event keeps reward in compressed context', async ({ page }) => {
   await page.goto('/#/')
-  const content = await page.evaluate(async () => {
+  const event = await page.evaluate(async () => {
     const { formatStructuredHistoryEvent } = await import('/src/lib/chatEngine.ts')
     const message = {
       id: 'm',
@@ -440,10 +490,46 @@ test('commission history event keeps reward in compressed context', async ({ pag
       commission: { commissionId: 'commission-a' },
       createdAt: 1,
     }
-    return formatStructuredHistoryEvent(message, 'commission', new Map([['commission-a', { reward: 20 }]])).content
+    return formatStructuredHistoryEvent(message, 'commission', new Map([['commission-a', { reward: 20 }]]))
   })
-  expect(content).toContain('取快递')
-  expect(content).toContain('20')
+  expect(event.role).toBe('assistant')
+  expect(event.content).toContain('HISTORY_EVENT')
+  expect(event.content).toContain('取快递')
+  expect(event.content).toContain('20')
+  expect(event.content).not.toContain('[发布了委托')
+})
+
+test('chat page with a commission card loads without a render loop', async ({ page }) => {
+  await page.goto('/#/chat/conversation-commission')
+  await seedCommissionCardFixture(page)
+  await page.reload()
+
+  await expect(page.getByText('取快递')).toBeVisible()
+  await expect(page.getByText('楼下驿站')).toBeVisible()
+  await expect(page.getByText('¥ 20')).toBeVisible()
+  await expect(page.getByRole('button', { name: '接取', exact: true })).toBeVisible()
+})
+
+test('desktop viewport can inspect commission card, crop UI, and currency icon', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('/#/chat/conversation-commission')
+  await seedCommissionCardFixture(page)
+  await page.reload()
+  await expect(page.getByText('¥ 20')).toBeVisible()
+
+  await page.goto('/#/settings')
+  const imagePath = join(testInfo.outputDir, 'desktop-bg.png')
+  await mkdir(testInfo.outputDir, { recursive: true })
+  await writeFile(
+    imagePath,
+    Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAGCAIAAADj5ND2AAAAFElEQVR4nGP8z8DwnwEJMDGgAcQBAJvGAwF4F6M8AAAAAElFTkSuQmCC',
+      'base64',
+    ),
+  )
+  await page.locator('input[accept="image/*"]').setInputFiles(imagePath)
+  await expect(page.getByTestId('frame-cropper-stage')).toBeVisible()
+  await expect(page.locator('input[type="range"]')).toHaveCount(0)
 })
 
 test('overdue commissions can trigger a progress reminder', async ({ page }) => {

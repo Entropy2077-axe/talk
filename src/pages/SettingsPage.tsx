@@ -655,6 +655,7 @@ export function SettingsPage() {
         <ImageCropper
           src={backgroundCropSrc}
           aspectRatio={0.68}
+          mode="frame"
           title="裁剪聊天背景"
           onCancel={() => setBackgroundCropSrc('')}
           onConfirm={(dataUrl) => {

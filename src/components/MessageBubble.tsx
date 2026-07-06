@@ -145,17 +145,17 @@ function CommissionCard({
   onRespond?: (commissionId: string, accept: boolean) => void
 }) {
   const commission = useLiveQuery(() => db.commissions.get(commissionId), [commissionId])
-  const currencySettings = useSettingsStore((s) => ({
-    currencyIconMode: s.currencyIconMode,
-    customCurrencyEmoji: s.customCurrencyEmoji,
-  }))
+  const currencyIconMode = useSettingsStore((s) => s.currencyIconMode)
+  const customCurrencyEmoji = useSettingsStore((s) => s.customCurrencyEmoji)
   if (!commission) return null
 
   return (
     <div className="w-56 rounded-xl border border-gray-200 bg-white p-3">
       <div className="mb-1.5 flex items-center gap-1.5">
         <span className="text-xs text-gray-400">📋 委托</span>
-        <span className="ml-auto text-xs font-medium text-[#aa3bff]">{formatCurrency(commission.reward, currencySettings)}</span>
+        <span className="ml-auto text-xs font-medium text-[#aa3bff]">
+          {formatCurrency(commission.reward, { currencyIconMode, customCurrencyEmoji })}
+        </span>
       </div>
       <p className="mb-1 text-[14px] font-medium text-gray-900">{commission.title}</p>
       <p className="mb-2 text-[12.5px] leading-relaxed text-gray-500">{commission.description}</p>

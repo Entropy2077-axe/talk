@@ -83,27 +83,51 @@ export function formatStructuredHistoryEvent(
 ): ChatMessage {
   const actor = message.role === 'assistant' ? 'contact' : 'user'
   const commission = kind === 'commission' && message.commission ? commissionById.get(message.commission.commissionId) : undefined
-  const payload =
+  const attrs =
     kind === 'commission' && message.commission
-      ? {
-          kind,
-          actor,
-          title: message.content,
-          reward: commission?.reward,
-          commissionId: message.commission.commissionId,
-          summary: `发布了委托: ${message.content}${commission ? `（报酬${commission.reward}）` : ''}`,
-        }
+      ? [
+          ['type', kind],
+          ['actor', actor],
+          ['title', message.content],
+          ['reward', commission?.reward],
+          ['commissionId', message.commission.commissionId],
+        ]
       : kind === 'link' && message.link
-        ? { kind, actor, label: message.link.label, app: message.link.app, data: message.link.data }
+        ? [
+            ['type', kind],
+            ['actor', actor],
+            ['label', message.link.label],
+            ['app', message.link.app],
+            ['data', JSON.stringify(message.link.data ?? {})],
+          ]
         : kind === 'gift' && message.gift
-          ? { kind, actor, name: message.gift.name, icon: message.gift.icon }
+          ? [
+              ['type', kind],
+              ['actor', actor],
+              ['name', message.gift.name],
+              ['icon', message.gift.icon],
+            ]
           : kind === 'scheduleChange' && message.scheduleChange
-            ? { kind, actor, summary: message.scheduleChange.summary, date: message.scheduleChange.date }
-            : { kind, actor, content: message.content }
+            ? [
+                ['type', kind],
+                ['actor', actor],
+                ['summary', message.scheduleChange.summary],
+                ['date', message.scheduleChange.date],
+              ]
+            : [
+                ['type', kind],
+                ['actor', actor],
+                ['content', message.content],
+              ]
+
+  const content = `<<HISTORY_EVENT ${attrs
+    .filter(([, value]) => value !== undefined && value !== '')
+    .map(([key, value]) => `${key}="${String(value).replace(/"/g, '\\"')}"`)
+    .join(' ')}>>`
 
   return {
-    role: 'system',
-    content: `HISTORY_EVENT ${JSON.stringify(payload)}`,
+    role: message.role,
+    content,
   }
 }
 
