@@ -27,12 +27,15 @@ export function SettingsPage() {
     tavilyApiKey,
     pexelsApiKey,
     adminModeEnabled,
+    themeMode,
+    chatBackground,
     setSettings,
   } = useSettingsStore()
   const [confirmingWipe, setConfirmingWipe] = useState(false)
   const [backupStatus, setBackupStatus] = useState('')
   const [restoringBackup, setRestoringBackup] = useState(false)
   const backupInputRef = useRef<HTMLInputElement | null>(null)
+  const backgroundInputRef = useRef<HTMLInputElement | null>(null)
 
   async function handleWipeContacts() {
     await db.transaction('rw', db.contacts, db.conversations, db.messages, async () => {
@@ -71,6 +74,7 @@ export function SettingsPage() {
       }
       await restoreBackup(parsed)
       setSettings(parsed.settings)
+      useSettingsStore.setState(parsed.settings)
       setBackupStatus('备份已恢复。建议返回消息页检查联系人和聊天记录。')
     } catch (err) {
       setBackupStatus(err instanceof Error ? err.message : String(err))
@@ -78,6 +82,14 @@ export function SettingsPage() {
       setRestoringBackup(false)
       if (backupInputRef.current) backupInputRef.current.value = ''
     }
+  }
+
+  async function handleBackgroundImage(file: File) {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') setSettings({ chatBackground: reader.result })
+    }
+    reader.readAsDataURL(file)
   }
 
   const [apiKeyDraft, setApiKeyDraft] = useState(apiKey)
@@ -172,6 +184,63 @@ export function SettingsPage() {
     <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
       <TopBar title="设置" showBack />
       <div className="flex-1 overflow-y-auto">
+
+      <section className="mt-3 bg-white px-4 py-3">
+        <h2 className="mb-2 text-xs font-medium text-gray-400">外观</h2>
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <p className="text-sm text-gray-800">暗色模式</p>
+            <p className="mt-0.5 text-[11px] text-gray-400">适合晚上聊天，聊天页和设置页会一起变暗</p>
+          </div>
+          <button
+            onClick={() => setSettings({ themeMode: (themeMode ?? 'light') === 'dark' ? 'light' : 'dark' })}
+            aria-label="切换暗色模式"
+            className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+              (themeMode ?? 'light') === 'dark' ? 'bg-gray-900' : 'bg-gray-200'
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
+                (themeMode ?? 'light') === 'dark' ? 'translate-x-5' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+
+        <label className="mb-1 block text-xs text-gray-500">聊天背景色</label>
+        <div className="mb-2 flex gap-2">
+          <input
+            type="color"
+            value={chatBackground && chatBackground.startsWith('#') ? chatBackground : '#ededed'}
+            onChange={(e) => setSettings({ chatBackground: e.target.value })}
+            className="h-10 w-14 rounded-lg border border-gray-200 p-1"
+          />
+          <button
+            onClick={() => backgroundInputRef.current?.click()}
+            className="flex-1 rounded-lg bg-gray-100 py-2 text-sm text-gray-700"
+          >
+            上传背景图
+          </button>
+          <button
+            onClick={() => setSettings({ chatBackground: '' })}
+            className="rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-700"
+          >
+            默认
+          </button>
+        </div>
+        <input
+          ref={backgroundInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) void handleBackgroundImage(file)
+            if (backgroundInputRef.current) backgroundInputRef.current.value = ''
+          }}
+        />
+        <p className="text-[11px] text-gray-400">背景只保存在本机，导出备份时会一起带走。</p>
+      </section>
 
       <section className="mt-3 bg-white px-4 py-3">
         <h2 className="mb-2 text-xs font-medium text-gray-400">API 配置（DeepSeek）</h2>

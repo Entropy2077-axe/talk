@@ -1,4 +1,4 @@
-import { forwardRef } from 'react'
+import { forwardRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/db'
 import { Avatar } from './Avatar'
@@ -14,6 +14,7 @@ interface MessageBubbleProps {
   userAvatar: string
   stickerUrl?: string
   highlighted?: boolean
+  adminMode?: boolean
   onLinkClick?: (label: string) => void
   onCommissionRespond?: (commissionId: string, accept: boolean) => void
 }
@@ -27,12 +28,19 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
     userAvatar,
     stickerUrl,
     highlighted,
+    adminMode,
     onLinkClick,
     onCommissionRespond,
   },
   ref,
 ) {
   const isUser = message.role === 'user'
+  const [expanded, setExpanded] = useState(false)
+  const debugPayload = {
+    message,
+    parsedBubble: message.debugParsedBubble,
+    rawAiResponse: message.debugRawAiResponse,
+  }
   return (
     <div ref={ref} className={`px-3 py-1.5 ${highlighted ? 'bg-yellow-50' : ''}`}>
       {!isUser && <p className="mb-1 text-[11px] text-gray-400">{contactName}</p>}
@@ -104,6 +112,21 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
           )}
 
           <span className="mt-0.5 px-1 text-[10px] text-gray-300">{formatBubbleTime(message.createdAt)}</span>
+          {adminMode && !isUser && (
+            <div className="mt-1 w-full">
+              <button
+                onClick={() => setExpanded((v) => !v)}
+                className="rounded bg-gray-100 px-2 py-1 text-[10px] text-gray-500"
+              >
+                {expanded ? '收起 JSON' : '展开 JSON'}
+              </button>
+              {expanded && (
+                <pre className="mt-1 max-h-48 w-64 overflow-auto rounded-lg bg-gray-50 p-2 font-mono text-[10px] leading-relaxed text-gray-600">
+                  {JSON.stringify(debugPayload, null, 2)}
+                </pre>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

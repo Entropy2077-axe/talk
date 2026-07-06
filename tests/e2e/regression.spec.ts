@@ -67,9 +67,69 @@ async function seedBackupFixture(page: Page) {
   })
 }
 
+async function seedSearchAndGroupFixture(page: Page) {
+  await page.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts')
+    const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
+    for (const table of db.tables) await table.clear()
+    useSettingsStore.getState().setSettings({ adminModeEnabled: true, themeMode: 'light', chatBackground: '' })
+    const baseContact = {
+      avatar: '🙂',
+      avatarColor: '#e5f7ef',
+      systemPrompt: 'test persona',
+      createdAt: 1,
+      memoryFacts: '',
+      memoryStyle: '',
+      memoryUpdatedAt: 0,
+      memoryMessageCursor: 0,
+      relationship: { familiarity: 10, affection: 20, trust: 30, romance: 0, friction: 0 },
+    }
+    await db.contacts.bulkAdd([
+      { ...baseContact, id: 'contact-a', name: 'Alice Search' },
+      { ...baseContact, id: 'contact-b', name: 'Bob Member' },
+      { ...baseContact, id: 'contact-c', name: 'Carol Newbie' },
+    ])
+    await db.groups.add({
+      id: 'group-a',
+      name: 'Search Squad',
+      avatar: '👥',
+      avatarColor: '#e5e7eb',
+      memberContactIds: ['contact-a', 'contact-b'],
+      createdAt: 2,
+      memoryMessageCursor: 0,
+    })
+    await db.conversations.bulkAdd([
+      { id: 'conversation-a', contactId: 'contact-a', pinned: false, createdAt: 3, updatedAt: 5 },
+      { id: 'conversation-g', groupId: 'group-a', pinned: false, createdAt: 4, updatedAt: 6 },
+    ])
+    await db.messages.bulkAdd([
+      {
+        id: 'message-a',
+        conversationId: 'conversation-a',
+        role: 'assistant',
+        type: 'text',
+        content: 'the hidden keyword is nebula',
+        debugRawAiResponse: '{"messages":[{"type":"text","content":"the hidden keyword is nebula"}]}',
+        debugParsedBubble: { type: 'text', content: 'the hidden keyword is nebula' },
+        createdAt: 7,
+      },
+      {
+        id: 'message-g',
+        conversationId: 'conversation-g',
+        role: 'assistant',
+        type: 'text',
+        content: 'group keyword comet',
+        speakerContactId: 'contact-a',
+        createdAt: 8,
+      },
+    ])
+  })
+}
+
 test('settings page exports a complete Talk backup json', async ({ page }) => {
   await page.goto('/#/settings')
   await seedBackupFixture(page)
+  await page.reload()
 
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: '导出备份' }).click()
@@ -92,6 +152,7 @@ test('settings page exports a complete Talk backup json', async ({ page }) => {
 test('settings page restores contacts and settings from a backup file', async ({ page }) => {
   await page.goto('/#/settings')
   await seedBackupFixture(page)
+  await page.reload()
 
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: '导出备份' }).click()
@@ -106,17 +167,17 @@ test('settings page restores contacts and settings from a backup file', async ({
   })
 
   page.on('dialog', (dialog) => dialog.accept())
-  await page.locator('input[type="file"]').setInputFiles(backupPath!)
+  await page.locator('input[accept="application/json,.json"]').setInputFiles(backupPath!)
   await expect(page.getByText('备份已恢复')).toBeVisible()
 
   const restored = await page.evaluate(async () => {
     const { db } = await import('/src/db/db.ts')
-    const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
+    const persisted = JSON.parse(window.localStorage.getItem('talk-settings') ?? '{"state":{}}')
     return {
       contacts: await db.contacts.toArray(),
       messages: await db.messages.toArray(),
-      userNickname: useSettingsStore.getState().userNickname,
-      apiKey: useSettingsStore.getState().apiKey,
+      userNickname: persisted.state.userNickname,
+      apiKey: persisted.state.apiKey,
     }
   })
   expect(restored.contacts).toHaveLength(1)
@@ -218,4 +279,96 @@ test('release assets needed for icon and apk publishing are present', async () =
   expect(existsSync(join(root, 'public', 'app-icon.png'))).toBe(true)
   expect(existsSync(join(root, 'scripts', 'release-apk.mjs'))).toBe(true)
   expect(existsSync(join(root, 'scripts', 'sync-android-icon.ps1'))).toBe(true)
+})
+
+test('search overlay finds full chat history and group chats', async ({ page }) => {
+  await page.goto('/#/')
+  await seedSearchAndGroupFixture(page)
+  await page.reload()
+
+  await page.getByLabel('搜索').click()
+  await page.getByPlaceholder('搜索联系人、群聊、聊天记录').fill('nebula')
+  await expect(page.getByText('the hidden keyword is nebula')).toBeVisible()
+  await expect(page.getByText('Alice Search', { exact: true })).toBeVisible()
+
+  await page.getByPlaceholder('搜索联系人、群聊、聊天记录').fill('Search Squad')
+  await expect(page.getByRole('button', { name: '👥 Search Squad' })).toBeVisible()
+})
+
+test('group info page can add and remove members after creation', async ({ page }) => {
+  await page.goto('/#/group/group-a')
+  await seedSearchAndGroupFixture(page)
+  await page.reload()
+
+  await expect(page.getByText('2 位成员')).toBeVisible()
+  await page.getByRole('button', { name: '管理' }).click()
+  await page.getByText('Carol Newbie').click()
+  await page.getByRole('button', { name: '添加选中的 1 人' }).click()
+  await expect(page.getByText('3 位成员')).toBeVisible()
+
+  await page.getByRole('button', { name: '移除' }).first().click()
+  await expect(page.getByText('2 位成员')).toBeVisible()
+})
+
+test('appearance settings enable dark mode and custom chat background', async ({ page }) => {
+  await page.goto('/#/settings')
+  await clearDatabase(page)
+
+  await page.getByLabel('切换暗色模式').click()
+  await expect(page.locator('.app-shell')).toHaveClass(/theme-dark/)
+
+  await page.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts')
+    const persisted = JSON.parse(window.localStorage.getItem('talk-settings') ?? '{"state":{}}')
+    window.localStorage.setItem(
+      'talk-settings',
+      JSON.stringify({ ...persisted, state: { ...(persisted.state ?? {}), chatBackground: '#123456', themeMode: 'dark' } }),
+    )
+    await db.contacts.add({
+      id: 'contact-bg',
+      name: 'Bg Test',
+      avatar: '🙂',
+      avatarColor: '#e5f7ef',
+      systemPrompt: 'test',
+      createdAt: 1,
+      memoryFacts: '',
+      memoryStyle: '',
+      memoryUpdatedAt: 0,
+      memoryMessageCursor: 0,
+      relationship: { familiarity: 0, affection: 0, trust: 0, romance: 0, friction: 0 },
+    })
+    await db.conversations.add({ id: 'conversation-bg', contactId: 'contact-bg', pinned: false, createdAt: 1, updatedAt: 1 })
+  })
+  await page.goto('/#/chat/conversation-bg')
+  await page.reload()
+  const chatBackground = await page.getByTestId('chat-scroll').evaluate((el) => getComputedStyle(el).backgroundColor)
+  expect(chatBackground).toBe('rgb(18, 52, 86)')
+})
+
+test('ai response parser recovers commission leaks and keeps reward fallback metrics', async ({ page }) => {
+  await page.goto('/#/sky-eye')
+  await page.evaluate(async () => {
+    window.localStorage.removeItem('talk-ai-response-quality')
+    const { parseAiResponse } = await import('/src/lib/aiProtocol.ts')
+    parseAiResponse('{"messages":[{"type":"commission","title":"买咖啡","description":"顺路带一杯","reward":"大概20左右"}]}')
+    parseAiResponse('{"messages":[{"type":"text","content":"[发布了委托: 取快递]"}]}')
+    parseAiResponse('不是JSON\n但也应该显示')
+  })
+  await page.reload()
+
+  await expect(page.getByText('AI 响应质量监控')).toBeVisible()
+  await expect(page.getByText('已记录回复').locator('..')).toContainText('3')
+  await expect(page.getByText('方括号 leak 命中').locator('..')).toContainText('1')
+  await expect(page.getByText('reward 默认兜底').locator('..')).toContainText('1')
+  await expect(page.getByText('逐行兜底气泡').locator('..')).toContainText('2')
+})
+
+test('admin mode can expand assistant message debug json', async ({ page }) => {
+  await page.goto('/#/chat/conversation-a')
+  await seedSearchAndGroupFixture(page)
+  await page.reload()
+
+  await page.getByRole('button', { name: '展开 JSON' }).click()
+  await expect(page.getByText('rawAiResponse')).toBeVisible()
+  await expect(page.getByText('debugParsedBubble')).toBeVisible()
 })

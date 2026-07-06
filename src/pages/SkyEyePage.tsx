@@ -4,6 +4,7 @@ import { useConsoleCaptureStore } from '../lib/consoleCapture'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { db } from '../db/db'
 import { formatBubbleTime } from '../lib/time'
+import { getAiResponseQualityStats, subscribeAiResponseQuality } from '../lib/aiProtocol'
 
 const LEVEL_COLOR: Record<string, string> = {
   log: 'text-gray-600',
@@ -53,6 +54,7 @@ export function SkyEyePage() {
   const clearLogs = useConsoleCaptureStore((s) => s.clear)
   const settings = useSettingsStore()
   const [stats, setStats] = useState<Record<string, number> | null>(null)
+  const [aiQualityStats, setAiQualityStats] = useState(() => getAiResponseQualityStats())
   const layoutDiagnostics = useLayoutDiagnostics()
 
   useEffect(() => {
@@ -105,6 +107,12 @@ export function SkyEyePage() {
     loadStats()
   }, [])
 
+  useEffect(() => {
+    const update = () => setAiQualityStats(getAiResponseQualityStats())
+    update()
+    return subscribeAiResponseQuality(update)
+  }, [])
+
   const settingsDump = Object.fromEntries(
     Object.entries(settings)
       .filter(([key]) => key !== 'setSettings')
@@ -146,6 +154,39 @@ export function SkyEyePage() {
               </p>
             ))}
           </div>
+        </section>
+
+        <section className="mt-3 bg-white px-4 py-4">
+          <h2 className="mb-2 text-xs font-medium text-gray-400">AI 响应质量监控（最近 {aiQualityStats.windowSize} 次）</h2>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm text-gray-700">
+            <div className="flex justify-between">
+              <span className="text-gray-500">已记录回复</span>
+              <span className="font-medium">{aiQualityStats.total}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">JSON 成功率</span>
+              <span className="font-medium">{Math.round(aiQualityStats.jsonSuccessRate * 100)}%</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">JSON 解析成功</span>
+              <span className="font-medium">{aiQualityStats.jsonParseSuccess}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">逐行兜底气泡</span>
+              <span className="font-medium">{aiQualityStats.fallbackLineParses}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">方括号 leak 命中</span>
+              <span className="font-medium">{aiQualityStats.commissionLeakHits}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">reward 默认兜底</span>
+              <span className="font-medium">{aiQualityStats.rewardNaNFallbacks}</span>
+            </div>
+          </div>
+          <p className="mt-2 text-[11px] leading-relaxed text-gray-400">
+            reward 解析失败时现在会保留委托，并使用默认报酬；这里统计的是触发默认兜底的次数。
+          </p>
         </section>
 
         <section className="mt-3 bg-white px-4 py-4">

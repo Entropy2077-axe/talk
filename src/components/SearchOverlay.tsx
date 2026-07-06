@@ -18,34 +18,47 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
   const navigate = useNavigate()
 
   const contacts = useLiveQuery(() => db.contacts.toArray(), []) ?? EMPTY_ARRAY
+  const groups = useLiveQuery(() => db.groups.toArray(), []) ?? EMPTY_ARRAY
   const conversations = useLiveQuery(() => db.conversations.toArray(), []) ?? EMPTY_ARRAY
   const messages = useLiveQuery(() => db.messages.toArray(), []) ?? EMPTY_ARRAY
 
   const q = query.trim()
+  const lowerQ = q.toLowerCase()
 
   const matchedContacts = useMemo(() => {
     if (!q) return []
     const convByContact = new Map(conversations.map((c) => [c.contactId, c]))
     return contacts
-      .filter((c) => displayName(c).toLowerCase().includes(q.toLowerCase()))
+      .filter((c) => displayName(c).toLowerCase().includes(lowerQ))
       .map((c) => ({ contact: c, conv: convByContact.get(c.id) }))
       .sort((a, b) => (b.conv?.updatedAt ?? 0) - (a.conv?.updatedAt ?? 0))
-  }, [q, contacts, conversations])
+  }, [q, lowerQ, contacts, conversations])
+
+  const matchedGroups = useMemo(() => {
+    if (!q) return []
+    const convByGroup = new Map(conversations.map((c) => [c.groupId, c]))
+    return groups
+      .filter((g) => g.name.toLowerCase().includes(lowerQ))
+      .map((g) => ({ group: g, conv: convByGroup.get(g.id) }))
+      .sort((a, b) => (b.conv?.updatedAt ?? 0) - (a.conv?.updatedAt ?? 0))
+  }, [q, lowerQ, groups, conversations])
 
   const matchedMessages = useMemo(() => {
     if (!q) return []
     const convById = new Map(conversations.map((c) => [c.id, c]))
     const contactById = new Map(contacts.map((c) => [c.id, c]))
+    const groupById = new Map(groups.map((g) => [g.id, g]))
     return messages
-      .filter((m) => m.type === 'text' && m.content.toLowerCase().includes(q.toLowerCase()))
+      .filter((m) => m.content.toLowerCase().includes(lowerQ))
       .map((m) => {
         const conv = convById.get(m.conversationId)
         const contact = conv?.contactId ? contactById.get(conv.contactId) : undefined
-        return { message: m, contactName: contact ? displayName(contact) : '未知' }
+        const group = conv?.groupId ? groupById.get(conv.groupId) : undefined
+        return { message: m, conversationName: contact ? displayName(contact) : group ? group.name : '未知会话' }
       })
       .sort((a, b) => b.message.createdAt - a.message.createdAt)
       .slice(0, 50)
-  }, [q, messages, conversations, contacts])
+  }, [q, lowerQ, messages, conversations, contacts, groups])
 
   return (
     <div className="absolute inset-0 z-30 flex flex-col bg-white">
@@ -59,7 +72,7 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索联系人、聊天记录"
+            placeholder="搜索联系人、群聊、聊天记录"
             className="w-full bg-transparent text-sm outline-none placeholder:text-gray-400"
           />
         </div>
@@ -98,11 +111,38 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
           </section>
 
           <section className="mt-2 border-t border-gray-100">
+            <h3 className="px-4 pt-3 pb-1 text-xs font-medium text-gray-400">群聊</h3>
+            {matchedGroups.length === 0 ? (
+              <p className="px-4 py-3 text-sm text-gray-400">没有找到匹配的群聊</p>
+            ) : (
+              matchedGroups.map(({ group, conv }) => (
+                <button
+                  key={group.id}
+                  onClick={() => {
+                    onClose()
+                    navigate(conv ? `/chat/${conv.id}` : `/group/${group.id}`)
+                  }}
+                  className="flex w-full items-center gap-3 px-4 py-2 text-left active:bg-gray-50"
+                >
+                  <Avatar avatar={group.avatar} color={group.avatarColor} size={38} />
+                  <span className="text-[15px] text-gray-900">
+                    {highlightSegments(group.name, q).map((seg, i) => (
+                      <span key={i} className={seg.matched ? 'text-[#aa3bff]' : ''}>
+                        {seg.text}
+                      </span>
+                    ))}
+                  </span>
+                </button>
+              ))
+            )}
+          </section>
+
+          <section className="mt-2 border-t border-gray-100">
             <h3 className="px-4 pt-3 pb-1 text-xs font-medium text-gray-400">聊天记录</h3>
             {matchedMessages.length === 0 ? (
               <p className="px-4 py-3 text-sm text-gray-400">没有找到匹配的聊天记录</p>
             ) : (
-              matchedMessages.map(({ message, contactName }) => (
+              matchedMessages.map(({ message, conversationName }) => (
                 <button
                   key={message.id}
                   onClick={() => {
@@ -118,12 +158,8 @@ export function SearchOverlay({ onClose }: SearchOverlayProps) {
                       </span>
                     ))}
                   </span>
-                  <span className="shrink-0 text-xs text-gray-400">
-                    {truncateName(contactName)}
-                  </span>
-                  <span className="shrink-0 text-[11px] text-gray-300">
-                    {formatListTime(message.createdAt)}
-                  </span>
+                  <span className="shrink-0 text-xs text-gray-400">{truncateName(conversationName)}</span>
+                  <span className="shrink-0 text-[11px] text-gray-300">{formatListTime(message.createdAt)}</span>
                 </button>
               ))
             )}

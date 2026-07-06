@@ -141,7 +141,7 @@ async function runGroupAiTurn(
       return
     }
     processKnowledgeQueries(knowledgeQueries, settings)
-    revealGroupBubbles(conversationId, group, members, speakers, bubbles, streamId, settings)
+    revealGroupBubbles(conversationId, group, members, speakers, bubbles, streamId, settings, raw)
   } catch (err) {
     if (streamByConversation.get(conversationId) !== streamId) return
     if (err instanceof DOMException && err.name === 'AbortError') return
@@ -159,6 +159,7 @@ function revealGroupBubbles(
   bubbles: GroupAiBubble[],
   streamId: string,
   settings: AppSettings,
+  rawAiResponse: string,
 ): void {
   const timers: ReturnType<typeof setTimeout>[] = []
   let cumulative = 0
@@ -183,6 +184,8 @@ function revealGroupBubbles(
         type: bubble.type,
         content,
         speakerContactId: speaker?.id,
+        debugRawAiResponse: rawAiResponse,
+        debugParsedBubble: bubble,
         createdAt: Date.now(),
       }
       await db.messages.add(msg)

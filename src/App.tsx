@@ -82,9 +82,14 @@ function useAndroidBackButton() {
 function App() {
   useAutonomousBehaviorTimer()
   useAndroidBackButton()
+  const themeMode = useSettingsStore((s) => s.themeMode ?? 'light')
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeMode
+  }, [themeMode])
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${themeMode === 'dark' ? 'theme-dark' : ''}`}>
       <NotificationBanner />
       <Routes>
         <Route element={<TabLayout />}>

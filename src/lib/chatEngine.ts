@@ -11,7 +11,7 @@ import { knowledgeDigestText, processKnowledgeQueries } from './knowledgeBase'
 import { displayName } from './contact'
 import { previewForMessage } from './messagePreview'
 import { useChatUiStore } from '../store/useChatUiStore'
-import type { AiBubble, AppSettings, Contact, Message, ScheduleOverride, Sticker } from '../types'
+import type { AiBubble, AppSettings, Contact, Message, MessageType, ScheduleOverride, Sticker } from '../types'
 
 /**
  * Per-conversation AI-turn state, deliberately kept in a module-level
@@ -65,6 +65,25 @@ function clearPending(conversationId: string) {
   timersByConversation.get(conversationId)?.forEach(clearTimeout)
   timersByConversation.set(conversationId, [])
   abortByConversation.get(conversationId)?.abort()
+}
+
+function formatStructuredHistoryEvent(message: Message, kind: MessageType): ChatMessage {
+  const actor = message.role === 'assistant' ? 'contact' : 'user'
+  const payload =
+    kind === 'commission' && message.commission
+      ? { kind, actor, title: message.content, commissionId: message.commission.commissionId }
+      : kind === 'link' && message.link
+        ? { kind, actor, label: message.link.label, app: message.link.app, data: message.link.data }
+        : kind === 'gift' && message.gift
+          ? { kind, actor, name: message.gift.name, icon: message.gift.icon }
+          : kind === 'scheduleChange' && message.scheduleChange
+            ? { kind, actor, summary: message.scheduleChange.summary, date: message.scheduleChange.date }
+            : { kind, actor, content: message.content }
+
+  return {
+    role: 'system',
+    content: `HISTORY_EVENT ${JSON.stringify(payload)}`,
+  }
 }
 
 export function buildUserProfileText(settings: AppSettings): string {
@@ -172,11 +191,11 @@ async function runAiTurn(
     const chatMessages: ChatMessage[] = coalesceConsecutiveRoles([
       { role: 'system', content: systemPrompt },
       ...recentHistory.map((m): ChatMessage => {
-        if (m.type === 'sticker') return { role: m.role, content: `[发了一个表情: ${m.content}]` }
-        if (m.type === 'link') return { role: m.role, content: `[分享了一个链接: ${m.content}]` }
-        if (m.type === 'commission') return { role: m.role, content: `[发布了委托: ${m.content}]` }
-        if (m.type === 'gift') return { role: m.role, content: `[送出了礼物: ${m.content}]` }
-        if (m.type === 'scheduleChange') return { role: m.role, content: `[达成新的日程约定: ${m.content}]` }
+        if (m.type === 'sticker') return formatStructuredHistoryEvent(m, 'sticker')
+        if (m.type === 'link') return formatStructuredHistoryEvent(m, 'link')
+        if (m.type === 'commission') return formatStructuredHistoryEvent(m, 'commission')
+        if (m.type === 'gift') return formatStructuredHistoryEvent(m, 'gift')
+        if (m.type === 'scheduleChange') return formatStructuredHistoryEvent(m, 'scheduleChange')
         return { role: m.role, content: m.content }
       }),
     ])
@@ -200,7 +219,7 @@ async function runAiTurn(
       return
     }
     processKnowledgeQueries(knowledgeQueries, settings)
-    revealBubbles(conversationId, contact, settings, bubbles, streamId)
+    revealBubbles(conversationId, contact, settings, bubbles, streamId, raw)
   } catch (err) {
     if (streamByConversation.get(conversationId) !== streamId) return
     if (err instanceof DOMException && err.name === 'AbortError') return
@@ -216,6 +235,7 @@ function revealBubbles(
   settings: AppSettings,
   bubbles: AiBubble[],
   streamId: string,
+  rawAiResponse: string,
 ): void {
   const timers: ReturnType<typeof setTimeout>[] = []
   let cumulative = 0
@@ -286,6 +306,8 @@ function revealBubbles(
                 summary: bubble.summary,
               }
             : undefined,
+        debugRawAiResponse: rawAiResponse,
+        debugParsedBubble: bubble,
         createdAt: Date.now(),
       }
       await db.messages.add(msg)

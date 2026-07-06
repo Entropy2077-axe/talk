@@ -1,30 +1,60 @@
 import type { AiBubble, AiResponse } from '../types'
 
-/**
- * Parses the model's reply into bubbles. The model is instructed to reply
- * with pure JSON, but empirically (verified against the live API) it does
- * not always comply on the 2nd+ turn of a conversation even with a
- * carefully ordered prompt — this is a model-compliance limitation, not
- * just our formatting. When JSON parsing fails but the model still wrote
- * something real, we fall back to treating each non-empty line as its own
- * text bubble (the same "one bubble per short line" shape a compliant JSON
- * reply would have produced) rather than discarding a genuine reply.
- * Returns an empty array only when there is truly nothing to show (blank
- * response) — callers must treat `[]` as "no reply".
- */
 export interface ParsedAiTurn {
   bubbles: AiBubble[]
-  /** Up to 2 topics the model flagged for the knowledge base to look up — see lib/knowledgeBase.ts. Always [] on the fallback (non-JSON) path since there's no structured field to read it from. */
   knowledgeQueries: string[]
 }
 
+export interface AiResponseQualityRecord {
+  id: string
+  timestamp: number
+  jsonParseSuccess: boolean
+  fallbackLineCount: number
+  commissionLeakHits: number
+  rewardNaNFallbacks: number
+}
+
+export interface AiResponseQualityStats {
+  windowSize: number
+  total: number
+  jsonParseSuccess: number
+  fallbackLineParses: number
+  commissionLeakHits: number
+  rewardNaNFallbacks: number
+  jsonSuccessRate: number
+}
+
+const QUALITY_STORAGE_KEY = 'talk-ai-response-quality'
+const QUALITY_EVENT = 'talk-ai-response-quality-updated'
+const QUALITY_WINDOW_SIZE = 50
+const MIN_COMMISSION_REWARD = 10
+const MAX_COMMISSION_REWARD = 200
+
+const COMMISSION_LEAK_PATTERNS = [
+  /^\[发布了委托[:：]\s*(.+?)\s*\]$/,
+  /^\[[^\]]*委托[:：]\s*(.+?)\s*\]$/,
+  /^\[[^\]]*鎵[^\]]*[:：]\s*(.+?)\s*\]$/,
+]
+
 export function parseAiResponse(raw: string): ParsedAiTurn {
   const trimmedRaw = raw.trim()
-  if (!trimmedRaw) return { bubbles: [], knowledgeQueries: [] }
+  const counters = { commissionLeakHits: 0, rewardNaNFallbacks: 0 }
 
-  const jsonResult = tryParseJson(trimmedRaw)
+  if (!trimmedRaw) {
+    recordAiResponseQuality({ jsonParseSuccess: false, fallbackLineCount: 0, commissionLeakHits: 0, rewardNaNFallbacks: 0 })
+    return { bubbles: [], knowledgeQueries: [] }
+  }
+
+  const jsonResult = tryParseJson(trimmedRaw, counters)
   if (jsonResult && jsonResult.bubbles.length > 0) {
-    return { bubbles: recoverLeakedBubbles(jsonResult.bubbles), knowledgeQueries: jsonResult.knowledgeQueries }
+    const bubbles = recoverLeakedBubbles(jsonResult.bubbles, counters)
+    recordAiResponseQuality({
+      jsonParseSuccess: true,
+      fallbackLineCount: 0,
+      commissionLeakHits: counters.commissionLeakHits,
+      rewardNaNFallbacks: counters.rewardNaNFallbacks,
+    })
+    return { bubbles, knowledgeQueries: jsonResult.knowledgeQueries }
   }
 
   const fallbackBubbles: AiBubble[] = trimmedRaw
@@ -32,30 +62,26 @@ export function parseAiResponse(raw: string): ParsedAiTurn {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((content) => ({ type: 'text', content }))
-  return { bubbles: recoverLeakedBubbles(fallbackBubbles), knowledgeQueries: [] }
+  const bubbles = recoverLeakedBubbles(fallbackBubbles, counters)
+  recordAiResponseQuality({
+    jsonParseSuccess: false,
+    fallbackLineCount: fallbackBubbles.length,
+    commissionLeakHits: counters.commissionLeakHits,
+    rewardNaNFallbacks: counters.rewardNaNFallbacks,
+  })
+  return { bubbles, knowledgeQueries: [] }
 }
 
-/**
- * The model occasionally, despite an explicit prompt instruction not to,
- * mimics the bracketed history-placeholder format (e.g.
- * "[发布了委托: 帮忙取快递]") as literal text content instead of actually using
- * the structured commission JSON type — reproduced live: it happens most
- * often for a *second* commission later in the same conversation, right
- * after the model has seen its own earlier commission compressed into that
- * exact bracket form in its own history (see chatEngine.ts's history
- * mapping for the API call). The prompt instruction alone didn't reliably
- * stop it, so this recovers the card structurally instead of depending
- * entirely on prompt compliance — same philosophy as extractJsonObject and
- * the reward-string coercion above.
- */
-const COMMISSION_LEAK_PATTERN = /^\[发布了委托[:：]\s*(.+?)\s*\]$/
-
-function recoverLeakedBubbles(bubbles: AiBubble[]): AiBubble[] {
+function recoverLeakedBubbles(
+  bubbles: AiBubble[],
+  counters: { commissionLeakHits: number },
+): AiBubble[] {
   return bubbles.map((b): AiBubble => {
     if (b.type !== 'text') return b
-    const match = b.content.match(COMMISSION_LEAK_PATTERN)
+    const match = COMMISSION_LEAK_PATTERNS.map((pattern) => b.content.match(pattern)).find(Boolean)
     if (!match) return b
-    const title = match[1]
+    counters.commissionLeakHits++
+    const title = match[1].trim()
     return { type: 'commission', title, description: title, reward: clampReward(NaN) }
   })
 }
@@ -65,14 +91,16 @@ export function parseKnowledgeQueriesField(raw: unknown): string[] {
   const result: string[] = []
   for (const q of raw) {
     if (typeof q === 'string' && q.trim()) result.push(q.trim())
-    if (result.length >= 2) break // cap at 2 regardless of how many the model listed
+    if (result.length >= 2) break
   }
   return result
 }
 
-function tryParseJson(trimmedRaw: string): { bubbles: AiBubble[]; knowledgeQueries: string[] } | null {
+function tryParseJson(
+  trimmedRaw: string,
+  counters: { rewardNaNFallbacks: number },
+): { bubbles: AiBubble[]; knowledgeQueries: string[] } | null {
   let text = trimmedRaw
-  // strip ```json ... ``` fences if the model added them despite instructions
   const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
   if (fenceMatch) text = fenceMatch[1].trim()
   if (!text) return null
@@ -81,11 +109,6 @@ function tryParseJson(trimmedRaw: string): { bubbles: AiBubble[]; knowledgeQueri
   try {
     parsed = JSON.parse(text)
   } catch {
-    // The model sometimes wraps the JSON in a bit of chit-chat before or
-    // after it despite instructions not to (e.g. "好的\n{...}" or a trailing
-    // remark) — that breaks a strict whole-string parse even though a
-    // perfectly valid JSON object is sitting in there. Scan for a balanced
-    // {...} object anywhere in the text and try that before giving up.
     const extracted = extractJsonObject(text)
     if (!extracted) return null
     try {
@@ -106,18 +129,14 @@ function tryParseJson(trimmedRaw: string): { bubbles: AiBubble[]; knowledgeQueri
     } else if (m.type === 'link' && typeof m.app === 'string' && typeof m.label === 'string') {
       bubbles.push({ type: 'link', app: m.app, label: m.label, data: m.data })
     } else if (m.type === 'commission' && typeof m.title === 'string' && m.title.trim() && typeof m.description === 'string') {
-      // reward is occasionally handed back as a numeric string ("30")
-      // rather than a JSON number — coerce rather than reject the whole
-      // commission over it.
       const rewardNum = typeof m.reward === 'number' ? m.reward : Number(m.reward)
-      if (Number.isFinite(rewardNum)) {
-        bubbles.push({
-          type: 'commission',
-          title: m.title.trim(),
-          description: m.description.trim(),
-          reward: clampReward(rewardNum),
-        })
-      }
+      if (!Number.isFinite(rewardNum)) counters.rewardNaNFallbacks++
+      bubbles.push({
+        type: 'commission',
+        title: m.title.trim(),
+        description: m.description.trim(),
+        reward: clampReward(rewardNum),
+      })
     } else if (m.type === 'scheduleChange') {
       const scheduleChange = parseScheduleChangeBubble(m as unknown as Record<string, unknown>)
       if (scheduleChange) bubbles.push(scheduleChange)
@@ -126,7 +145,6 @@ function tryParseJson(trimmedRaw: string): { bubbles: AiBubble[]; knowledgeQueri
   return { bubbles, knowledgeQueries: parseKnowledgeQueriesField(parsed.knowledgeQueries) }
 }
 
-/** Validates a scheduleChange bubble the model emitted — drops it (falls back to just the surrounding text bubbles) rather than crashing on a malformed date/hour. */
 function parseScheduleChangeBubble(m: Record<string, unknown>): AiBubble | null {
   const date = typeof m.date === 'string' ? m.date : ''
   const startHour = typeof m.startHour === 'number' ? m.startHour : Number(m.startHour)
@@ -145,7 +163,6 @@ function parseScheduleChangeBubble(m: Record<string, unknown>): AiBubble | null 
   return { type: 'scheduleChange', date, startHour, endHour, phoneAccess, location, activity, summary }
 }
 
-/** Finds the first balanced {...} object in `text`, respecting quoted strings, and returns it as a substring. */
 export function extractJsonObject(text: string): string | null {
   const start = text.indexOf('{')
   if (start === -1) return null
@@ -177,15 +194,71 @@ export function extractJsonObject(text: string): string | null {
   return null
 }
 
-// Keeps the AI from handing out (or lowballing) wildly unbalanced rewards.
-const MIN_COMMISSION_REWARD = 10
-const MAX_COMMISSION_REWARD = 200
 function clampReward(reward: number): number {
   if (!Number.isFinite(reward)) return MIN_COMMISSION_REWARD
   return Math.round(Math.min(MAX_COMMISSION_REWARD, Math.max(MIN_COMMISSION_REWARD, reward)))
 }
 
-/** Simulated typing delay before a bubble appears, based on its own content length. */
+function recordAiResponseQuality(record: Omit<AiResponseQualityRecord, 'id' | 'timestamp'>): void {
+  if (typeof window === 'undefined') return
+  const records = readAiResponseQualityRecords()
+  const next = [
+    ...records,
+    {
+      ...record,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      timestamp: Date.now(),
+    },
+  ].slice(-QUALITY_WINDOW_SIZE)
+  window.localStorage.setItem(QUALITY_STORAGE_KEY, JSON.stringify(next))
+  window.dispatchEvent(new CustomEvent(QUALITY_EVENT))
+}
+
+export function readAiResponseQualityRecords(): AiResponseQualityRecord[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(QUALITY_STORAGE_KEY) ?? '[]')
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((item): item is AiResponseQualityRecord => {
+      if (!item || typeof item !== 'object') return false
+      const r = item as Record<string, unknown>
+      return (
+        typeof r.id === 'string' &&
+        typeof r.timestamp === 'number' &&
+        typeof r.jsonParseSuccess === 'boolean' &&
+        typeof r.fallbackLineCount === 'number' &&
+        typeof r.commissionLeakHits === 'number' &&
+        typeof r.rewardNaNFallbacks === 'number'
+      )
+    })
+  } catch {
+    return []
+  }
+}
+
+export function getAiResponseQualityStats(records = readAiResponseQualityRecords()): AiResponseQualityStats {
+  const total = records.length
+  const jsonParseSuccess = records.filter((r) => r.jsonParseSuccess).length
+  const fallbackLineParses = records.reduce((sum, r) => sum + r.fallbackLineCount, 0)
+  const commissionLeakHits = records.reduce((sum, r) => sum + r.commissionLeakHits, 0)
+  const rewardNaNFallbacks = records.reduce((sum, r) => sum + r.rewardNaNFallbacks, 0)
+  return {
+    windowSize: QUALITY_WINDOW_SIZE,
+    total,
+    jsonParseSuccess,
+    fallbackLineParses,
+    commissionLeakHits,
+    rewardNaNFallbacks,
+    jsonSuccessRate: total === 0 ? 0 : jsonParseSuccess / total,
+  }
+}
+
+export function subscribeAiResponseQuality(listener: () => void): () => void {
+  if (typeof window === 'undefined') return () => {}
+  window.addEventListener(QUALITY_EVENT, listener)
+  return () => window.removeEventListener(QUALITY_EVENT, listener)
+}
+
 export function typingDelayMs(bubble: AiBubble): number {
   if (bubble.type === 'text') {
     const len = bubble.content.length

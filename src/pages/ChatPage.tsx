@@ -5,6 +5,7 @@ import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { TopBar } from '../components/TopBar'
 import { MessageBubble } from '../components/MessageBubble'
+import { SearchOverlay } from '../components/SearchOverlay'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { useChatUiStore } from '../store/useChatUiStore'
 import { DEFAULT_RUNTIME_STATE, sendMessage, useChatEngineStore } from '../lib/chatEngine'
@@ -60,6 +61,7 @@ export function ChatPage() {
 
   const [input, setInput] = useState('')
   const [toast, setToast] = useState('')
+  const [searching, setSearching] = useState(false)
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const bubbleRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -170,12 +172,20 @@ export function ChatPage() {
 
   const headerTitle = isGroupConv ? group!.name : displayName(contact!)
   const headerInfoPath = isGroupConv ? `/group/${group!.id}` : `/contact/${contact!.id}`
+  const chatBackgroundStyle =
+    settings.chatBackground && settings.chatBackground.startsWith('data:')
+      ? { backgroundImage: `url(${settings.chatBackground})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+      : settings.chatBackground
+        ? { backgroundColor: settings.chatBackground }
+        : undefined
 
   return (
-    <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#ededed]">
+    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#ededed]">
       <TopBar
         title={headerTitle}
         showBack
+        showSearch
+        onSearchClick={() => setSearching(true)}
         right={
           <button
             onClick={() => navigate(headerInfoPath)}
@@ -190,7 +200,7 @@ export function ChatPage() {
         }
       />
 
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto pt-2">
+      <div ref={scrollContainerRef} data-testid="chat-scroll" className="flex-1 overflow-y-auto pt-2" style={chatBackgroundStyle}>
         {messages.map((m) => {
           const speaker =
             isGroupConv && m.role === 'assistant' && m.speakerContactId ? memberById.get(m.speakerContactId) : undefined
@@ -210,6 +220,7 @@ export function ChatPage() {
               userAvatar={settings.userAvatar}
               stickerUrl={m.type === 'sticker' ? stickerByName.get(m.content) : undefined}
               highlighted={flashId === m.id}
+              adminMode={!!settings.adminModeEnabled}
               onLinkClick={() => setToast('小程序功能正在开发中')}
               onCommissionRespond={handleCommissionRespond}
             />
@@ -256,6 +267,7 @@ export function ChatPage() {
           发送
         </button>
       </div>
+      {searching && <SearchOverlay onClose={() => setSearching(false)} />}
     </div>
   )
 }

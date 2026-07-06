@@ -37,6 +37,8 @@ export const useSettingsStore = create<SettingsState>()(
       worldview: '',
       adminModeEnabled: false,
       pexelsApiKey: envPexelsKey,
+      themeMode: 'light',
+      chatBackground: '',
       setSettings: (patch) => set(patch),
     }),
     { name: 'talk-settings' },

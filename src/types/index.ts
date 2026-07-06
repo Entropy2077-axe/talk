@@ -199,6 +199,8 @@ export interface Message {
   scheduleChange?: ScheduleChangePayload
   bubbleGroupId?: string // groups bubbles emitted from one AI response
   speakerContactId?: string // group chats only: which member persona spoke this assistant bubble
+  debugRawAiResponse?: string // admin mode only: raw JSON/text returned by the AI for the turn that produced this bubble
+  debugParsedBubble?: AiBubble | GroupAiBubble // admin mode only: parsed bubble payload used to render this message
   createdAt: number
   pending?: boolean // true while an assistant bubble is still "typing" (not yet delivered)
 }
@@ -277,6 +279,9 @@ export interface AppSettings {
   knowledgeQueryLog?: { date: string; count: number } // rolling daily counter backing the cap on reactive keyword-triggered knowledge lookups, keyed by local date
   // ---- admin/dev tooling (see lib/consoleCapture.ts + SkyEyePage) ----
   adminModeEnabled: boolean // master switch for the "天眼" debug page; off by default, entry disappears from DiscoverPage when off
+  // ---- appearance ----
+  themeMode?: 'light' | 'dark'
+  chatBackground?: string // empty = default; otherwise a CSS color or data URL used behind chat messages
 }
 
 /** A dated fact about current internet culture (memes/anime/games), gathered by the knowledge-base refresh job — see lib/knowledgeBase.ts. */

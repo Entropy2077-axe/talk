@@ -56,6 +56,10 @@
   --app-height: 100dvh;
 }
 
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
 * {
   -webkit-tap-highlight-color: transparent;
 }
@@ -99,6 +103,70 @@ body {
   flex-direction: column;
   position: relative;
   overflow: hidden;
+}
+
+.theme-dark {
+  background: #111827;
+  color: #e5e7eb;
+}
+
+.theme-dark .bg-white {
+  background-color: #111827 !important;
+}
+
+.theme-dark .bg-\[\#f4f4f6\],
+.theme-dark .bg-\[\#ededed\],
+.theme-dark .bg-gray-50,
+.theme-dark .bg-gray-100 {
+  background-color: #1f2937 !important;
+}
+
+.theme-dark .bg-gray-900 {
+  background-color: #f3f4f6 !important;
+}
+
+.theme-dark .text-white {
+  color: #111827 !important;
+}
+
+.theme-dark .text-gray-900,
+.theme-dark .text-gray-800,
+.theme-dark .text-gray-700,
+.theme-dark .text-gray-600 {
+  color: #e5e7eb !important;
+}
+
+.theme-dark .text-gray-500,
+.theme-dark .text-gray-400,
+.theme-dark .text-gray-300 {
+  color: #9ca3af !important;
+}
+
+.theme-dark .border-gray-100,
+.theme-dark .border-gray-200 {
+  border-color: #374151 !important;
+}
+
+.theme-dark input,
+.theme-dark textarea,
+.theme-dark select {
+  background-color: #111827;
+  color: #e5e7eb;
+  border-color: #374151;
+}
+
+.theme-dark input::placeholder,
+.theme-dark textarea::placeholder {
+  color: #6b7280;
+}
+
+.theme-dark .active\:bg-gray-50:active {
+  background-color: #1f2937 !important;
+}
+
+.theme-dark .bg-\[\#95ec69\] {
+  background-color: #166534 !important;
+  color: #f9fafb !important;
 }
 
 @media (min-width: 481px) {
