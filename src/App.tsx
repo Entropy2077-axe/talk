@@ -4,7 +4,6 @@ import { App as CapacitorApp } from '@capacitor/app'
 import { useSettingsStore } from './store/useSettingsStore'
 import { refreshMoments } from './lib/moments'
 import { AUTONOMOUS_TICK_INTERVAL_MS, maybeTriggerProactiveMessage } from './lib/proactiveChat'
-import { maybeRemindOverdueCommissions } from './lib/chatEngine'
 import { installConsoleCapture } from './lib/consoleCapture'
 import { TabLayout } from './components/TabLayout'
 import { MessagesPage } from './pages/MessagesPage'
@@ -27,8 +26,6 @@ import { ProfileEditPage } from './pages/ProfileEditPage'
 import { WorldSettingsPage } from './pages/WorldSettingsPage'
 import { SkyEyePage } from './pages/SkyEyePage'
 import { NotificationBanner } from './components/NotificationBanner'
-import { RelationshipNotice } from './components/RelationshipNotice'
-
 // Runs once at module load, regardless of admin mode — so there's already
 // log history by the time someone opens "天眼".
 installConsoleCapture()
@@ -49,7 +46,6 @@ function useAutonomousBehaviorTimer() {
       const settings = useSettingsStore.getState()
       refreshMoments(settings).catch(() => {})
       maybeTriggerProactiveMessage(settings).catch(() => {})
-      maybeRemindOverdueCommissions().catch(() => {})
     }
     const id = setInterval(tick, AUTONOMOUS_TICK_INTERVAL_MS)
     return () => clearInterval(id)
@@ -94,7 +90,6 @@ function App() {
   return (
     <div className={`app-shell ${themeMode === 'dark' ? 'theme-dark' : ''}`}>
       <NotificationBanner />
-      <RelationshipNotice />
       <Routes>
         <Route element={<TabLayout />}>
           <Route path="/" element={<MessagesPage />} />

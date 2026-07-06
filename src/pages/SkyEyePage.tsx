@@ -4,7 +4,6 @@ import { useConsoleCaptureStore } from '../lib/consoleCapture'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { db } from '../db/db'
 import { formatBubbleTime } from '../lib/time'
-import { getAiResponseQualityStats, subscribeAiResponseQuality } from '../lib/aiProtocol'
 
 const LEVEL_COLOR: Record<string, string> = {
   log: 'text-gray-600',
@@ -15,47 +14,11 @@ const LEVEL_COLOR: Record<string, string> = {
 
 const REDACTED_KEYS = ['apiKey', 'tavilyApiKey', 'pexelsApiKey']
 
-/** Real-device viewport/WebView numbers — added specifically to debug a device-specific "layout stretches, bottom nav vanishes" report (Honor/MagicOS, Android 14) that couldn't be reproduced via Playwright/emulator. Recomputes on resize/visualViewport-resize so it reflects whatever's happening live, not just the state at page-load. */
-function useLayoutDiagnostics() {
-  const [snapshot, setSnapshot] = useState(() => readLayoutSnapshot())
-
-  useEffect(() => {
-    const update = () => setSnapshot(readLayoutSnapshot())
-    update()
-    window.addEventListener('resize', update)
-    window.visualViewport?.addEventListener('resize', update)
-    const interval = setInterval(update, 1000)
-    return () => {
-      window.removeEventListener('resize', update)
-      window.visualViewport?.removeEventListener('resize', update)
-      clearInterval(interval)
-    }
-  }, [])
-
-  return snapshot
-}
-
-function readLayoutSnapshot() {
-  const shell = document.querySelector('.app-shell')
-  return {
-    'window.innerHeight': window.innerHeight,
-    'window.innerWidth': window.innerWidth,
-    'visualViewport.height': window.visualViewport?.height ?? '(不支持)',
-    'visualViewport.offsetTop': window.visualViewport?.offsetTop ?? '(不支持)',
-    '计算出的 --app-height': getComputedStyle(document.documentElement).getPropertyValue('--app-height'),
-    '.app-shell 实际高度': shell ? Math.round(shell.getBoundingClientRect().height) : '(找不到)',
-    devicePixelRatio: window.devicePixelRatio,
-    userAgent: navigator.userAgent,
-  }
-}
-
 export function SkyEyePage() {
   const logs = useConsoleCaptureStore((s) => s.logs)
   const clearLogs = useConsoleCaptureStore((s) => s.clear)
   const settings = useSettingsStore()
   const [stats, setStats] = useState<Record<string, number> | null>(null)
-  const [aiQualityStats, setAiQualityStats] = useState(() => getAiResponseQualityStats())
-  const layoutDiagnostics = useLayoutDiagnostics()
 
   useEffect(() => {
     async function loadStats() {
@@ -70,7 +33,6 @@ export function SkyEyePage() {
         knowledgeEntries,
         savedWorldviews,
         todos,
-        commissions,
         inventory,
         stickers,
       ] = await Promise.all([
@@ -84,7 +46,6 @@ export function SkyEyePage() {
         db.knowledgeEntries.count(),
         db.savedWorldviews.count(),
         db.todos.count(),
-        db.commissions.count(),
         db.inventory.count(),
         db.stickers.count(),
       ])
@@ -99,18 +60,11 @@ export function SkyEyePage() {
         知识库条目: knowledgeEntries,
         收藏的世界观: savedWorldviews,
         待办: todos,
-        委托: commissions,
         仓库物品: inventory,
         表情包: stickers,
       })
     }
     loadStats()
-  }, [])
-
-  useEffect(() => {
-    const update = () => setAiQualityStats(getAiResponseQualityStats())
-    update()
-    return subscribeAiResponseQuality(update)
   }, [])
 
   const settingsDump = Object.fromEntries(
@@ -142,51 +96,6 @@ export function SkyEyePage() {
               ))}
             </div>
           )}
-        </section>
-
-        <section className="mt-3 bg-white px-4 py-4">
-          <h2 className="mb-2 text-xs font-medium text-gray-400">布局诊断（每秒自动刷新，遇到布局问题时把这块内容截图发给开发者）</h2>
-          <div className="space-y-1 rounded-lg bg-gray-50 p-2 font-mono text-[11px] leading-relaxed text-gray-600">
-            {Object.entries(layoutDiagnostics).map(([label, value]) => (
-              <p key={label} className="break-all">
-                <span className="text-gray-400">{label}: </span>
-                {String(value)}
-              </p>
-            ))}
-          </div>
-        </section>
-
-        <section className="mt-3 bg-white px-4 py-4">
-          <h2 className="mb-2 text-xs font-medium text-gray-400">AI 响应质量监控（最近 {aiQualityStats.windowSize} 次）</h2>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm text-gray-700">
-            <div className="flex justify-between">
-              <span className="text-gray-500">已记录回复</span>
-              <span className="font-medium">{aiQualityStats.total}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">JSON 成功率</span>
-              <span className="font-medium">{Math.round(aiQualityStats.jsonSuccessRate * 100)}%</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">JSON 解析成功</span>
-              <span className="font-medium">{aiQualityStats.jsonParseSuccess}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">逐行兜底气泡</span>
-              <span className="font-medium">{aiQualityStats.fallbackLineParses}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">方括号 leak 命中</span>
-              <span className="font-medium">{aiQualityStats.commissionLeakHits}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500">reward 默认兜底</span>
-              <span className="font-medium">{aiQualityStats.rewardNaNFallbacks}</span>
-            </div>
-          </div>
-          <p className="mt-2 text-[11px] leading-relaxed text-gray-400">
-            reward 解析失败时现在会保留委托，并使用默认报酬；这里统计的是触发默认兜底的次数。
-          </p>
         </section>
 
         <section className="mt-3 bg-white px-4 py-4">

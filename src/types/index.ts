@@ -1,12 +1,4 @@
-/** Five-dimension relationship model, scored 0-100 like a lightweight MBTI-style profile. */
-export interface RelationshipDimensions {
-  familiarity: number // 熟悉度 — how much history/context they share
-  affection: number // 好感度 — warmth, fondness
-  trust: number // 信任度 — willingness to be open/vulnerable
-  romance: number // 暧昧度 — romantic/flirtatious charge
-  friction: number // 摩擦感 — accumulated tension/annoyance
-}
-
+/** Single-dimension warmth model, -100 (hostile) to +100 (bonded) — see lib/relationship.ts. */
 export interface Contact {
   id: string
   name: string // the persona's own name, chosen by the AI at creation time — not user-renameable
@@ -21,8 +13,10 @@ export interface Contact {
   memoryStyle: string // compact notes on how tone/familiarity should adapt to this user over time
   memoryUpdatedAt: number
   memoryMessageCursor: number // number of messages already folded into memory, so updates only look at what's new
-  // ---- relationship network (contact's relationship toward the user) ----
-  relationship: RelationshipDimensions
+  // ---- relationship (single-dimension warmth, -100 hostile ~ +100 bonded) ----
+  warmth: number
+  relationshipBase: string // label the user picked at creation: 恋人/朋友/家人/... — only changes by explicit user action or explicit model assessment (e.g. "已经分手了")
+  relationshipDynamic: string // short natural-language summary of what the relationship currently feels like, updated by the utility model when warmth crosses a stage boundary; empty until the first assessment
   // ---- moments (朋友圈) ----
   lastMomentAt?: number // when this contact last posted a moment, used for the "hasn't posted in 10 min" eligibility check
   pendingEvents?: string[] // short notes about notable things to naturally mention next chat (e.g. "对方刚给你的朋友圈点了赞"), cleared once used
@@ -36,18 +30,6 @@ export interface Contact {
   // ---- auto-generated photo avatar (see lib/avatarCategory.ts + lib/photoSearch.ts) ----
   avatarPhotographer?: string // Pexels photographer credit, unset for anime avatars (waifu.pics) or manually-picked emoji/uploads
   avatarPhotographerUrl?: string
-  // ---- relationship type label (恋人/朋友/家人 etc., see RELATIONSHIP_OPTIONS in prompt.ts) ----
-  // Picked during the creation questionnaire and previously only used as a
-  // one-time hint fed into persona generation, then discarded — meaning
-  // nothing persistently told the model "you two are dating" on every
-  // subsequent turn, just whatever the generated persona text happened to
-  // imply. Now persisted and re-injected into the system prompt every turn
-  // (see buildSystemPrompt's relationshipType param) so the dynamic doesn't
-  // fade over a long conversation. Optional since contacts created before
-  // this existed won't have it — editable afterward on ContactCardPage
-  // (unlike name/persona, which stay locked after creation) so those can be
-  // corrected retroactively.
-  relationshipType?: string
 }
 
 /** A recurring weekly time block — generated once at contact creation alongside the persona, not user-editable directly. */
@@ -74,7 +56,7 @@ export interface ScheduleOverride {
   createdAt: number
 }
 
-/** A plan/appointment this contact made with the user, extracted from casual conversation (not the formal paid Commission system) — see memory.ts. Persists across turns until its date passes, unlike pendingEvents which fire once. */
+/** A plan/appointment this contact made with the user, extracted from casual conversation — see memory.ts. Persists across turns until its date passes, unlike pendingEvents which fire once. */
 export interface PlanItem {
   id: string
   text: string // short natural-language description, e.g. "周三晚上一起去吃烧烤"
@@ -158,16 +140,12 @@ export interface Group {
 }
 
 export type MessageRole = 'user' | 'assistant'
-export type MessageType = 'text' | 'sticker' | 'link' | 'commission' | 'gift' | 'scheduleChange'
+export type MessageType = 'text' | 'sticker' | 'link' | 'gift' | 'scheduleChange'
 
 export interface LinkPayload {
   app: string // e.g. 'shop' | 'todo'
   label: string
   data?: Record<string, unknown>
-}
-
-export interface CommissionPayload {
-  commissionId: string
 }
 
 export interface GiftPayload {
@@ -176,7 +154,7 @@ export interface GiftPayload {
   description?: string
 }
 
-/** Immutable record of an agreed one-off schedule exception, stored directly on the message (no separate mutable status/table — unlike Commission, there's nothing to accept/decline after the fact, the negotiation already happened in the preceding text bubbles). */
+/** Immutable record of an agreed one-off schedule exception, stored directly on the message (no separate mutable status/table — the negotiation already happened in the preceding text bubbles). */
 export interface ScheduleChangePayload {
   date: string
   startHour: number
@@ -192,9 +170,8 @@ export interface Message {
   conversationId: string
   role: MessageRole
   type: MessageType
-  content: string // text content, sticker name, link/commission/gift label
+  content: string // text content, sticker name, link/gift label
   link?: LinkPayload
-  commission?: CommissionPayload
   gift?: GiftPayload
   scheduleChange?: ScheduleChangePayload
   bubbleGroupId?: string // groups bubbles emitted from one AI response
@@ -222,22 +199,6 @@ export interface Sticker {
   createdAt: number
 }
 
-/** A paid task a contact offers the user in chat — accept/decline is itself sent back as a chat message. */
-export type CommissionStatus = 'pending' | 'accepted' | 'declined' | 'completed'
-
-export interface Commission {
-  id: string
-  contactId: string
-  title: string
-  description: string
-  reward: number // in 金币(coins), set by the AI when it issues the commission, clamped to a sane range
-  status: CommissionStatus
-  createdAt: number
-  respondedAt?: number
-  completedAt?: number
-  lastReminderAt?: number
-}
-
 export interface Todo {
   id: string
   title: string
@@ -245,8 +206,6 @@ export interface Todo {
   done: boolean
   createdAt: number
   completedAt?: number
-  source: 'user' | 'commission'
-  commissionId?: string // set when source === 'commission'
 }
 
 /** A purchased shop item sitting in the user's warehouse until used or gifted away. */
@@ -263,7 +222,7 @@ export interface AppSettings {
   apiKey: string
   baseUrl: string
   model: string
-  shopModel: string // separate model selection for shop product generation
+  utilityModel: string // model for secondary tasks: shop generation, warmth scoring / memory updates, worldview drafts, etc.
   globalSystemPrompt: string
   userNickname: string
   userAvatar: string
@@ -329,13 +288,6 @@ export interface AiBubbleLink {
   label: string
   data?: Record<string, unknown>
 }
-/** The contact offering the user a paid commission/errand. */
-export interface AiBubbleCommission {
-  type: 'commission'
-  title: string
-  description: string
-  reward: number
-}
 /** Emitted when the AI agrees to (or itself proposes) a one-off exception to its normal schedule — the negotiation itself happens in plain text bubbles beforehand; this is just the structured record of what was agreed. 1:1 only, not supported in the (deliberately simpler) group chat protocol. */
 export interface AiBubbleScheduleChange {
   type: 'scheduleChange'
@@ -347,7 +299,7 @@ export interface AiBubbleScheduleChange {
   activity: string
   summary: string
 }
-export type AiBubble = AiBubbleText | AiBubbleSticker | AiBubbleLink | AiBubbleCommission | AiBubbleScheduleChange
+export type AiBubble = AiBubbleText | AiBubbleSticker | AiBubbleLink | AiBubbleScheduleChange
 
 export interface AiResponse {
   messages: AiBubble[]
@@ -357,7 +309,7 @@ export interface AiResponse {
 
 // ---- group chat AI output protocol (see lib/groupChat.ts) ----
 // Deliberately a smaller protocol than 1:1 (text/sticker only, no
-// commission/link) to keep the multi-persona prompt tractable.
+// link) to keep the multi-persona prompt tractable.
 export interface GroupAiBubbleText {
   speakerIndex: number // 1-based index into that turn's selected-speakers list
   type: 'text'

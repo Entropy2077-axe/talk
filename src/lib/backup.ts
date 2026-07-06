@@ -11,7 +11,6 @@ export const BACKUP_TABLES = [
   'messages',
   'stickers',
   'todos',
-  'commissions',
   'inventory',
   'moments',
   'momentComments',

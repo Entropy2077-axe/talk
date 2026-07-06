@@ -14,6 +14,7 @@ import { removeContactFromAllGroups } from '../lib/groupChat'
 import { pruneExpiredOverrides, describeCurrentSchedule, describeUpcomingScheduleText } from '../lib/schedule'
 import { WEEKDAYS, describeCurrentTime } from '../lib/time'
 import { RELATIONSHIP_OPTIONS, AVAILABLE_LINK_APPS, buildSystemPromptSections } from '../lib/prompt'
+import { warmthLabel, warmthPrompt } from '../lib/relationship'
 import { buildUserProfileText } from '../lib/chatEngine'
 import { knowledgeDigestText } from '../lib/knowledgeBase'
 import { useSettingsStore } from '../store/useSettingsStore'
@@ -89,7 +90,10 @@ export function ContactCardPage() {
     ? buildSystemPromptSections({
         stylePrompt: settings.globalSystemPrompt,
         persona: contact.systemPrompt,
-        relationshipType: contact.relationshipType,
+        relationshipBase: contact.relationshipBase || '朋友',
+        relationshipDynamic: contact.relationshipDynamic || '',
+        warmth: contact.warmth ?? 0,
+        warmthPrompt: warmthPrompt(contact.warmth ?? 0),
         memoryFacts: contact.memoryFacts,
         memoryStyle: contact.memoryStyle,
         stickerNames: stickers.map((s) => s.name),
@@ -146,11 +150,11 @@ export function ContactCardPage() {
           className="flex w-full items-center justify-between px-4 py-3.5 text-left active:bg-gray-50"
         >
           <span className="text-[15px] text-gray-900">关系定位</span>
-          <span className="text-sm text-gray-400">{contact.relationshipType || '未设置'}</span>
+          <span className="text-sm text-gray-400">{contact.relationshipBase || '未设置'}</span>
         </button>
       </div>
       <p className="mt-1.5 px-4 text-[11px] text-gray-400">
-        关系定位会直接影响TA跟你聊天时的亲密程度和称呼方式（比如设成"恋人"会更亲密）不设置就是普通朋友
+        好感度: {contact.warmth ?? 0}（{warmthLabel(contact.warmth ?? 0)}）{contact.relationshipDynamic ? ` · ${contact.relationshipDynamic}` : ''}
       </p>
 
       <section className="mt-3 bg-white px-4 py-4">
@@ -263,7 +267,7 @@ export function ContactCardPage() {
           onClose={() => setPickingRelationshipType(false)}
           options={RELATIONSHIP_OPTIONS.map((label) => ({
             label,
-            onSelect: () => db.contacts.update(contactId!, { relationshipType: label }),
+            onSelect: () => db.contacts.update(contactId!, { relationshipBase: label }),
           }))}
         />
       )}

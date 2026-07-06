@@ -19,7 +19,7 @@ export const useSettingsStore = create<SettingsState>()(
       apiKey: envKey,
       baseUrl: envBaseUrl,
       model: 'deepseek-chat',
-      shopModel: 'deepseek-chat',
+      utilityModel: 'deepseek-chat',
       globalSystemPrompt: DEFAULT_STYLE_PROMPT,
       userNickname: '我',
       userAvatar: '🙂',

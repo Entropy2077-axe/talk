@@ -11,14 +11,7 @@ import { knowledgeDigestText, processKnowledgeQueries } from './knowledgeBase'
 import { displayName } from './contact'
 import { previewForMessage } from './messagePreview'
 import { useChatUiStore } from '../store/useChatUiStore'
-import {
-  applyRelationshipDelta,
-  crossedRelationshipMilestones,
-  inferRelationshipDeltaFromTurn,
-  relationshipStatsText,
-  relationshipUnlocks,
-  relationshipUnlocksText,
-} from './relationship'
+import { warmthPrompt } from './relationship'
 import type { AiBubble, AppSettings, Contact, Message, MessageType, ScheduleOverride, Sticker } from '../types'
 
 /**
@@ -68,8 +61,6 @@ export function getConversationRuntimeState(conversationId: string): Conversatio
 const streamByConversation = new Map<string, string>()
 const timersByConversation = new Map<string, ReturnType<typeof setTimeout>[]>()
 const abortByConversation = new Map<string, AbortController>()
-const COMMISSION_REMINDER_DELAY_MS = 24 * 60 * 60 * 1000
-
 function clearPending(conversationId: string) {
   timersByConversation.get(conversationId)?.forEach(clearTimeout)
   timersByConversation.set(conversationId, [])
@@ -79,46 +70,36 @@ function clearPending(conversationId: string) {
 export function formatStructuredHistoryEvent(
   message: Message,
   kind: MessageType,
-  commissionById = new Map<string, { reward: number }>(),
 ): ChatMessage {
   const actor = message.role === 'assistant' ? 'contact' : 'user'
-  const commission = kind === 'commission' && message.commission ? commissionById.get(message.commission.commissionId) : undefined
   const attrs =
-    kind === 'commission' && message.commission
+    kind === 'link' && message.link
       ? [
           ['type', kind],
           ['actor', actor],
-          ['title', message.content],
-          ['reward', commission?.reward],
-          ['commissionId', message.commission.commissionId],
+          ['label', message.link.label],
+          ['app', message.link.app],
+          ['data', JSON.stringify(message.link.data ?? {})],
         ]
-      : kind === 'link' && message.link
+      : kind === 'gift' && message.gift
         ? [
             ['type', kind],
             ['actor', actor],
-            ['label', message.link.label],
-            ['app', message.link.app],
-            ['data', JSON.stringify(message.link.data ?? {})],
+            ['name', message.gift.name],
+            ['icon', message.gift.icon],
           ]
-        : kind === 'gift' && message.gift
+        : kind === 'scheduleChange' && message.scheduleChange
           ? [
               ['type', kind],
               ['actor', actor],
-              ['name', message.gift.name],
-              ['icon', message.gift.icon],
+              ['summary', message.scheduleChange.summary],
+              ['date', message.scheduleChange.date],
             ]
-          : kind === 'scheduleChange' && message.scheduleChange
-            ? [
-                ['type', kind],
-                ['actor', actor],
-                ['summary', message.scheduleChange.summary],
-                ['date', message.scheduleChange.date],
-              ]
-            : [
-                ['type', kind],
-                ['actor', actor],
-                ['content', message.content],
-              ]
+          : [
+              ['type', kind],
+              ['actor', actor],
+              ['content', message.content],
+            ]
 
   const content = `<<HISTORY_EVENT ${attrs
     .filter(([, value]) => value !== undefined && value !== '')
@@ -196,7 +177,7 @@ export async function sendMessage(
  * Kicks off a reply from whatever's already in the conversation history,
  * without inserting a new user-role message first — for background actions
  * that write their own message directly (gifting an item from the
- * warehouse, completing a commission from the todo list) and then want a
+ * warehouse) and then want a
  * real reply out of it instead of just leaving a message sitting there
  * until the user happens to reopen that chat.
  */
@@ -213,57 +194,13 @@ export async function triggerAiTurn(
   await runAiTurn(conversationId, contact, settings, stickers, streamId)
 }
 
-export async function maybeRemindOverdueCommissions(): Promise<void> {
-  const now = Date.now()
-  const commissions = await db.commissions.toArray()
-  const overdue = commissions.find((c) => {
-    if (c.status !== 'pending' && c.status !== 'accepted') return false
-    const anchor = c.respondedAt ?? c.createdAt
-    const lastReminder = c.lastReminderAt ?? 0
-    return now - anchor >= COMMISSION_REMINDER_DELAY_MS && now - lastReminder >= COMMISSION_REMINDER_DELAY_MS
-  })
-  if (!overdue) return
-
-  const [contact, conv] = await Promise.all([
-    db.contacts.get(overdue.contactId),
-    db.conversations.where('contactId').equals(overdue.contactId).first(),
-  ])
-  if (!contact || !conv) return
-
-  const msg: Message = {
-    id: uuid(),
-    conversationId: conv.id,
-    role: 'assistant',
-    type: 'text',
-    content:
-      overdue.status === 'accepted'
-        ? `那个「${overdue.title}」怎么样啦 有空跟我说下进度`
-        : `之前那个「${overdue.title}」你还接吗 不方便的话也跟我说一声`,
-    createdAt: now,
-  }
-  await db.messages.add(msg)
-  await db.commissions.update(overdue.id, { lastReminderAt: now })
-  await db.conversations.update(conv.id, { updatedAt: now })
-
-  if (useChatUiStore.getState().activeConversationId !== conv.id) {
-    useChatUiStore.getState().showNotification({
-      id: uuid(),
-      conversationId: conv.id,
-      contactName: displayName(contact),
-      contactAvatar: contact.avatar,
-      contactAvatarColor: contact.avatarColor,
-      preview: previewForMessage(msg),
-    })
-  }
-}
-
 async function runAiTurn(
   conversationId: string,
   contact: Contact,
   settings: AppSettings,
   stickers: Sticker[],
   streamId: string,
-  triggeringUserText = '',
+  _triggeringUserText = '',
 ): Promise<void> {
   const engine = useChatEngineStore.getState()
   engine.patch(conversationId, { aiTyping: true, error: '' })
@@ -278,17 +215,13 @@ async function runAiTurn(
     if (pendingEvents.length > 0) await db.contacts.update(contact.id, { pendingEvents: [] })
 
     const knowledgeEntries = await db.knowledgeEntries.toArray()
-    const commissions = await db.commissions.toArray()
-    const commissionById = new Map(commissions.map((c) => [c.id, c]))
-    const contactNetworkText = await buildContactNetworkText(contact.id)
-
     const systemPrompt = buildSystemPrompt({
       stylePrompt: settings.globalSystemPrompt,
       persona: contact.systemPrompt,
-      relationshipType: contact.relationshipType,
-      relationshipStatsText: relationshipStatsText(contact.relationship),
-      relationshipUnlocksText: relationshipUnlocksText(contact.relationship),
-      contactNetworkText,
+      relationshipBase: contact.relationshipBase || '朋友',
+      relationshipDynamic: contact.relationshipDynamic || '',
+      warmth: contact.warmth ?? 0,
+      warmthPrompt: warmthPrompt(contact.warmth ?? 0),
       memoryFacts: contact.memoryFacts,
       memoryStyle: contact.memoryStyle,
       stickerNames: stickers.map((s) => s.name),
@@ -306,11 +239,10 @@ async function runAiTurn(
     const chatMessages: ChatMessage[] = coalesceConsecutiveRoles([
       { role: 'system', content: systemPrompt },
       ...recentHistory.map((m): ChatMessage => {
-        if (m.type === 'sticker') return formatStructuredHistoryEvent(m, 'sticker', commissionById)
-        if (m.type === 'link') return formatStructuredHistoryEvent(m, 'link', commissionById)
-        if (m.type === 'commission') return formatStructuredHistoryEvent(m, 'commission', commissionById)
-        if (m.type === 'gift') return formatStructuredHistoryEvent(m, 'gift', commissionById)
-        if (m.type === 'scheduleChange') return formatStructuredHistoryEvent(m, 'scheduleChange', commissionById)
+        if (m.type === 'sticker') return formatStructuredHistoryEvent(m, 'sticker')
+        if (m.type === 'link') return formatStructuredHistoryEvent(m, 'link')
+        if (m.type === 'gift') return formatStructuredHistoryEvent(m, 'gift')
+        if (m.type === 'scheduleChange') return formatStructuredHistoryEvent(m, 'scheduleChange')
         return { role: m.role, content: m.content }
       }),
     ])
@@ -343,7 +275,7 @@ async function runAiTurn(
       createdAt: Date.now(),
     })
     processKnowledgeQueries(knowledgeQueries, settings)
-    revealBubbles(conversationId, contact, settings, bubbles, streamId, aiTurnId, triggeringUserText)
+    revealBubbles(conversationId, contact, settings, bubbles, streamId, aiTurnId, _triggeringUserText)
   } catch (err) {
     if (streamByConversation.get(conversationId) !== streamId) return
     if (err instanceof DOMException && err.name === 'AbortError') return
@@ -360,7 +292,7 @@ function revealBubbles(
   bubbles: AiBubble[],
   streamId: string,
   aiTurnId: string,
-  triggeringUserText: string,
+  _triggeringUserText: string,
 ): void {
   const timers: ReturnType<typeof setTimeout>[] = []
   let cumulative = 0
@@ -368,20 +300,6 @@ function revealBubbles(
     cumulative += typingDelayMs(bubble)
     const timer = setTimeout(async () => {
       if (streamByConversation.get(conversationId) !== streamId) return
-
-      let commissionId: string | undefined
-      if (bubble.type === 'commission') {
-        commissionId = uuid()
-        await db.commissions.add({
-          id: commissionId,
-          contactId: contact.id,
-          title: bubble.title,
-          description: bubble.description,
-          reward: bubble.reward,
-          status: 'pending',
-          createdAt: Date.now(),
-        })
-      }
 
       if (bubble.type === 'scheduleChange') {
         // Re-fetch rather than reusing the `contact` this whole turn was
@@ -407,7 +325,6 @@ function revealBubbles(
       let content: string
       if (bubble.type === 'text') content = bubble.content
       else if (bubble.type === 'sticker') content = bubble.name
-      else if (bubble.type === 'commission') content = bubble.title
       else if (bubble.type === 'scheduleChange') content = bubble.summary
       else content = bubble.label
 
@@ -418,7 +335,6 @@ function revealBubbles(
         type: bubble.type,
         content,
         link: bubble.type === 'link' ? { app: bubble.app, label: bubble.label, data: bubble.data } : undefined,
-        commission: commissionId ? { commissionId } : undefined,
         scheduleChange:
           bubble.type === 'scheduleChange'
             ? {
@@ -452,7 +368,6 @@ function revealBubbles(
       }
 
       if (i === bubbles.length - 1) {
-        updateRelationshipAfterTurn(contact.id, triggeringUserText, bubbles)
         useChatEngineStore.getState().patch(conversationId, { aiTyping: false })
         maybeUpdateMemory(contact.id, conversationId, settings)
       }
@@ -462,33 +377,4 @@ function revealBubbles(
   timersByConversation.set(conversationId, timers)
 }
 
-async function buildContactNetworkText(contactId: string): Promise<string> {
-  const [links, contacts] = await Promise.all([db.contactRelations.toArray(), db.contacts.toArray()])
-  const contactById = new Map(contacts.map((c) => [c.id, c]))
-  const lines = links
-    .filter((l) => l.fromContactId === contactId || l.toContactId === contactId)
-    .map((l) => {
-      const otherId = l.fromContactId === contactId ? l.toContactId : l.fromContactId
-      const other = contactById.get(otherId)
-      if (!other) return ''
-      return `- 和 ${displayName(other)}: ${l.label}`
-    })
-    .filter(Boolean)
-  return lines.length > 0 ? lines.join('\n') : ''
-}
 
-async function updateRelationshipAfterTurn(contactId: string, userText: string, bubbles: AiBubble[]): Promise<void> {
-  const contact = await db.contacts.get(contactId)
-  if (!contact) return
-  const delta = inferRelationshipDeltaFromTurn(userText, bubbles)
-  const next = applyRelationshipDelta(contact.relationship, delta)
-  if (JSON.stringify(next) === JSON.stringify(contact.relationship)) return
-  await db.contacts.update(contactId, { relationship: next })
-  const milestones = crossedRelationshipMilestones(contact.relationship, next)
-  if (milestones.length > 0) {
-    const unlocks = relationshipUnlocks(next)
-    useChatUiStore
-      .getState()
-      .showRelationshipNotice(`关系变化：${milestones.join('、')}${unlocks.length > 0 ? ` · 解锁 ${unlocks[0].split('：')[0]}` : ''}`)
-  }
-}

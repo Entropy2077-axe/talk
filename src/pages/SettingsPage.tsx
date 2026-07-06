@@ -18,7 +18,7 @@ export function SettingsPage() {
     apiKey,
     baseUrl,
     model,
-    shopModel,
+    utilityModel,
     globalSystemPrompt,
     autonomousBehaviorEnabled,
     proactiveDailyCap,
@@ -99,7 +99,7 @@ export function SettingsPage() {
   const [apiKeyDraft, setApiKeyDraft] = useState(apiKey)
   const [baseUrlDraft, setBaseUrlDraft] = useState(baseUrl)
   const [modelDraft, setModelDraft] = useState(model)
-  const [shopModelDraft, setShopModelDraft] = useState(shopModel)
+  const [utilityModelDraft, setUtilityModelDraft] = useState(utilityModel)
   const [promptDraft, setPromptDraft] = useState(globalSystemPrompt)
   const [tavilyKeyDraft, setTavilyKeyDraft] = useState(tavilyApiKey)
   const [pexelsKeyDraft, setPexelsKeyDraft] = useState(pexelsApiKey)
@@ -135,9 +135,9 @@ export function SettingsPage() {
           setModelDraft(list[0])
           setSettings({ model: list[0] })
         }
-        if (!list.includes(shopModelDraft)) {
-          setShopModelDraft(list[0])
-          setSettings({ shopModel: list[0] })
+        if (!list.includes(utilityModelDraft)) {
+          setUtilityModelDraft(list[0])
+          setSettings({ utilityModel: list[0] })
         }
       }
     } catch (err) {
@@ -351,14 +351,14 @@ export function SettingsPage() {
         </div>
         {pullError && <p className="mb-2 text-xs text-red-500">{pullError}</p>}
 
-        <label className="mb-1 block text-xs text-gray-500">购物商城商品生成模型（独立于聊天，可以选不同的模型）</label>
+        <label className="mb-1 block text-xs text-gray-500">多功能模型（商城生成、好感度评分、世界观草稿等辅助任务，独立于主聊天模型）</label>
         <div className="mb-1 flex gap-2">
           {models.length > 0 ? (
             <select
-              value={shopModelDraft}
+              value={utilityModelDraft}
               onChange={(e) => {
-                setShopModelDraft(e.target.value)
-                setSettings({ shopModel: e.target.value })
+                setUtilityModelDraft(e.target.value)
+                setSettings({ utilityModel: e.target.value })
               }}
               className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"
             >
@@ -370,9 +370,9 @@ export function SettingsPage() {
             </select>
           ) : (
             <input
-              value={shopModelDraft}
-              onChange={(e) => setShopModelDraft(e.target.value)}
-              onBlur={() => setSettings({ shopModel: shopModelDraft.trim() })}
+              value={utilityModelDraft}
+              onChange={(e) => setUtilityModelDraft(e.target.value)}
+              onBlur={() => setSettings({ utilityModel: utilityModelDraft.trim() })}
               className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"
             />
           )}

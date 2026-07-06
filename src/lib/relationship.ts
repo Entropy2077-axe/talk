@@ -1,130 +1,168 @@
-import type { AiBubble, RelationshipDimensions } from '../types'
+/**
+ * Single-dimension warmth model, -100 (hostile) to +100 (bonded).
+ * Changes are assessed by the utility model during memory updates —
+ * no more regex-based heuristics here (see memory.ts).
+ */
 
-export const RELATIONSHIP_DIMENSIONS: { key: keyof RelationshipDimensions; label: string; description: string }[] = [
-  { key: 'familiarity', label: '熟悉度', description: '你们互相了解多少 聊过的话题和经历越多越高' },
-  { key: 'affection', label: '好感度', description: '对方对你的喜欢和亲近程度' },
-  { key: 'trust', label: '信任度', description: '愿意对你敞开心扉、说真心话的程度' },
-  { key: 'romance', label: '暧昧度', description: '你们之间暧昧、心动氛围的强弱' },
-  { key: 'friction', label: '摩擦感', description: '累积的不耐烦和小摩擦 越高关系越紧张' },
+export const WARMTH_MIN = -100
+export const WARMTH_MAX = 100
+
+/** Initial warmth for a brand-new contact, biased by the relationship-base label the user picked when creating them. */
+export function initialWarmthForBase(base: string): number {
+  switch (base) {
+    case '恋人':
+      return 60
+    case '暧昧对象':
+      return 35
+    case '家人':
+      return 55
+    case '朋友':
+      return 30
+    case '损友':
+      return 25
+    case '前辈/同事':
+      return 15
+    default:
+      return 0
+  }
+}
+
+/** Clamp a warmth change to [-5, +5] so no single memory update swings it too far. */
+export function clampWarmthDelta(delta: number): number {
+  return Math.max(-5, Math.min(5, Math.round(delta)))
+}
+
+/** Apply delta and clamp to the valid range. */
+export function applyWarmthDelta(current: number, delta: number): number {
+  return Math.max(WARMTH_MIN, Math.min(WARMTH_MAX, Math.round(current + delta)))
+}
+
+// ---- stage tiers & preset prompts ----
+
+export interface WarmthStage {
+  label: string
+  min: number
+  max: number
+  prompt: string
+}
+
+export const WARMTH_STAGES: WarmthStage[] = [
+  {
+    label: '极度厌恶',
+    min: -100,
+    max: -81,
+    prompt: '对你有强烈的敌意 说话不客气 可能直接拒绝交流或恶语相向 不想跟你有任何互动',
+  },
+  {
+    label: '明显讨厌',
+    min: -80,
+    max: -61,
+    prompt: '不喜欢你 态度冷淡带刺 不想多聊 回复简短敷衍 可能带着不耐烦',
+  },
+  {
+    label: '不太喜欢',
+    min: -60,
+    max: -41,
+    prompt: '对你有意见或心结 语气疏远、不耐烦 不太想主动亲近 但还维持着基本的表面礼貌',
+  },
+  {
+    label: '有点冷淡',
+    min: -40,
+    max: -21,
+    prompt: '心里有点疙瘩 不太想主动亲近 但还能正常说话 不会刻意回避',
+  },
+  {
+    label: '略微疏离',
+    min: -20,
+    max: -1,
+    prompt: '因为一些小事有点不爽或生疏 但不会表现出来太多 语气比平时略冷一点',
+  },
+  {
+    label: '刚认识',
+    min: 0,
+    max: 20,
+    prompt: '彼此还很陌生 保持基本的礼貌和一点距离感 不会太随意',
+  },
+  {
+    label: '有点熟了',
+    min: 21,
+    max: 40,
+    prompt: '已经聊过几次了 可以放松一点 语气自然 但仍有一定的边界感',
+  },
+  {
+    label: '关系不错',
+    min: 41,
+    max: 60,
+    prompt: '算得上是朋友了 语气随意自然 可以开玩笑、吐槽 不会太拘谨',
+  },
+  {
+    label: '很亲密',
+    min: 61,
+    max: 80,
+    prompt: '关系很熟 可以损、撒娇、不客气 有内部梗和默契 说话不用过脑子',
+  },
+  {
+    label: '深厚羁绊',
+    min: 81,
+    max: 100,
+    prompt: '超越了普通朋友的情感连接 什么都能说 不需要任何客套和防备 可以自然流露最真实的情绪',
+  },
 ]
 
-export function dimensionQualifier(value: number): string {
-  if (value >= 80) return '非常高'
-  if (value >= 60) return '较高'
-  if (value >= 40) return '中等'
-  if (value >= 20) return '较低'
-  return '很低'
-}
-
-function clampDimension(n: number): number {
-  return Math.max(0, Math.min(100, Math.round(n)))
-}
-
-/** Starting point for a brand new contact, biased a little by the relationship the user picked when adding them. */
-export function initialRelationshipFor(relationshipTag: string): RelationshipDimensions {
-  const base: RelationshipDimensions = { familiarity: 8, affection: 50, trust: 35, romance: 0, friction: 0 }
-  switch (relationshipTag) {
-    case '恋人':
-      return { ...base, affection: 75, trust: 55, romance: 60 }
-    case '暧昧对象':
-      return { ...base, affection: 60, romance: 35 }
-    case '损友':
-      return { ...base, affection: 60, friction: 15 }
-    case '前辈/同事':
-      return { ...base, affection: 40, trust: 30 }
-    case '家人':
-      return { ...base, familiarity: 40, affection: 65, trust: 55 }
-    default:
-      return base
+/** Look up which stage a given warmth score falls into. */
+export function warmthStage(warmth: number): WarmthStage {
+  for (const stage of WARMTH_STAGES) {
+    if (warmth >= stage.min && warmth <= stage.max) return stage
   }
+  return WARMTH_STAGES[warmth >= 0 ? 5 : 2] // fallback: "刚认识" or "不太喜欢"
 }
 
-export type RelationshipDelta = Partial<Record<keyof RelationshipDimensions, number>>
-
-export function applyRelationshipDelta(
-  current: RelationshipDimensions,
-  delta: RelationshipDelta,
-): RelationshipDimensions {
-  const next = { ...current }
-  for (const { key } of RELATIONSHIP_DIMENSIONS) {
-    const d = delta[key]
-    if (typeof d === 'number' && Number.isFinite(d)) {
-      next[key] = clampDimension(current[key] + d)
-    }
-  }
-  return next
+/** Short label for display (RelationshipsPage, ContactCardPage). */
+export function warmthLabel(warmth: number): string {
+  return warmthStage(warmth).label
 }
 
-export function relationshipStatsText(rel: RelationshipDimensions): string {
-  return RELATIONSHIP_DIMENSIONS.map(({ key, label }) => `- ${label}: ${rel[key]}/100（${dimensionQualifier(rel[key])}）`).join('\n')
+/** The preset prompt for the current warmth stage — injected into the system prompt. */
+export function warmthPrompt(warmth: number): string {
+  return warmthStage(warmth).prompt
 }
 
-export function relationshipUnlocks(rel: RelationshipDimensions): string[] {
-  const unlocks: string[] = []
-  if (rel.affection >= 70) unlocks.push('更亲近的日常语气：可以更自然地关心、撒娇、使用昵称或内部梗')
-  if (rel.trust >= 70) unlocks.push('更深的话题：可以聊自己的脆弱、烦恼和真实想法')
-  if (rel.romance >= 60) unlocks.push('暧昧/恋爱语气：可以更明显地吃醋、心动、贴近，但仍符合角色性格')
-  if (rel.friction >= 60) unlocks.push('冲突语气：可以冷淡、顶嘴、催促或表达不满，不必强行友好')
-  if (rel.familiarity >= 60) unlocks.push('熟人默契：可以省略解释、接内部梗、用更短更随意的表达')
-  return unlocks
+/** Whether warmth has crossed a stage boundary. */
+export function warmthStageChanged(before: number, after: number): boolean {
+  return warmthStage(before).label !== warmthStage(after).label
 }
 
-export function relationshipUnlocksText(rel: RelationshipDimensions): string {
-  const unlocks = relationshipUnlocks(rel)
-  return unlocks.length > 0 ? unlocks.map((u) => `- ${u}`).join('\n') : '（暂无额外解锁，保持基础关系语气）'
+// ---- relationship base / dynamic ----
+
+/**
+ * If warmth crosses a stage boundary (and enough messages have accumulated
+ * since the last assessment), the utility model is asked to write a short
+ * natural-language description of what the relationship currently feels like.
+ *
+ * `base` is the label the user picked at creation (恋人/朋友/家人/…), only
+ * changed by explicit user action or when the model assessment output clearly
+ * states a relationship status change (e.g. "已经确认分手了", "已经在一起了").
+ */
+export function relationshipText(base: string, dynamic: string, warmth: number): string {
+  const stage = warmthStage(warmth)
+  const dynamicPart = dynamic ? ` 当前状态: ${dynamic}` : ''
+  return `你们是${base}关系。${stage.prompt}。${dynamicPart}`.trim()
 }
 
-const THRESHOLDS = [30, 60, 80]
-
-export function crossedRelationshipMilestones(before: RelationshipDimensions, after: RelationshipDimensions): string[] {
-  const messages: string[] = []
-  for (const { key, label } of RELATIONSHIP_DIMENSIONS) {
-    for (const threshold of THRESHOLDS) {
-      if (before[key] < threshold && after[key] >= threshold) {
-        messages.push(`${label}达到 ${threshold}`)
-      }
-    }
-  }
-  return messages
-}
-
-export function inferRelationshipDeltaFromTurn(userText: string, bubbles: AiBubble[]): RelationshipDelta {
-  const text = `${userText}\n${bubbles
-    .map((b) => {
-      if (b.type === 'text') return b.content
-      if (b.type === 'commission') return `${b.title} ${b.description}`
-      return ''
-    })
-    .join('\n')}`.toLowerCase()
-  const delta: RelationshipDelta = {}
-  const add = (key: keyof RelationshipDimensions, amount: number) => {
-    delta[key] = (delta[key] ?? 0) + amount
-  }
-
-  if (userText.trim()) add('familiarity', 1)
-  if (/[谢谢|谢啦|辛苦|喜欢|开心|哈哈|嘿嘿|抱抱|爱你]/.test(text)) add('affection', 2)
-  if (/[秘密|难过|害怕|压力|焦虑|崩溃|心事|告诉你]/.test(text)) {
-    add('trust', 2)
-    add('familiarity', 1)
-  }
-  if (/[想你|亲|吻|抱抱|宝贝|老婆|老公|心动|暧昧]/.test(text)) add('romance', 2)
-  if (/[烦|闭嘴|算了|滚|讨厌|生气|不想理|别管]/.test(text)) add('friction', 3)
-  if (/[对不起|抱歉|不好意思]/.test(text)) add('friction', -1)
-  if (bubbles.some((b) => b.type === 'commission')) add('trust', 1)
-
-  for (const key of Object.keys(delta) as (keyof RelationshipDimensions)[]) {
-    delta[key] = Math.max(-3, Math.min(3, delta[key] ?? 0))
-  }
-  return delta
-}
-
-/** Reduces the five numeric dimensions to a single memorable label, the same way MBTI reduces axes to a type code. */
-export function relationshipStageLabel(rel: RelationshipDimensions): string {
-  if (rel.friction >= 60) return '关系紧张'
-  if (rel.romance >= 60 && rel.affection >= 60) return '热恋'
-  if (rel.romance >= 30) return '暧昧不明'
-  if (rel.familiarity <= 15) return '刚认识'
-  if (rel.affection >= 70 && rel.trust >= 70) return '挚友'
-  if (rel.familiarity >= 60 && rel.affection >= 50) return '熟悉的朋友'
-  return '普通朋友'
+/**
+ * Whether the utility model's relationship assessment indicates the base
+ * label itself should change — only fires on explicit status-change language
+ * combined with a warmth score that's crossed a major threshold.
+ */
+export function shouldUpdateBase(
+  dynamic: string,
+  warmth: number,
+): string | null {
+  if (!dynamic) return null
+  const lowered = dynamic.toLowerCase()
+  const breakupPatterns = /已经分手|已经解除|已经不再是|已经离婚|已经绝交|彻底闹掰|确认分开/
+  const upgradePatterns = /已经在一起|确认恋爱|确认成为恋人|确认交往|已经是恋人/
+  if (breakupPatterns.test(lowered) && warmth < 20) return '朋友'
+  if (upgradePatterns.test(lowered) && warmth >= 50) return '恋人'
+  return null
 }

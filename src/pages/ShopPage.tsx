@@ -33,7 +33,7 @@ export function ShopPage() {
       const raw = await chatCompletion({
         apiKey: settings.apiKey,
         baseUrl: settings.baseUrl,
-        model: settings.shopModel,
+        model: settings.utilityModel,
         messages: [
           { role: 'system', content: buildShopPrompt(searchQuery) },
           { role: 'user', content: searchQuery ?? '推荐一些商品' },

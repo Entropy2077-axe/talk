@@ -4,7 +4,7 @@ import { chatCompletion } from './deepseek'
 import { canReactToMoments } from './contactRelations'
 import { describeCurrentSchedule, isPhoneAvailable } from './schedule'
 import { searchPexelsPhoto } from './photoSearch'
-import type { AppSettings, Contact, RelationshipDimensions } from '../types'
+import type { AppSettings, Contact } from '../types'
 
 const ELIGIBLE_WINDOW_MS = 10 * 60 * 1000
 /** Of the friends who *do* react (relationship allows it and the dice roll passed), this fraction also leave a comment instead of just liking. */
@@ -282,10 +282,9 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
   return { postedCount: entries.length }
 }
 
-/** How likely a contact is to notice/react to the user's own moment — no contactRelations link exists for this (the user isn't a node in that graph), so it's driven by the user-AI relationship dimensions instead. */
-function userMomentReactionProbability(rel: RelationshipDimensions): number {
-  const score = (rel.affection * 0.6 + rel.familiarity * 0.4) / 100
-  return Math.min(0.9, Math.max(0.05, score))
+/** How likely a contact is to react to the user's own moment — driven by warmth. */
+function userMomentReactionProbability(warmth: number): number {
+  return Math.min(0.9, Math.max(0.05, (warmth + 100) / 200))
 }
 
 interface UserMomentReactorPlan {
@@ -296,7 +295,7 @@ interface UserMomentReactorPlan {
 function planUserMomentReactors(contacts: Contact[]): UserMomentReactorPlan[] {
   const plans: UserMomentReactorPlan[] = []
   for (const contact of contacts) {
-    if (Math.random() > userMomentReactionProbability(contact.relationship)) continue
+    if (Math.random() > userMomentReactionProbability(contact.warmth ?? 0)) continue
     plans.push({ contact, willComment: Math.random() < COMMENT_SHARE })
   }
   return plans

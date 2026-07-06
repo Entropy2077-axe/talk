@@ -1,27 +1,25 @@
 import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { chatCompletion } from './deepseek'
-import { RELATIONSHIP_DIMENSIONS } from './relationship'
+import { clampWarmthDelta, applyWarmthDelta, warmthStage, warmthStageChanged, shouldUpdateBase } from './relationship'
 import { displayName } from './contact'
 import { describeCurrentTime, toDateKey } from './time'
-import type { Contact, Message, PlanItem, RelationshipDimensions } from '../types'
+import type { AppSettings, Contact, Message, PlanItem } from '../types'
 
 /** How many *new* messages accumulate before we bother refreshing memory. Keeps the extra API call rare. */
 export const MEMORY_UPDATE_INTERVAL = 10
 
-/** How many of the most recent messages get sent verbatim to the main chat call. Older context is represented only via the memory summary, not raw text — this is what keeps token usage bounded as a conversation grows. */
+/** How many of the most recent messages get sent verbatim to the main chat call. */
 export const CONTEXT_WINDOW_SIZE = 30
 
-/** Bounds how many upcoming plans a contact can accumulate — old/expired ones are pruned, but this is a hard backstop against unbounded growth for plans with no resolvable date. */
+/** Bounds how many upcoming plans a contact can accumulate. */
 const MAX_UPCOMING_PLANS = 8
 
-/** Plans whose date has passed are no longer "upcoming" — filters both for prompt injection and for what gets persisted back at the next memory update. */
 export function activeUpcomingPlans(plans: PlanItem[], now: Date): PlanItem[] {
   const todayKey = toDateKey(now)
   return plans.filter((p) => !p.date || p.date >= todayKey)
 }
 
-/** Model-facing text block for the "what have you two arranged" prompt section — empty string if nothing active, so callers can skip the section entirely. */
 export function activeUpcomingPlansText(contact: Pick<Contact, 'upcomingPlans'>, now: Date): string {
   const active = activeUpcomingPlans(contact.upcomingPlans ?? [], now)
   if (active.length === 0) return ''
@@ -29,60 +27,52 @@ export function activeUpcomingPlansText(contact: Pick<Contact, 'upcomingPlans'>,
 }
 
 function plansPromptFragment(): string {
-  return `- plans只列这批记录里**新出现**的、双方明确约好的具体安排或承诺(不是正式委托系统里的那种委托 是随口聊到的约定 比如"周三一起吃饭") 不要重复已经在"已知约定"里出现过的 如果结合当前时间能推算出具体日期就填date(格式YYYY-MM-DD) 算不出来就留空字符串 这批记录里没有新约定就返回空数组`
+  return `- plans: 这批记录里新出现的约定/安排(不是正式委托 是随口聊到的 比如"周三一起吃饭") 不要重复"已知约定"里已有的 能推算出日期就填date(YYYY-MM-DD) 算不出来留空 没有新约定就返回空数组`
 }
 
-/**
- * Facts/style memory, the relationship-dimension scores, and now upcoming
- * plans are all updated together in one call (same trigger, same batch of
- * new messages) rather than as separate API calls — they're reading the
- * same evidence, so splitting them would just multiply the token cost for
- * no benefit.
- */
-function buildMemoryUpdatePrompt(
-  existingFacts: string,
-  existingStyle: string,
-  existingPlansText: string,
-  relationship: RelationshipDimensions,
-  currentTimeText: string,
-): string {
-  const dimensionLines = RELATIONSHIP_DIMENSIONS.map(
-    ({ key, label }) => `- ${key}（${label}，当前 ${relationship[key]}/100）`,
-  ).join('\n')
+// ---- 1:1 memory update (now also handles warmth scoring) ----
 
-  return `你是一个对话记忆整理器 任务是帮一个角色扮演AI维护它对聊天对象的记忆和关系判断 你不会出现在对话里 只输出JSON 不要有其他任何文字
+function buildMemoryUpdatePrompt(opts: {
+  existingFacts: string
+  existingStyle: string
+  existingPlansText: string
+  warmth: number
+  currentTimeText: string
+}): string {
+  const stage = warmthStage(opts.warmth)
+  return `你是对话记忆整理器 也是好感度评分员 输出JSON 不要有其他任何文字
 
 【当前时间】
-${currentTimeText}
+${opts.currentTimeText}
 
-已有记忆:
 【已知信息】
-${existingFacts || '（暂无）'}
+${opts.existingFacts || '（暂无）'}
 【相处状态】
-${existingStyle || '（暂无 默认还比较陌生）'}
+${opts.existingStyle || '（暂无）'}
 【已知约定】
-${existingPlansText || '（暂无）'}
+${opts.existingPlansText || '（暂无）'}
+【当前好感度】${opts.warmth}/100（${stage.label}）
 
-当前关系维度（0-100分 满分100）:
-${dimensionLines}
-
-接下来会给你一批新的聊天记录（"对方"是用户 "你"是角色扮演AI自己） 请你更新记忆并评估关系变化 输出格式:
-{"facts": "...", "style": "...", "plans": [{"text": "...", "date": "YYYY-MM-DD或空字符串"}]}
+接下来是一批新的聊天记录（"对方"是用户 "你"是角色扮演AI） 请更新记忆并评估好感度变化 输出:
+{"facts":"...", "style":"...", "plans":[{"text":"...", "date":"YYYY-MM-DD或空字符串"}], "warmthDelta": 0, "relationshipAssessment":"..."}
 
 要求:
-- facts是关于对方(用户)的客观信息 比如名字、年龄、职业、住址、喜好、讨厌的东西、重要的人和事、正在经历的事情等 只记录聊天里明确提到的 不要编造 用简短的、分号分隔的短语罗列 总长度控制在200字以内 新信息和旧信息冲突时以新的为准 不再重要或已过时的旧信息可以删除 保持精简
-- style是这个AI应该如何调整语气和熟悉程度来更贴合这位对话对象 比如"关系变熟了 可以更随便"、"对方喜欢简短回复 你也保持简短"、"对方情绪低落时会安静倾听不追问" 这类相处细节 绝对不能改变角色的核心性格 只是语气和熟悉度上的贴合 总长度控制在150字以内
-- facts和style都必须是非空字符串 如果这批新记录里确实没有值得更新的内容 就把已有记忆原样返回 不要清空
+- facts: 关于对方的客观信息(名字/年龄/喜好/重要事件等) 只记聊天里明确提到的 ≤200字 分号分隔 新旧冲突以新为准
+- style: AI应如何调整语气来贴合对方 ≤150字 不改变核心性格
+- facts和style有值得更新的才改 没有就原样返回 不要清空
 ${plansPromptFragment()}
-- 只输出JSON 不要有markdown代码块标记`
+- warmthDelta: 根据这批聊天记录的语气和互动质量 好感度应该变化多少(-5到+5整数) 聊得好→正数 聊崩了→负数 平平无奇→0 不要因为好感度已经很高/很低就不敢给分
+- relationshipAssessment: 正常空字符串。只有当好感度跨越了关键阶段边界(warmth从${opts.warmth}变成了另一个阶段区间)时才写一句话描述当前关系实际状态(比如"虽然是恋人但最近闹得很僵"或"关系升温很快 已经比普通朋友亲密多了") 不超过30字。没跨阶段就留空`
 }
 
 function formatMessagesForMemory(messages: Message[]): string {
   return messages
     .map((m) => {
       const speaker = m.role === 'user' ? '对方' : '你'
-      if (m.type === 'sticker') return `${speaker}: [发了一个表情: ${m.content}]`
-      if (m.type === 'link') return `${speaker}: [分享了一个链接: ${m.content}]`
+      if (m.type === 'sticker') return `${speaker}: [表情: ${m.content}]`
+      if (m.type === 'link') return `${speaker}: [链接: ${m.content}]`
+      if (m.type === 'gift') return `${speaker}: [礼物: ${m.content}]`
+      if (m.type === 'scheduleChange') return `${speaker}: [日程: ${m.content}]`
       return `${speaker}: ${m.content}`
     })
     .join('\n')
@@ -107,21 +97,33 @@ function parsePlansField(raw: unknown): ParsedPlan[] {
   return result
 }
 
-function parseMemoryResponse(raw: string): { facts: string; style: string; plans: ParsedPlan[] } | null {
+interface MemoryUpdateResult {
+  facts: string
+  style: string
+  plans: ParsedPlan[]
+  warmthDelta: number
+  relationshipAssessment: string
+}
+
+function parseMemoryResponse(raw: string): MemoryUpdateResult | null {
   let text = raw.trim()
   const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
   if (fenceMatch) text = fenceMatch[1].trim()
   try {
     const parsed = JSON.parse(text)
     if (typeof parsed?.facts === 'string' && typeof parsed?.style === 'string') {
+      const delta = typeof parsed.warmthDelta === 'number' ? parsed.warmthDelta : Number(parsed.warmthDelta)
+      const assessment = typeof parsed.relationshipAssessment === 'string' ? parsed.relationshipAssessment.trim() : ''
       return {
         facts: parsed.facts.trim(),
         style: parsed.style.trim(),
         plans: parsePlansField(parsed.plans),
+        warmthDelta: Number.isFinite(delta) ? clampWarmthDelta(delta) : 0,
+        relationshipAssessment: assessment.slice(0, 80),
       }
     }
   } catch {
-    // ignore malformed response, memory update is best-effort
+    // ignore
   }
   return null
 }
@@ -133,16 +135,14 @@ function mergePlans(existing: PlanItem[], newOnes: ParsedPlan[], now: number): P
 }
 
 /**
- * Fire-and-forget: if enough new messages have piled up since the last
- * memory refresh, summarize them into the contact's compact facts/style
- * memory, nudge the relationship dimensions, and fold in any newly
- * mentioned plans/appointments. Silently does nothing on failure — this is
- * an enhancement, it must never block or break the chat.
+ * Fire-and-forget: if enough new messages have piled up, summarize them into
+ * compact facts/style memory, score warmth, and optionally re-assess the
+ * relationship dynamic when warmth crosses a stage boundary.
  */
 export async function maybeUpdateMemory(
   contactId: string,
   conversationId: string,
-  api: { apiKey: string; baseUrl: string; model: string },
+  settings: AppSettings,
 ): Promise<void> {
   try {
     const contact = await db.contacts.get(contactId)
@@ -154,19 +154,19 @@ export async function maybeUpdateMemory(
     if (newMessages.length < MEMORY_UPDATE_INTERVAL) return
 
     const raw = await chatCompletion({
-      apiKey: api.apiKey,
-      baseUrl: api.baseUrl,
-      model: api.model,
+      apiKey: settings.apiKey,
+      baseUrl: settings.baseUrl,
+      model: settings.utilityModel,
       messages: [
         {
           role: 'system',
-          content: buildMemoryUpdatePrompt(
-            contact.memoryFacts,
-            contact.memoryStyle,
-            activeUpcomingPlansText(contact, new Date()),
-            contact.relationship,
-            describeCurrentTime(new Date()),
-          ),
+          content: buildMemoryUpdatePrompt({
+            existingFacts: contact.memoryFacts,
+            existingStyle: contact.memoryStyle,
+            existingPlansText: activeUpcomingPlansText(contact, new Date()),
+            warmth: contact.warmth ?? 0,
+            currentTimeText: describeCurrentTime(new Date()),
+          }),
         },
         { role: 'user', content: formatMessagesForMemory(newMessages) },
       ],
@@ -176,12 +176,28 @@ export async function maybeUpdateMemory(
     if (!updated) return
 
     const now = Date.now()
+    const oldWarmth = contact.warmth ?? 0
+    const newWarmth = applyWarmthDelta(oldWarmth, updated.warmthDelta)
+    const crossedStage = warmthStageChanged(oldWarmth, newWarmth)
+
+    // Only write a relationship assessment when the model gave one AND warmth
+    // actually crossed a stage boundary (both conditions, not either).
+    const dynamic = crossedStage ? updated.relationshipAssessment || '' : contact.relationshipDynamic
+
+    // If the assessment contains explicit status-change language, update base.
+    let base = contact.relationshipBase
+    const newBase = crossedStage ? shouldUpdateBase(dynamic, newWarmth) : null
+    if (newBase) base = newBase
+
     await db.contacts.update(contact.id, {
       memoryFacts: updated.facts,
       memoryStyle: updated.style,
       memoryUpdatedAt: now,
       memoryMessageCursor: allMessages.length,
       upcomingPlans: mergePlans(contact.upcomingPlans ?? [], updated.plans, now),
+      warmth: newWarmth,
+      relationshipDynamic: dynamic,
+      relationshipBase: base,
     })
   } catch {
     // best-effort only
@@ -198,12 +214,7 @@ export async function resetMemory(contactId: string): Promise<void> {
   })
 }
 
-// ---- group chat memory (see groupChatEngine.ts) ----
-// A single shared call updates every member who actually spoke in the new
-// batch of group messages — same "one call, positional output" shape as
-// moments.ts and groupChat.ts, so cost stays flat regardless of group size.
-// No relationshipDelta here (scope cut, see CLAUDE.md): there's no
-// per-group relationship model to nudge, only the plain user-AI one.
+// ---- group chat memory ----
 
 function formatGroupMessagesForMemory(
   messages: Message[],
@@ -216,7 +227,7 @@ function formatGroupMessagesForMemory(
         m.role === 'user'
           ? userNickname || '对方'
           : displayName(m.speakerContactId ? (memberById.get(m.speakerContactId) ?? { name: '某人' }) : { name: '某人' })
-      if (m.type === 'sticker') return `${speakerName}: [发了一个表情: ${m.content}]`
+      if (m.type === 'sticker') return `${speakerName}: [表情: ${m.content}]`
       return `${speakerName}: ${m.content}`
     })
     .join('\n')
@@ -237,28 +248,24 @@ function buildGroupMemoryUpdatePrompt(opts: {
     )
     .join('\n\n')
 
-  return `你是一个群聊记忆整理器 任务是帮群聊"${opts.groupName}"里的每个角色扮演AI维护它对用户(群里的"对方")的记忆 你不会出现在对话里 只输出JSON 不要有其他任何文字
+  return `你是群聊记忆整理器 帮群聊"${opts.groupName}"里的每个角色更新对用户("对方")的记忆 输出JSON 不要有额外文字
 
 【当前时间】
 ${opts.currentTimeText}
 
-下面是这个群聊最近的一批聊天记录:
+群聊记录:
 ${opts.transcript}
 
-下面几位是这批记录里说过话的人 需要分别帮他们更新记忆(只根据这批记录里能看到的信息更新 不要编造 也不要互相搞混):
-
+下面是需要更新的发言人(只根据自己能看到的聊天内容更新):
 ${speakerBlocks}
 
-输出格式:
-{
-  "updates": [
-    { "facts": "...", "style": "...", "plans": [{"text": "...", "date": "YYYY-MM-DD或空字符串"}] }
-  ]
-}
+输出:
+{"updates":[{"facts":"...","style":"...","plans":[{"text":"...","date":"YYYY-MM-DD或空字符串"}]}]}
 
 要求:
-- updates数组顺序必须和上面"发言人1/发言人2/..."顺序完全一致 数量必须完全一致
-- facts客观信息≤200字 分号分隔 style相处语气建议≤150字 含义跟"已知信息"/"相处状态"一致 如果这批记录里对某人确实没有新增内容 就把对应已知信息原样返回 不要清空
+- updates数组顺序和上面发言人顺序一致 数量一致
+- facts客观信息≤200字 style相处语气≤150字
+- 没有新增内容的就原样返回已知信息 不要清空
 ${plansPromptFragment()}
 - 只输出JSON 不要markdown代码块标记`
 }
@@ -288,19 +295,12 @@ function parseGroupMemoryResponse(raw: string, expectedCount: number): GroupMemo
   }
 }
 
-/**
- * Fire-and-forget group-chat counterpart to maybeUpdateMemory. The cursor
- * lives on the Group (not per-contact) since a contact's own
- * memoryMessageCursor already tracks their 1:1 conversation and a contact
- * can belong to several groups at once. Only members who actually spoke in
- * the new batch get updated — a silent member sitting in the group doesn't
- * need their personal memory of the user touched.
- */
+/** Group-chat memory — no warmth scoring (intentional: group dynamics are too complex for a single score). */
 export async function maybeUpdateGroupMemory(
   groupId: string,
   conversationId: string,
   members: Contact[],
-  api: { apiKey: string; baseUrl: string; model: string; userNickname: string },
+  settings: AppSettings,
 ): Promise<void> {
   try {
     const group = await db.groups.get(groupId)
@@ -322,22 +322,20 @@ export async function maybeUpdateGroupMemory(
     const speakers = speakerIds.map((id) => memberById.get(id)).filter((c): c is Contact => !!c)
 
     if (speakers.length === 0) {
-      // Nothing to attribute this batch to (e.g. a parse failure produced no
-      // assistant bubbles) — still advance the cursor so it isn't reprocessed forever.
       await db.groups.update(groupId, { memoryMessageCursor: allMessages.length })
       return
     }
 
     const raw = await chatCompletion({
-      apiKey: api.apiKey,
-      baseUrl: api.baseUrl,
-      model: api.model,
+      apiKey: settings.apiKey,
+      baseUrl: settings.baseUrl,
+      model: settings.utilityModel,
       messages: [
         {
           role: 'system',
           content: buildGroupMemoryUpdatePrompt({
             groupName: group.name,
-            transcript: formatGroupMessagesForMemory(newMessages, memberById, api.userNickname),
+            transcript: formatGroupMessagesForMemory(newMessages, memberById, settings.userNickname),
             currentTimeText: describeCurrentTime(new Date()),
             speakers,
           }),

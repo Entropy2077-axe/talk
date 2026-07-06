@@ -1,7 +1,6 @@
 import Dexie, { type Table } from 'dexie'
 import type {
   AiTurnDebug,
-  Commission,
   Contact,
   ContactRelationLink,
   Conversation,
@@ -23,7 +22,6 @@ export class TalkDB extends Dexie {
   messages!: Table<Message, string>
   stickers!: Table<Sticker, string>
   todos!: Table<Todo, string>
-  commissions!: Table<Commission, string>
   inventory!: Table<InventoryItem, string>
   moments!: Table<Moment, string>
   momentComments!: Table<MomentComment, string>
@@ -52,8 +50,7 @@ export class TalkDB extends Dexie {
       tasks: null,
     })
     this.version(4).stores({
-      todos: 'id, done, commissionId, createdAt',
-      commissions: 'id, contactId, status, createdAt',
+      todos: 'id, done, createdAt',
       inventory: 'id, acquiredAt',
     })
     this.version(5).stores({
@@ -81,6 +78,29 @@ export class TalkDB extends Dexie {
     })
     this.version(9).stores({
       aiTurns: 'id, conversationId, createdAt',
+    })
+    // Commission system removed — drop the table.
+    this.version(10).stores({
+      commissions: null,
+    })
+    // 5-dimension relationship → single warmth.
+    this.version(11).upgrade(async (tx) => {
+      const contacts = await tx.table('contacts').toArray()
+      for (const c of contacts) {
+        const rel = (c as Record<string, unknown>).relationship as Record<string, number> | undefined
+        if (!rel || typeof rel.affection !== 'number') continue
+        const warmth = Math.round(rel.affection * 0.7 + (rel.familiarity ?? 0) * 0.3 - (rel.friction ?? 0) * 0.5 - 10)
+        const clamped = Math.max(-100, Math.min(100, warmth))
+        const base =
+          typeof (c as Record<string, unknown>).relationshipType === 'string'
+            ? (c as Record<string, unknown>).relationshipType as string
+            : '朋友'
+        await tx.table('contacts').update(c.id, {
+          warmth: clamped,
+          relationshipBase: base,
+          relationshipDynamic: '',
+        })
+      }
     })
   }
 }

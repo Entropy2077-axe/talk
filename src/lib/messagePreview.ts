@@ -10,7 +10,6 @@ export function previewForMessage(m?: Message, speakerName?: string): string {
   const body = (() => {
     if (m.type === 'sticker') return '[表情]'
     if (m.type === 'link') return `[链接] ${m.content}`
-    if (m.type === 'commission') return `[委托] ${m.content}`
     if (m.type === 'gift') return `[礼物] ${m.content}`
     if (m.type === 'scheduleChange') return `[日程] ${m.content}`
     return m.content

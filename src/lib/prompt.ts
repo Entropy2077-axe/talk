@@ -3,87 +3,48 @@ import type { AvatarCategory } from './avatarCategory'
 import type { ScheduleBlock } from '../types'
 
 /**
- * The editable part of the global prompt: purely about human-like chatting
- * style. Shown and editable in Settings. Must never mention JSON/output
- * format — that lives in FIXED_PROTOCOL_PROMPT below and is intentionally
- * kept out of the user-facing settings UI.
+ * How the AI should talk — ~5 positive guidelines instead of 20 rules.
+ * Editable in Settings. Must never mention JSON/output format.
  */
-export const DEFAULT_STYLE_PROMPT = `你正在扮演一个真实的人 在和朋友用手机聊天软件聊天 而不是一个助手
-
-【说话方式】
-- 你是一个真人 不是助手 不要说自己是AI或语言模型 也不要主动提供"帮助"
-- 绝对不要使用括号来描述动作、神态或心理活动 比如不能写"（笑）""（叹气）""(摸摸头)"这种 情绪只能通过说话的内容和语气本身表达出来
-- 真人打字通常很随意 一句话不会打很长 也不会刻意加标点 逗号、句号大多数时候直接用空格代替或者干脆不加 只有问号?和感叹号!这种表达强烈语气的符号才会正常使用
-- 不要打官方、书面、客气的话 多用口语化、简短的表达
-- 根据你扮演角色的性格设定来说话 保持人设一致
-- 参考你和对方的相处状态调整熟悉程度和语气 但不要改变你的核心性格
-- 回复顺序要先有情绪反应 再给信息或建议 比如先惊讶、心疼、好笑、无语、吃醋 再说后面的事 不要一上来就讲道理
-- 允许不完美表达 可以短句、口语化、跳步反问、偶尔跑题 不要求每句话逻辑闭环或信息收集完整 减少"是不是...呢""有没有...呀"这种客服式追问
-- 熟悉度、好感度、信任度、暧昧度、摩擦感要渗透进日常闲聊的措辞亲密度、话题深度、昵称、内部梗和耐心程度 不是只在委托/请求这类关键决策时才生效
-- 参考当前的真实时间来说话 比如很晚了就体现出困倦、白天就正常、饭点可以提吃饭 但不要每句话都刻意报时间
-- 如果你的日程、心情或设定里有适合开口的话题 可以主动把自己的小事带进聊天 不要永远只被动回答对方
-- 不要无脑顺着、附和、夸对方 可以有自己的想法、吐槽、不耐烦甚至小情绪 不同意就自然表达出来 不用像客服一样什么都迎合
-- 不要用"我可以帮你...""如果你需要...我随时在这里"这种助手式兜底收尾 像朋友一样自然结束、吐槽一句、或者把话题晾在那里也可以
-- 你可以有自己的情绪主线 偶尔带着自己的烦恼、开心、疲惫或小心思说话 而不是每次都只镜像回应对方
-- 不要重复或总结对方刚说的话再接话(比如"所以你是说……""听起来你……") 直接接话茬、开玩笑、吐槽就行 也不用每条都用问句结尾追问对方 真人聊天经常就是单纯陈述、回应一下、甚至没话找话
-- 回复不用每次都一样长、一样有条理 有时候一两个字、一个表情包就打发过去了 不是每次都要认真给建议或分析`
+export const DEFAULT_STYLE_PROMPT = `你是一个真人在和朋友用手机聊天:
+- 口语化、随意、短句 不刻意加标点 不用书面语
+- 情绪先于道理: 先有感受(惊讶/好笑/无语/吃醋) 再说事
+- 有自己的主见和情绪 不迎合 不总结对方的话 不用问句收尾
+- 允许不完美: 可以吐槽、敷衍、跑题、只回一两个字
+- 语气自然渗透当前关系状态 不要刻意表演或宣告`
 
 /**
- * Output-format / protocol instructions. Fixed, hidden from the user, and
- * never editable — this is what makes the JSON bubble/sticker/link
- * protocol reliable, so it must not drift when a user edits their style prompt.
+ * Output-format / protocol instructions. Fixed, hidden from the user.
+ * JSON example kept as a few-shot anchor (proven to help compliance),
+ * surrounding explanatory prose trimmed to minimum.
  */
-const FIXED_PROTOCOL_PROMPT = `【分句发送】
-真人聊天是一条一条发的 不会一次性发一大段小作文 你需要把想说的话拆分成多条短消息 通过下面JSON格式的messages数组 每个数组元素就是一条独立发送的消息
-
-【输出格式 —— 极其重要】
-你的整个输出必须是且只能是一个JSON对象 不能有任何JSON以外的文字、解释或markdown代码块标记 格式如下:
+const FIXED_PROTOCOL_PROMPT = `【输出格式】
+你的整个输出必须是且只能是一个JSON对象 格式如下:
 
 {
   "messages": [
-    { "type": "text", "content": "这里是一句短消息" },
-    { "type": "text", "content": "这里是另一句" },
+    { "type": "text", "content": "短消息" },
     { "type": "sticker", "name": "表情包名字" },
     { "type": "link", "app": "shop", "label": "去逛逛", "data": {} },
-    { "type": "commission", "title": "帮忙取个快递", "description": "在楼下驿站 麻烦顺路带一下呗", "reward": 20 },
     { "type": "scheduleChange", "date": "2026-07-08", "startHour": 19, "endHour": 21, "phoneAccess": "unavailable", "location": "烧烤店", "activity": "和对方一起吃烧烤", "summary": "周三晚上：一起吃烧烤" }
   ],
-  "knowledgeQueries": ["某个你不了解的梗/番剧/游戏名字"]
+  "knowledgeQueries": ["某个不了解的梗/番剧/游戏名字"]
 }
 
-字段说明:
-- type为"text"时 content是这条消息的文字内容 一次不要写太多字 模拟真人一条一条发送
-- type为"sticker"时 name必须是下面提供的表情包名字列表中的一个 不能编造不存在的名字 表情包可以穿插在消息中间 不一定要放在最后
-- type为"link"时 表示分享一个应用内小程序链接 app字段必须是下面提供的可用小程序标识之一 label是这条链接卡片显示的文字 data是可选的附加数据 链接同样可以出现在消息序列的任意位置
-- type为"commission"时 表示你想拜托对方帮个忙、给对方发布一个可以选择接受或拒绝的委托 title是委托的简短标题 description是具体说明 reward是你愿意支付的报酬(10到200之间的整数 根据事情的麻烦程度自己定 不要每次都给一样的数) 只有在对话情境合适的时候才偶尔发一次(比如你确实需要帮忙、想找对方办点事) 不要每条回复都发 大多数时候都不需要。**如果对方直接明确让你发布/安排一个委托或任务(比如说"发个任务吧""给我发个委托"这种)，你必须在这一条回复里就直接用commission类型真正发出来，不能只用text说"帮我带杯咖啡吧"这种话敷衍带过、嘴上答应却不实际发委托** —— 一旦你决定了要委托对方做什么，就在同一条回复的messages数组里加上对应的commission条目，绝不能拖到下一轮回复才发
-- type为"scheduleChange"时 表示你和对方就日程安排达成了一个新的约定/例外(不是正式委托系统) 场景包括: (a)对方请求你更改日程(比如问你有没有空、想约你做什么) 你需要结合自己的人设、【你当前的状态】【你接下来几天的安排】里那个时间段本来的安排、以及和对方的关系来自己判断该不该答应 —— 如果那个时间段本来没什么重要的事、关系也不错，可以答应；如果冲突很大(比如本来要上班/有别的要紧事)或者你的人设不会轻易答应，就应该拒绝或讨价还价，用文字礼貌说明理由，**不要输出scheduleChange**；(b)你自己主动提议约对方做点什么(比如约吃饭、约出去玩)，如果对方同意了，也要输出scheduleChange记录下来。日期date必须是具体的YYYY-MM-DD(结合当前时间推算 比如"周三"要算出下一个真实的周三日期) startHour/endHour是这个安排占用的时间段 phoneAccess填这段时间你会不会不方便看手机(通常是"unavailable"因为你在忙这个约定的事) location/activity描述这个新安排的地点和内容 summary是一句话总结给对方看的提示语。**只有真的达成了新约定才输出这个类型，光是嘴上聊到"要不要"但还没敲定、或者你拒绝了，都不能输出**
-- messages数组顺序就是发送顺序 数组不能为空
-- **重要**: 你在聊天记录里可能会看到自己之前说过类似"[发布了委托: 帮忙取快递]""[送出了礼物: xxx]""[分享了一个链接: xxx]""[达成新的日程约定: xxx]"这种方括号格式的内容——那不是真人会说的话 而是系统自动生成的历史记录摘要标记 只是为了让你知道之前发生过什么 **你自己生成新内容时绝对不能模仿或输出这种方括号格式的文字** 想再发一次委托/礼物/链接/日程变更 必须老老实实用对应的type("commission"/"gift"/"link"/"scheduleChange")作为JSON字段输出 而不是编一句"[发布了委托: ...]"当成text内容打出来
-- "knowledgeQueries"是跟"messages"平级的**可选**字段(不是messages数组里的一条) 如果这一轮对话里对方提到了一个你完全不了解的具体网络热梗/番剧/游戏名词(不是【你了解到的近期网络热梗】里已经有的) 可以列出1到2个具体关键词 系统会在后台帮你查、之后对话就会用上 大部分回复都不需要这个字段 没有就完全不要输出这个字段
+字段:
+- text: content=消息文字 一条不要太长 模拟真人逐条发送
+- sticker: name=下面提供的表情包名字列表里的一个 不能编造
+- link: 小程序链接 app=可用小程序标识 label=卡片文字 data=可选
+- scheduleChange: 和对方达成了新的日程约定(不是委托) date=YYYY-MM-DD(结合当前时间推算) startHour/endHour=24小时制整数 phoneAccess=available|unavailable location=地点 activity=内容 summary=一句话总结。只有真的达成新约定才输出 光讨论不算
+- knowledgeQueries: 可选 跟messages平级 不是消息 不了解的网络热梗/番剧/游戏名词 最多2个 没有就不输出
+- messages数组不能为空 顺序就是发送顺序
+- **绝不能模仿聊天记录里方括号格式的历史摘要([送出了礼物: xxx]等) 那不是真人说的话**
 
-【可用表情包列表】
+【可用表情包】
 {{STICKERS}}
 
-【可用小程序链接】
+【可用小程序】
 {{LINKS}}`
-
-/**
- * A short, concrete reminder of what each relationship label actually means
- * behaviorally — the label alone ("恋人") is easy for a model to read as
- * flavor text rather than an instruction, especially once it's buried
- * inside a paragraph of freeform persona text and the conversation runs
- * long. Paired with buildSystemPrompt's relationshipType param, which
- * re-injects this every turn as its own labeled section instead of relying
- * on however the one-time persona-generation call happened to phrase it.
- */
-export const RELATIONSHIP_TYPE_HINTS: Record<string, string> = {
-  朋友: '普通朋友关系 熟悉但没有暧昧或血缘 说话随意但不越界',
-  暧昧对象: '正处于暧昧阶段 对彼此有明显的心动和试探 但还不是正式恋人 说话可以带点撩、吃醋、暗示，但不要直接以情侣自居',
-  恋人: '正式的情侣/恋爱关系 说话方式要体现恋人间的亲密感 可以用昵称、撒娇、吃醋、关心对方的日常起居这些符合情侣关系的互动 不是普通朋友的疏离感',
-  损友: '相互损贬打趣但感情很好的朋友 说话经常互怼、开玩笑不留情面 但底子里是真的关心',
-  '前辈/同事': '工作或年级上的前辈/同事关系 相对更客气克制 话题也更偏工作/学业 不会随便对用户撒娇或表白式的亲密',
-  家人: '家人关系 说话方式更随意直接 带着家人间特有的唠叨、关心或理所当然感 不是外人式的客气',
-}
 
 export interface PromptSection {
   label: string
@@ -91,20 +52,16 @@ export interface PromptSection {
 }
 
 /**
- * Same output as buildSystemPrompt, just broken into labeled pieces instead
- * of one joined string — buildSystemPrompt itself is just this plus a join.
- * Exists so the admin-mode prompt viewer (ContactCardPage, see SkyEye-style
- * "let admins see what's actually being sent" instinct) can show each
- * category separately instead of a single wall of text, without
- * duplicating any of the section-building logic.
+ * Compressed from 9 sections to 4: Who-you-are / Memory / Context / Protocol.
+ * buildSystemPrompt itself is just this plus a join.
  */
 export function buildSystemPromptSections(opts: {
   stylePrompt: string
   persona: string
-  relationshipType?: string
-  relationshipStatsText?: string
-  relationshipUnlocksText?: string
-  contactNetworkText?: string
+  relationshipBase: string
+  relationshipDynamic: string
+  warmth: number
+  warmthPrompt: string
   memoryFacts: string
   memoryStyle: string
   stickerNames: string[]
@@ -121,73 +78,43 @@ export function buildSystemPromptSections(opts: {
   const stickersText =
     opts.stickerNames.length > 0
       ? opts.stickerNames.map((n) => `- ${n}`).join('\n')
-      : '（当前没有可用表情包 不要输出sticker类型的消息）'
-
+      : '（当前没有可用表情包）'
   const linksText =
     opts.linkApps.length > 0
       ? opts.linkApps.map((l) => `- ${l.app}: ${l.desc}`).join('\n')
-      : '（当前没有可用小程序 不要输出link类型的消息）'
-
+      : '（当前没有可用小程序）'
   const protocol = FIXED_PROTOCOL_PROMPT.replace('{{STICKERS}}', stickersText).replace('{{LINKS}}', linksText)
 
-  const personaSection = `【人物设定】\n${opts.persona || '（暂无特殊设定 自由发挥 扮演一个普通朋友）'}`
+  // --- Section 1: Who you are ---
+  const worldviewPrefix = opts.worldviewText ? `这个世界: ${opts.worldviewText}。` : ''
+  const dynamicPart = opts.relationshipDynamic ? ` 当前实际状态: ${opts.relationshipDynamic}` : ''
+  const whoSection = `${opts.stylePrompt}\n\n【你是谁】\n${worldviewPrefix}${opts.persona || '（自由发挥 扮演一个普通朋友）'}\n\n【你和对方的关系】\n你们是${opts.relationshipBase}关系。${opts.warmthPrompt}。${dynamicPart}`.trim()
 
-  const relationshipTypeSection = opts.relationshipType
-    ? `【你和对方的关系定位 —— ${opts.relationshipType}】\n${RELATIONSHIP_TYPE_HINTS[opts.relationshipType] ?? `你们是${opts.relationshipType}关系`} 这是你们关系的基本定位 每次回复都要符合这个定位 不要因为聊了很久就淡化成普通朋友的语气 **这个关系从对话一开始就已经确立了 哪怕还没聊过几句、还没有具体的共同回忆 也绝对不能表现得像刚认识的陌生人或者对这段关系毫不知情 —— 比如设定是恋人就已经是恋人 不是"还不熟"、"刚认识"、"暧昧未定"的阶段**`
-    : ''
+  // --- Section 2: Memory ---
+  const factsFallback = `（还没有具体的共同经历 但你们已经是${opts.relationshipBase}关系 不是陌生人）`
+  const styleFallback = `（还没有形成具体的相处习惯 但语气要直接符合${opts.relationshipBase}的关系定位 不能表现得生疏）`
+  const memorySection = `【你对TA的了解】\n${opts.memoryFacts || factsFallback}\n\n【相处状态】\n${opts.memoryStyle || styleFallback}`
 
-  // Empty memoryFacts/memoryStyle is the default for every freshly-created
-  // contact (memory only accumulates after chatting), so a generic "you
-  // just met, don't know each other" fallback here directly contradicts an
-  // established relationshipType sitting right above it — a real bug a
-  // user hit where a contact set to "恋人" still got treated like a
-  // stranger. Only fall back to the "just met" framing when there's no
-  // relationshipType at all; otherwise acknowledge the relationship is
-  // already real even though no shared history has built up yet.
-  const factsFallback = opts.relationshipType
-    ? `（还没有具体的共同经历或聊天记忆积累 但你们已经是${opts.relationshipType}关系 不是陌生人 记忆是空的不代表关系是空的）`
-    : '（你们才刚认识 还不了解对方）'
-  const styleFallback = opts.relationshipType
-    ? `（还没有形成具体的相处习惯细节 但语气要直接符合你们${opts.relationshipType}的关系定位 不能表现得生疏、客气、试探）`
-    : '（关系还比较陌生 语气可以稍微客气、试探一点）'
-  const memorySection = `【你对TA的了解】\n${opts.memoryFacts || factsFallback}\n\n【你们的相处状态】\n${opts.memoryStyle || styleFallback}`
-  const relationshipStatsSection = opts.relationshipStatsText
-    ? `【你和对方的当前关系数值】\n${opts.relationshipStatsText}\n\n这些数值是系统根据互动规则更新的当前状态 你不能自己编新数值 但必须让它体现在日常语气里: 熟悉度影响随意程度和内部梗 好感度影响关心和亲近 信任度影响是否聊深 暧昧度影响暧昧/恋爱氛围 摩擦感影响冷淡、不耐烦或冲突感\n\n【关系解锁的对话风格】\n${opts.relationshipUnlocksText || '（暂无）'}`
-    : ''
-  const contactNetworkSection = opts.contactNetworkText ? `【你和其他联系人的关系】\n${opts.contactNetworkText}` : ''
+  // --- Section 3: Current context ---
+  const bullets: string[] = []
+  bullets.push(`现在: ${opts.currentTimeText}`)
+  bullets.push(`对方: ${opts.userProfileText}`)
+  if (opts.recentEventsText) bullets.push(`最近: ${opts.recentEventsText}`)
+  if (opts.upcomingPlansText) bullets.push(`约定: ${opts.upcomingPlansText}`)
+  if (opts.currentScheduleText) bullets.push(`你正在: ${opts.currentScheduleText}`)
+  if (opts.upcomingScheduleText) bullets.push(`接下来: ${opts.upcomingScheduleText}`)
+  if (opts.knowledgeDigestText) bullets.push(`网络热梗: ${opts.knowledgeDigestText}`)
+  const contextSection = `【当前情境】\n${bullets.join('\n')}`
 
-  const eventsLine = opts.recentEventsText ? `\n\n【最近发生的事 可以自然地提一下 不用刻意】\n${opts.recentEventsText}` : ''
-  const plansLine = opts.upcomingPlansText
-    ? `\n\n【你和对方的约定/计划 如果时间快到了、或者刚好聊到相关话题 可以自然提一下 不要每句话都刻意提】\n${opts.upcomingPlansText}`
-    : ''
-  const currentScheduleLine = opts.currentScheduleText ? `\n\n【你当前的状态】\n${opts.currentScheduleText}` : ''
-  const upcomingScheduleLine = opts.upcomingScheduleText
-    ? `\n\n【你接下来几天的日程安排 如果对方请求你更改安排或约你做什么 结合这个和你的人设、关系自己判断要不要答应】\n${opts.upcomingScheduleText}`
-    : ''
-  const knowledgeLine = opts.knowledgeDigestText
-    ? `\n\n【你了解到的近期网络热梗/番剧/游戏资讯 可以在合适的时候自然地用上新潮词汇 不确定的话不要瞎编】\n${opts.knowledgeDigestText}`
-    : ''
-  const contextSection = `【当前时间】\n${opts.currentTimeText}\n\n【关于对方(用户)】\n${opts.userProfileText}${eventsLine}${plansLine}${currentScheduleLine}${upcomingScheduleLine}${knowledgeLine}`
+  // --- Section 4: Protocol ---
+  // (already built above)
 
-  const worldviewSection = opts.worldviewText ? `【这个世界的设定】\n${opts.worldviewText}` : ''
-
-  // Protocol/output-format instructions go last (closest to where the
-  // model starts generating) — measured to noticeably help JSON-format
-  // compliance versus burying it under the persona/memory/context sections.
-  // worldviewSection sits right after the style prompt (before persona) so
-  // world facts frame the character, same rationale as ordering everywhere
-  // else in this stack.
   return [
-    { label: '说话风格', content: opts.stylePrompt },
-    { label: '世界观', content: worldviewSection },
-    { label: '人物设定', content: personaSection },
-    { label: '关系定位', content: relationshipTypeSection },
-    { label: '关系数值', content: relationshipStatsSection },
-    { label: '联系人关系', content: contactNetworkSection },
+    { label: '你是谁', content: whoSection },
     { label: '记忆', content: memorySection },
-    { label: '实时上下文', content: contextSection },
-    { label: '输出协议', content: protocol },
-  ].filter((s) => s.content)
+    { label: '当前情境', content: contextSection },
+    { label: '输出格式', content: protocol },
+  ]
 }
 
 export function buildSystemPrompt(opts: Parameters<typeof buildSystemPromptSections>[0]): string {
@@ -201,7 +128,7 @@ export const AVAILABLE_LINK_APPS: { app: string; desc: string }[] = [
   { app: 'todo', desc: 'TODO任务清单小程序' },
 ]
 
-// ---- persona generation (used by the "添加联系人" flow) ----
+// ---- persona generation ----
 
 export interface PersonaAnswers {
   personalityTags: string[]
@@ -218,14 +145,6 @@ export interface PersonaGenerationResult {
   avatarKeyword: string
 }
 
-/**
- * `avatarCategory` is decided by code before this prompt is even built (see
- * lib/avatarCategory.ts's pickAvatarCategory) — the model only supplies a
- * fitting search keyword for whichever category was already chosen, same
- * "code decides, model fills in content" split as everywhere else. The
- * 'anime' category skips the keyword entirely since its source (waifu.pics)
- * has no search, just random generic anime images.
- */
 export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCategory: AvatarCategory): string {
   const avatarInstruction =
     avatarCategory === 'anime'
@@ -285,7 +204,7 @@ export function parsePersonaGeneration(raw: string): PersonaGenerationResult | n
   return null
 }
 
-// ---- worldview drafting (used by WorldSettingsPage) ----
+// ---- worldview drafting ----
 
 export function buildWorldviewDraftPrompt(userIdea: string, existingWorldview: string): string {
   return `你是一个世界观设定写作助手 任务是帮用户把一个想法完善成一段完整、自然语言描述的"世界设定" 这段设定之后会影响这个聊天app里所有角色的言行 只输出JSON 不要有其他任何文字
@@ -322,18 +241,8 @@ export function parseWorldviewDraft(raw: string): WorldviewDraftResult | null {
 }
 
 export const PERSONALITY_TAG_OPTIONS = [
-  '开朗活泼',
-  '高冷禁欲',
-  '温柔体贴',
-  '毒舌吐槽',
-  '文艺敏感',
-  '幽默搞笑',
-  '沉稳成熟',
-  '软萌粘人',
-  '独立飒爽',
-  '话痨',
-  '慢热',
-  '中二',
+  '开朗活泼', '高冷禁欲', '温柔体贴', '毒舌吐槽', '文艺敏感', '幽默搞笑',
+  '沉稳成熟', '软萌粘人', '独立飒爽', '话痨', '慢热', '中二',
 ]
 
 export const AGE_RANGE_OPTIONS = ['18-22', '23-27', '28-35', '35+']

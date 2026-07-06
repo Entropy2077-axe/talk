@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { TopBar } from '../components/TopBar'
 import { MessageBubble } from '../components/MessageBubble'
@@ -120,25 +119,6 @@ export function ChatPage() {
     await sendMessage(conversationId, contact, settings, stickers, text)
   }
 
-  async function handleCommissionRespond(commissionId: string, accept: boolean) {
-    if (!conversationId || !contact) return
-    const commission = await db.commissions.get(commissionId)
-    if (!commission || commission.status !== 'pending') return
-    await db.commissions.update(commissionId, { status: accept ? 'accepted' : 'declined', respondedAt: Date.now() })
-    if (accept) {
-      await db.todos.add({
-        id: uuid(),
-        title: commission.title,
-        note: commission.description,
-        done: false,
-        createdAt: Date.now(),
-        source: 'commission',
-        commissionId,
-      })
-    }
-    await sendMessage(conversationId, contact, settings, stickers, accept ? `好 这个我接了` : `这个我接不了 抱歉`)
-  }
-
   if (conversation === undefined) return null
   if (conversation === null) {
     return (
@@ -222,7 +202,6 @@ export function ChatPage() {
               highlighted={flashId === m.id}
               adminMode={!!settings.adminModeEnabled}
               onLinkClick={() => setToast('小程序功能正在开发中')}
-              onCommissionRespond={handleCommissionRespond}
             />
           )
         })}

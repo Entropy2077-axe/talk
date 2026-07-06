@@ -1,7 +1,7 @@
 /**
  * Product generation is deliberately kept separate from the chat persona
  * system: its own prompt, and the user can point it at a different model
- * (settings.shopModel) than the one used for conversations — this is a
+ * (settings.utilityModel) than the one used for conversations — this is a
  * distinct, single-turn (system+user only) generation task, unrelated to
  * any contact's persona or chat history.
  */

@@ -11,7 +11,7 @@ import { chatCompletion } from '../lib/deepseek'
 import { randomAvatarColor } from '../lib/colors'
 import { AVATAR_EMOJIS } from '../lib/avatarEmojis'
 import { pickRandomTrait } from '../lib/randomTraits'
-import { initialRelationshipFor } from '../lib/relationship'
+import { initialWarmthForBase } from '../lib/relationship'
 import { displayName } from '../lib/contact'
 import { pickAvatarCategory } from '../lib/avatarCategory'
 import { randomAnimeAvatar, searchPexelsPhoto } from '../lib/photoSearch'
@@ -170,8 +170,9 @@ export function ContactAddPage() {
         memoryStyle: '',
         memoryUpdatedAt: 0,
         memoryMessageCursor: 0,
-        relationship: initialRelationshipFor(relationship),
-        relationshipType: relationship || undefined,
+        warmth: initialWarmthForBase(relationship || '朋友'),
+        relationshipBase: relationship || '朋友',
+        relationshipDynamic: '',
         schedule: parsed.schedule,
         scheduleOverrides: [],
       })
