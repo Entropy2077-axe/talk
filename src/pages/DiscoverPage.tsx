@@ -1,30 +1,48 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { TopBar } from '../components/TopBar'
 import { SearchOverlay } from '../components/SearchOverlay'
 import { UnreadBadge } from '../components/UnreadBadge'
 import { useSettingsStore } from '../store/useSettingsStore'
+import { ALL_MODULES } from '../features'
 import { db } from '../db/db'
 import { momentsUnreadCount } from '../lib/momentsUnread'
 
+// Only 朋友圈 is always present — everything else is a toggleable module.
 const BASE_ENTRIES = [
   { to: '/moments', icon: '📸', label: '朋友圈' },
-  { to: '/shop', icon: '🛍️', label: '商城' },
-  { to: '/warehouse', icon: '📦', label: '仓库' },
-  { to: '/relationships', icon: '🕸️', label: '关系网' },
-  { to: '/world-settings', icon: '🌐', label: '世界设定' },
 ]
 
 export function DiscoverPage() {
   const [searching, setSearching] = useState(false)
   const navigate = useNavigate()
-  const adminModeEnabled = useSettingsStore((s) => s.adminModeEnabled)
+  const enabledModules = useSettingsStore((s) => s.enabledModules)
   const momentsLastReadAt = useSettingsStore((s) => s.momentsLastReadAt)
   const moments = useLiveQuery(() => db.moments.toArray(), []) ?? []
   const socialEvents = useLiveQuery(() => db.socialEvents.toArray(), []) ?? []
   const momentsUnread = momentsUnreadCount({ lastReadAt: momentsLastReadAt, moments, socialEvents })
-  const entries = adminModeEnabled ? [...BASE_ENTRIES, { to: '/sky-eye', icon: '🔭', label: '天眼' }] : BASE_ENTRIES
+
+  const moduleEntries = useMemo(() => {
+    const seen = new Set<string>()
+    const entries: { to: string; icon: string; label: string }[] = []
+    for (const m of ALL_MODULES) {
+      if (!enabledModules.includes(m.id)) continue
+      for (const e of m.discoverEntries ?? []) {
+        const key = e.to + e.label
+        if (seen.has(key)) continue
+        seen.add(key)
+        entries.push(e)
+      }
+    }
+    return entries
+  }, [enabledModules])
+
+  const entries = [
+    ...BASE_ENTRIES,
+    ...moduleEntries,
+  ]
+
   return (
     <div className="relative flex min-h-full flex-col">
       <TopBar title="发现" showSearch onSearchClick={() => setSearching(true)} />
@@ -32,7 +50,7 @@ export function DiscoverPage() {
       <div className="mx-4 mt-3 space-y-2">
         {entries.map((entry) => (
           <button
-            key={entry.to}
+            key={entry.to + entry.label}
             onClick={() => navigate(entry.to)}
             className="flex w-full items-center justify-between rounded-xl bg-white px-4 py-3.5 text-left active:bg-gray-50"
           >

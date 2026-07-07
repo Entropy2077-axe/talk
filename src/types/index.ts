@@ -15,7 +15,8 @@ export interface Contact {
   memoryUpdatedAt: number
   memoryMessageCursor: number // number of messages already folded into memory, so updates only look at what's new
   // ---- relationship (single-dimension warmth, -100 hostile ~ +100 bonded) ----
-  warmth: number
+  /** Absent until the 好感度 module is enabled and the first evaluation runs, or a personality trait with an initial value is assigned. */
+  warmth?: number
   relationshipBase: string // label the user picked at creation: 恋人/朋友/家人/... — only changes by explicit user action or explicit model assessment (e.g. "已经分手了")
   relationshipDynamic: string // short natural-language summary of what the relationship currently feels like, updated by the utility model on every memory update
   personalityTrait?: string // 病娇/天然呆/傲娇/无. Affects warmth change rate via traitWarmthModifier; missing/无 = normal.
@@ -232,6 +233,7 @@ export interface Message {
   debugAiTurnId?: string // admin mode only: links this bubble to the full AI turn debug payload
   debugRawAiResponse?: string // admin mode only: raw JSON/text returned by the AI for the turn that produced this bubble
   debugParsedBubble?: AiBubble | GroupAiBubble // admin mode only: parsed bubble payload used to render this message
+  thought?: string // AI's private thought for this turn — only shown when 读心 module is enabled
   createdAt: number
   pending?: boolean // true while an assistant bubble is still "typing" (not yet delivered)
 }
@@ -286,13 +288,15 @@ export interface AppSettings {
   momentsCoverPhoto: string // data URL for the 朋友圈 page's cover banner, empty until the user sets one
   momentsLastReadAt?: number // updated when the user opens MomentsPage; drives Discover red dots
   // ---- autonomous behavior (see lib/proactiveChat.ts) ----
-  autonomousBehaviorEnabled: boolean // master switch: AI can post moments / proactively open a chat on a timer while the app is open. Off by default — it makes real API calls without a direct user action.
+  // Master switch moved to enabledModules['proactiveChat'] — see src/features/proactiveChat.ts
   proactiveMessageLog?: { date: string; count: number } // rolling daily counter backing the global cap on proactive chat-opens, keyed by local date
   // was a hardcoded const in lib/proactiveChat.ts, moved to user-configurable settings (with the same defaults) — see SettingsPage's "AI自主行为" section
   proactiveDailyCap: number // max proactive chat-opens per day, all contacts combined
   proactiveProbability: number // 0-1, per-tick chance anything happens at all even when someone's eligible
   proactiveSilenceThresholdMs: number // a conversation must have been quiet at least this long to make its contact eligible
   proactiveCooldownMs: number // a contact won't proactively message again until this long has passed since their last one
+  proactiveMomentsMax: number // max moments to auto-post per background tick (default 3)
+  proactiveTickIntervalMs: number // how often the background timer fires (default 5 min)
   // ---- web search (see lib/webSearch.ts) ----
   tavilyApiKey: string // used only by the knowledge-base refresh job, not live during normal chat
   // ---- photo avatars/moments images (see lib/photoSearch.ts) ----
@@ -302,12 +306,18 @@ export interface AppSettings {
   // ---- knowledge base (see lib/knowledgeBase.ts) ----
   knowledgeQueryLog?: { date: string; count: number } // rolling daily counter backing the cap on reactive keyword-triggered knowledge lookups, keyed by local date
   // ---- admin/dev tooling (see lib/consoleCapture.ts + SkyEyePage) ----
-  adminModeEnabled: boolean // master switch for the "天眼" debug page; off by default, entry disappears from DiscoverPage when off
+  // Master switch moved to enabledModules['adminMode'] — see src/features/adminMode.ts
   // ---- appearance ----
   themeMode?: 'light' | 'dark'
   chatBackground?: string // empty = default; otherwise a CSS color or data URL used behind chat messages
   currencyIconMode?: 'coin' | 'emoji' | 'yen' | 'dollar'
   customCurrencyEmoji?: string
+  /** How long an AI mood lasts before expiring (ms). Default 30 min. */
+  moodExpiryMs: number
+  /** Validation mode: 'quality' = check+rewrite via utility model, 'optimize' = always re-feed to main model. */
+  validatorMode: 'quality' | 'optimize'
+  /** Feature-module toggles — see src/features/. Every module id listed here is active. */
+  enabledModules: string[]
 }
 
 /** A dated fact about current internet culture (memes/anime/games), gathered by the knowledge-base refresh job — see lib/knowledgeBase.ts. */
@@ -357,8 +367,10 @@ export type AiBubble = AiBubbleText | AiBubbleSticker | AiBubbleLink | AiBubbleS
 
 export interface AiResponse {
   messages: AiBubble[]
-  /** Short emotional-state summary the model assesses about itself this turn. Optional; omit when nothing notable. */
-  mood?: string
+  /** Short emotional-state summary the model assesses about itself this turn. Required. */
+  mood: string
+  /** Private thought — what the AI really thinks vs what it says. Required. */
+  thought: string
   /** Sibling of `messages`, not a bubble — up to 2 short topics the model wants the knowledge base to look up (see lib/knowledgeBase.ts), e.g. a slang term the user just used that it doesn't recognize. Optional; most turns won't set this. */
   knowledgeQueries?: string[]
 }

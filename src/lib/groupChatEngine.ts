@@ -11,6 +11,7 @@ import {
 import { extractJsonObject } from './aiProtocol'
 import { CONTEXT_WINDOW_SIZE, maybeUpdateGroupMemory } from './memory'
 import { knowledgeDigestText, processKnowledgeQueries } from './knowledgeBase'
+import { isModuleEnabled } from '../features'
 import { describeCurrentTime } from './time'
 import { displayName } from './contact'
 import { previewForMessage } from './messagePreview'
@@ -242,8 +243,8 @@ async function runGroupAiTurn(
       userProfileText: buildUserProfileText(settings),
       targetedContextText: targetContext,
       recentEventsText: recentEventsText || undefined,
-      worldviewText: settings.worldview || undefined,
-      knowledgeDigestText: knowledgeDigestText(knowledgeEntries) || undefined,
+      worldviewText: isModuleEnabled('worldview') ? (settings.worldview || undefined) : undefined,
+      knowledgeDigestText: isModuleEnabled('knowledgeBase') ? (knowledgeDigestText(knowledgeEntries) || undefined) : undefined,
     })
 
     const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
@@ -301,7 +302,7 @@ async function runGroupAiTurn(
       knowledgeQueries,
       createdAt: Date.now(),
     })
-    processKnowledgeQueries(knowledgeQueries, settings)
+    if (isModuleEnabled('knowledgeBase')) processKnowledgeQueries(knowledgeQueries, settings)
     revealGroupBubbles(conversationId, group, members, speakers, bubbles, streamId, settings, aiTurnId)
   } catch (err) {
     if (streamByConversation.get(conversationId) !== streamId) return

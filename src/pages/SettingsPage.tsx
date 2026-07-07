@@ -20,14 +20,8 @@ export function SettingsPage() {
     model,
     utilityModel,
     globalSystemPrompt,
-    autonomousBehaviorEnabled,
-    proactiveDailyCap,
-    proactiveProbability,
-    proactiveSilenceThresholdMs,
-    proactiveCooldownMs,
     tavilyApiKey,
     pexelsApiKey,
-    adminModeEnabled,
     themeMode,
     chatBackground,
     currencyIconMode,
@@ -488,118 +482,6 @@ export function SettingsPage() {
         </p>
       </section>
 
-      <section className="mt-3 bg-white px-4 py-3">
-        <div className="flex items-center justify-between">
-          <div className="pr-4">
-            <h2 className="text-xs font-medium text-gray-400">AI自主行为</h2>
-            <p className="mt-1 text-[11px] leading-relaxed text-gray-400">
-              开启后 app开着的时候AI会自己刷新朋友圈、偶尔主动找你聊天 不需要你先发消息 关掉app/切到后台太久就不会再触发
-              下面几个参数可以调节主动找你的频率 但依然会产生真实API调用
-            </p>
-          </div>
-          <button
-            onClick={() => setSettings({ autonomousBehaviorEnabled: !autonomousBehaviorEnabled })}
-            aria-label="切换AI自主行为"
-            className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
-              autonomousBehaviorEnabled ? 'bg-gray-900' : 'bg-gray-200'
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                autonomousBehaviorEnabled ? 'translate-x-5' : 'translate-x-0'
-              }`}
-            />
-          </button>
-        </div>
-
-        {autonomousBehaviorEnabled && (
-          <div className="mt-3 space-y-3 border-t border-gray-100 pt-3">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-xs text-gray-500">每天最多主动找你聊天几次</span>
-              <select
-                value={proactiveDailyCap}
-                onChange={(e) => setSettings({ proactiveDailyCap: Number(e.target.value) })}
-                className="rounded-lg border border-gray-200 px-2 py-1 text-xs"
-              >
-                {[1, 2, 3, 5, 10].map((n) => (
-                  <option key={n} value={n}>
-                    {n}次
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-xs text-gray-500">每次检查时主动找你的概率</span>
-              <select
-                value={proactiveProbability}
-                onChange={(e) => setSettings({ proactiveProbability: Number(e.target.value) })}
-                className="rounded-lg border border-gray-200 px-2 py-1 text-xs"
-              >
-                {[0.1, 0.25, 0.5, 0.75, 1].map((p) => (
-                  <option key={p} value={p}>
-                    {Math.round(p * 100)}%
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-xs text-gray-500">至少沉默多久才会主动找你</span>
-              <select
-                value={proactiveSilenceThresholdMs}
-                onChange={(e) => setSettings({ proactiveSilenceThresholdMs: Number(e.target.value) })}
-                className="rounded-lg border border-gray-200 px-2 py-1 text-xs"
-              >
-                {[15, 30, 45, 60, 120, 180].map((min) => (
-                  <option key={min} value={min * 60 * 1000}>
-                    {min < 60 ? `${min}分钟` : `${min / 60}小时`}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-xs text-gray-500">同一个人多久内不会重复主动找你</span>
-              <select
-                value={proactiveCooldownMs}
-                onChange={(e) => setSettings({ proactiveCooldownMs: Number(e.target.value) })}
-                className="rounded-lg border border-gray-200 px-2 py-1 text-xs"
-              >
-                {[1, 3, 6, 12, 24].map((h) => (
-                  <option key={h} value={h * 60 * 60 * 1000}>
-                    {h}小时
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        )}
-      </section>
-
-      <section className="mt-3 bg-white px-4 py-3">
-        <div className="flex items-center justify-between">
-          <div className="pr-4">
-            <h2 className="text-xs font-medium text-gray-400">管理员模式</h2>
-            <p className="mt-1 text-[11px] leading-relaxed text-gray-400">
-              开启后发现页会出现"天眼"入口 可以看console日志、数据统计、当前设置 方便开发调试 关闭后天眼入口也会消失
-            </p>
-          </div>
-          <button
-            onClick={() => setSettings({ adminModeEnabled: !adminModeEnabled })}
-            aria-label="切换管理员模式"
-            className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
-              adminModeEnabled ? 'bg-gray-900' : 'bg-gray-200'
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-                adminModeEnabled ? 'translate-x-5' : 'translate-x-0'
-              }`}
-            />
-          </button>
-        </div>
-      </section>
 
       <section className="mt-3 bg-white px-4 py-3">
         <h2 className="mb-2 text-xs font-medium text-gray-400">数据备份与恢复</h2>

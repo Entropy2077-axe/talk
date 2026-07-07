@@ -3,14 +3,16 @@ import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { chatCompletion, coalesceConsecutiveRoles, type ChatMessage } from './deepseek'
 import { extractJsonObject, parseAiResponse, typingDelayMs } from './aiProtocol'
-import { buildSystemPrompt, AVAILABLE_LINK_APPS, formatSpeechSamplesForScene } from './prompt'
+import { formatSpeechSamplesForScene, buildRawChatPrompt, buildJsonConversionPrompt } from './prompt'
+import { isModuleEnabled } from '../features'
 import { CONTEXT_WINDOW_SIZE, activeUpcomingPlansText, maybeUpdateMemory } from './memory'
 import { describeCurrentTime, ageFromBirthday } from './time'
 import { describeCurrentSchedule, describeUpcomingScheduleText, pruneExpiredOverrides } from './schedule'
-import { knowledgeDigestText, processKnowledgeQueries } from './knowledgeBase'
+import { processKnowledgeQueries } from './knowledgeBase'
+import { evaluateInitialWarmth, relationshipLine } from './relationship'
 import { displayName } from './contact'
 import { previewForMessage } from './messagePreview'
-import { validatePrivateTurn } from './responseQuality'
+import { validatePrivateTurn, optimizePrivateTurn } from './responseQuality'
 import { recentSocialEventsText } from './socialEvents'
 import { useChatUiStore } from '../store/useChatUiStore'
 import type { AiBubble, AppSettings, Contact, Message, MessageType, ScheduleOverride, Sticker } from '../types'
@@ -60,7 +62,8 @@ export function getConversationRuntimeState(conversationId: string): Conversatio
 // Bookkeeping that doesn't need to be reactive — plain module-level maps,
 // keyed by conversationId, so they survive regardless of component mounts.
 /** How long a mood lasts before expiring back to neutral. */
-const MOOD_EXPIRY_MS = 30 * 60 * 1000
+// Mood expiry is now a user-configurable setting (see ProactiveSettingsPage → mood settings).
+// The default is 30 min, stored in AppSettings.moodExpiryMs.
 const streamByConversation = new Map<string, string>()
 const timersByConversation = new Map<string, ReturnType<typeof setTimeout>[]>()
 const abortByConversation = new Map<string, AbortController>()
@@ -243,11 +246,20 @@ async function runAiTurn(
 ): Promise<void> {
   const engine = useChatEngineStore.getState()
   const now = Date.now()
-  const activeMood = getActiveMood(contact, now)
+  const activeMood = isModuleEnabled('mood') ? getActiveMood(contact, now) : undefined
   engine.patch(conversationId, { aiTyping: true, error: '' })
   console.log(`[chat] 开始生成回复 对方=${displayName(contact)} conversationId=${conversationId}`)
   try {
     const history = await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt')
+
+    // Cold-start warmth evaluation: 好感度 is enabled but this contact
+    // was created while the module was off → evaluate once from chat history.
+    if (isModuleEnabled('relationship') && contact.warmth === undefined) {
+      await evaluateInitialWarmth(contact, conversationId, settings)
+      // Re-read the contact so the newly-set warmth is available below.
+      const fresh = await db.contacts.get(contact.id)
+      if (fresh) contact = fresh
+    }
 
     // Notable things that happened outside the chat itself (e.g. the user
     // liked this contact's moment) get mentioned once then cleared, rather
@@ -257,31 +269,34 @@ async function runAiTurn(
     const socialEventsText = await recentSocialEventsText([contact.id], 4)
     const recentEventsText = [pendingEvents.join('；'), socialEventsText].filter(Boolean).join('\n')
 
-    const knowledgeEntries = await db.knowledgeEntries.toArray()
-    const systemPrompt = buildSystemPrompt({
-      stylePrompt: settings.globalSystemPrompt,
+    // ---- Step 1: build context sections (no JSON protocol) ----
+    const scheduleText = describeUpcomingScheduleText(contact, new Date())
+    const contextSections = buildRawChatPrompt({
+      name: contact.name,
       persona: contact.systemPrompt,
-      relationshipBase: contact.relationshipBase || '朋友',
-      relationshipDynamic: contact.relationshipDynamic || '',
-      warmth: contact.warmth ?? 0,
-      memoryFacts: contact.memoryFacts,
-      memoryStyle: contact.memoryStyle,
+      stylePrompt: settings.globalSystemPrompt,
+      relationshipBase: isModuleEnabled('relationship') ? (contact.relationshipBase || '朋友') : '朋友',
+      personalityTrait: isModuleEnabled('personalityTraits') ? contact.personalityTrait : undefined,
+      worldviewText: isModuleEnabled('worldview') ? (settings.worldview || undefined) : undefined,
+      recentContext: [
+        `【你和对方的关系】${relationshipLine(
+          isModuleEnabled('relationship') ? (contact.relationshipBase || '朋友') : '朋友',
+          isModuleEnabled('relationship') ? (contact.relationshipDynamic || '') : '',
+          isModuleEnabled('relationship') ? (contact.warmth ?? 0) : 0,
+        )}`,
+        `【你对TA的了解】${contact.memoryFacts || '（刚开始聊）'}`,
+        `【相处习惯】${contact.memoryStyle || '（还没有形成习惯）'}`,
+        `【当前情境】现在: ${describeCurrentTime(new Date())}。对方: ${buildUserProfileText(settings)}。${activeMood ? `你的心情: ${activeMood}。` : ''}【日程】${describeCurrentSchedule(contact, new Date()) ? `\n当前: ${describeCurrentSchedule(contact, new Date())}` : '\n当前: 暂无安排'}${scheduleText ? `\n接下来:\n${scheduleText}` : '\n接下来: 暂无安排'}${activeUpcomingPlansText(contact, new Date()) ? `\n约定: ${activeUpcomingPlansText(contact, new Date())}` : ''}${recentEventsText ? `\n最近: ${recentEventsText}` : ''}`,
+        formatSpeechSamplesForScene(contact.speechSamples, 'private', 3)
+          ? `【说话样例】\n${formatSpeechSamplesForScene(contact.speechSamples, 'private', 3)}`
+          : '',
+      ].filter(Boolean).join('\n\n'),
       stickerNames: stickers.map((s) => s.name),
-      linkApps: AVAILABLE_LINK_APPS,
-      currentTimeText: describeCurrentTime(new Date()),
-      userProfileText: buildUserProfileText(settings),
-      activeMood,
-      recentEventsText: recentEventsText || undefined,
-      upcomingPlansText: activeUpcomingPlansText(contact, new Date()) || undefined,
-      currentScheduleText: describeCurrentSchedule(contact, new Date()) || undefined,
-      upcomingScheduleText: describeUpcomingScheduleText(contact, new Date()) || undefined,
-      worldviewText: settings.worldview || undefined,
-      knowledgeDigestText: knowledgeDigestText(knowledgeEntries) || undefined,
-      speechSamplesText: formatSpeechSamplesForScene(contact.speechSamples, 'private', 3) || undefined,
     })
+
     const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
     const chatMessages: ChatMessage[] = coalesceConsecutiveRoles([
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: contextSections },
       ...recentHistory.map((m): ChatMessage => {
         if (m.type === 'sticker') return formatStructuredHistoryEvent(m, 'sticker')
         if (m.type === 'link') return formatStructuredHistoryEvent(m, 'link')
@@ -293,7 +308,9 @@ async function runAiTurn(
 
     const controller = new AbortController()
     abortByConversation.set(conversationId, controller)
-    const raw = await chatCompletion({
+
+    // ---- Step 1: main model generates raw text (no JSON) ----
+    const rawText = await chatCompletion({
       apiKey: settings.apiKey,
       baseUrl: settings.baseUrl,
       model: settings.model,
@@ -302,27 +319,65 @@ async function runAiTurn(
     })
 
     if (streamByConversation.get(conversationId) !== streamId) return
-    let finalRaw = raw
-    let { bubbles, knowledgeQueries, mood: turnMood } = parseAiResponse(finalRaw)
-    if (bubbles.length > 0) {
-      const checked = await validatePrivateTurn({
-        settings,
-        contact,
-        latestUserText: _triggeringUserText,
-        raw: finalRaw,
-        bubbles,
-        signal: controller.signal,
-      })
-      if (streamByConversation.get(conversationId) !== streamId) return
-      if (checked.repaired) {
-        console.warn(`[chat] 回复已被质量校验重写 对方=${displayName(contact)} 原因=${checked.reason ?? 'unknown'}`)
-        finalRaw = checked.raw
-        ;({ bubbles, knowledgeQueries, mood: turnMood } = parseAiResponse(finalRaw))
+    console.log(`[chat] 主模型回复(${rawText.length}字): ${rawText.slice(0, 100)}...`)
+
+    // ---- Step 2: utility model converts raw text to JSON ----
+    const conversionPrompt = buildJsonConversionPrompt(rawText)
+    const jsonRaw = await chatCompletion({
+      apiKey: settings.apiKey,
+      baseUrl: settings.baseUrl,
+      model: settings.utilityModel,
+      messages: [
+        { role: 'system', content: conversionPrompt },
+      ],
+      jsonMode: true,
+      signal: controller.signal,
+    })
+
+    if (streamByConversation.get(conversationId) !== streamId) return
+    console.log(`[chat] 多功能模型转换JSON: ${jsonRaw.slice(0, 200)}`)
+    let finalRaw = jsonRaw
+    let { bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw)
+
+    // Validator module — two modes, both skipped when the module is off.
+    if (isModuleEnabled('validator') && bubbles.length > 0) {
+      if (settings.validatorMode === 'quality') {
+        // Mode 1: quality check via utility model, rewrite on failure.
+        const checked = await validatePrivateTurn({
+          settings,
+          contact,
+          latestUserText: _triggeringUserText,
+          raw: finalRaw,
+          bubbles,
+          signal: controller.signal,
+        })
+        if (streamByConversation.get(conversationId) !== streamId) return
+        if (checked.repaired) {
+          console.warn(`[chat] 校验器重写 对方=${displayName(contact)} 原因=${checked.reason ?? 'unknown'}`)
+          finalRaw = checked.raw
+          ;({ bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw))
+        }
+      } else {
+        // Mode 2: force-optimize — re-feed to main model for improvement.
+        const optimized = await optimizePrivateTurn({
+          settings,
+          contact,
+          latestUserText: _triggeringUserText,
+          raw: finalRaw,
+          bubbles,
+          signal: controller.signal,
+        })
+        if (streamByConversation.get(conversationId) !== streamId) return
+        if (optimized) {
+          console.log(`[chat] 校验器优化 对方=${displayName(contact)}`)
+          finalRaw = optimized
+          ;({ bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw))
+        }
       }
     }
-    console.log(`[chat] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 对方=${displayName(contact)}`)
+    console.log(`[chat] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 mood=${turnMood || '无'} thought=${turnThought ? '有(' + turnThought.length + '字)' : '无'} 对方=${displayName(contact)}`)
     if (bubbles.length === 0) {
-      console.warn(`[chat] 本轮没有正常回复 对方=${displayName(contact)} 原始内容: ${raw.slice(0, 200)}`)
+      console.warn(`[chat] 本轮没有正常回复 对方=${displayName(contact)} JSON内容: ${jsonRaw.slice(0, 200)}`)
       engine.patch(conversationId, { error: '对方这次没有正常回复 可以再发一条试试', aiTyping: false })
       return
     }
@@ -335,8 +390,8 @@ async function runAiTurn(
       knowledgeQueries,
       createdAt: Date.now(),
     })
-    processKnowledgeQueries(knowledgeQueries, settings)
-    revealBubbles(conversationId, contact, settings, bubbles, streamId, aiTurnId, _triggeringUserText, turnMood)
+    if (isModuleEnabled('knowledgeBase')) processKnowledgeQueries(knowledgeQueries, settings)
+    revealBubbles(conversationId, contact, settings, bubbles, streamId, aiTurnId, _triggeringUserText, turnMood, turnThought, finalRaw)
   } catch (err) {
     if (streamByConversation.get(conversationId) !== streamId) return
     if (err instanceof DOMException && err.name === 'AbortError') return
@@ -355,6 +410,8 @@ function revealBubbles(
   aiTurnId: string,
   _triggeringUserText: string,
   turnMood?: string,
+  turnThought?: string,
+  finalRaw?: string,
 ): void {
   const timers: ReturnType<typeof setTimeout>[] = []
   let cumulative = 0
@@ -411,7 +468,12 @@ function revealBubbles(
             : undefined,
         debugAiTurnId: aiTurnId,
         debugParsedBubble: bubble,
+        debugRawAiResponse: i === bubbles.length - 1 ? (finalRaw || '') : undefined,
+        thought: turnThought && i === bubbles.length - 1 ? turnThought : undefined,
         createdAt: Date.now(),
+      }
+      if (turnThought) {
+        console.log(`[chat] 想法已存入消息: ${turnThought}`)
       }
       await db.messages.add(msg)
       await db.conversations.update(conversationId, { updatedAt: Date.now() })
@@ -434,7 +496,7 @@ function revealBubbles(
         maybeUpdateMemory(contact.id, conversationId, settings)
         if (turnMood) {
           await db.contacts.update(contact.id, {
-            mood: { text: turnMood, expiresAt: Date.now() + MOOD_EXPIRY_MS },
+            mood: { text: turnMood, expiresAt: Date.now() + settings.moodExpiryMs },
           })
         }
       }

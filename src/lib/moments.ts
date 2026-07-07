@@ -6,6 +6,7 @@ import { describeCurrentSchedule, isPhoneAvailable } from './schedule'
 import { searchPexelsPhoto } from './photoSearch'
 import { recordSocialEvent } from './socialEvents'
 import { formatSpeechSamplesForScene } from './prompt'
+import { isModuleEnabled } from '../features'
 import type { AppSettings, Contact } from '../types'
 
 const ELIGIBLE_WINDOW_MS = 10 * 60 * 1000
@@ -70,9 +71,9 @@ export function eligiblePosters(contacts: Contact[], now: number): Contact[] {
  * but if more than 5 contacts are eligible, cap the upper bound at 5
  * instead (so a big friend list doesn't make every refresh flood the feed).
  */
-export function pickPosterCount(eligibleCount: number, totalContacts: number): number {
+export function pickPosterCount(eligibleCount: number, totalContacts: number, maxCount = 5): number {
   if (eligibleCount <= 0) return 0
-  const upperExclusive = eligibleCount > 5 ? 5 : totalContacts
+  const upperExclusive = Math.min(maxCount, eligibleCount > 5 ? 5 : totalContacts)
   const count = upperExclusive > 2 ? 2 + Math.floor(Math.random() * (upperExclusive - 2)) : 1
   return Math.max(1, Math.min(count, eligibleCount))
 }
@@ -216,7 +217,7 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
   const eligible = eligiblePosters(contacts, now)
   if (eligible.length === 0) return { postedCount: 0, message: '大家都刚发过 稍后再刷新试试' }
 
-  const count = pickPosterCount(eligible.length, contacts.length)
+  const count = pickPosterCount(eligible.length, contacts.length, settings.proactiveMomentsMax)
   const posters = shuffle(eligible).slice(0, count)
   const contactsById = new Map(contacts.map((c) => [c.id, c]))
 
@@ -232,7 +233,7 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
     baseUrl: settings.baseUrl,
     model: settings.model,
     messages: [
-      { role: 'system', content: buildMomentsPrompt(entries, settings.worldview, stickerNames) },
+      { role: 'system', content: buildMomentsPrompt(entries, isModuleEnabled('worldview') ? settings.worldview : '', stickerNames) },
       { role: 'user', content: '请生成' },
     ],
     jsonMode: true,
@@ -418,7 +419,7 @@ export async function postUserMoment(content: string, settings: AppSettings): Pr
             content: buildUserMomentCommentPrompt(
               content,
               commenterPlans.map((p) => p.contact),
-              settings.worldview,
+              isModuleEnabled('worldview') ? settings.worldview : '',
               stickerNames,
             ),
           },
@@ -541,7 +542,7 @@ export async function generateMomentReply(
       messages: [
         {
           role: 'system',
-          content: buildMomentReplyPrompt(poster, moment.content, threadLines, settings.worldview, stickerNames),
+          content: buildMomentReplyPrompt(poster, moment.content, threadLines, isModuleEnabled('worldview') ? settings.worldview : '', stickerNames),
         },
         { role: 'user', content: '请回复' },
       ],

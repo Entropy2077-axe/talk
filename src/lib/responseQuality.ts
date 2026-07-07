@@ -84,10 +84,10 @@ export async function validatePrivateTurn(opts: {
   signal?: AbortSignal
 }): Promise<{ raw: string; repaired: boolean; reason?: string }> {
   const name = displayName(opts.contact)
-  const systemPrompt = `You are a strict but lightweight roleplay response reviewer. Output JSON only: {"valid":true/false,"reason":"short","fixedRaw":"optional"}.
-Judge whether the assistant reply fits the persona, answers the latest user message, avoids invented facts, and stays in a private chat.
-If valid, return valid=true and omit fixedRaw.
-If invalid, rewrite the reply as fixedRaw using this exact app protocol JSON: {"messages":[{"type":"text","content":"..."}],"mood":"optional"}. Keep it short and in character.`
+  const systemPrompt = `You are a strict roleplay response reviewer. Output JSON only: {"valid":true/false,"reason":"short","fixedRaw":"optional"}.
+Check: (1) reply fits persona, (2) answers user, (3) no invented facts, (4) mood field is present and non-empty, (5) thought field is present and non-empty.
+If valid, return valid=true.
+If invalid, rewrite as fixedRaw. Must include mood and thought: {"messages":[{"type":"text","content":"..."}],"mood":"15字情绪","thought":"30字内心想法 和嘴上说的不一样"}. Keep it short.`
   const userPrompt = `Persona name: ${name}
 Persona: ${truncate(opts.contact.systemPrompt || '', 700)}
 Relationship: ${opts.contact.relationshipBase || '朋友'} ${truncate(opts.contact.relationshipDynamic || '', 160)}
@@ -105,6 +105,44 @@ ${truncate(opts.raw, 1200)}`
     raw: opts.raw,
     signal: opts.signal,
   })
+}
+
+// ---- optimize mode (force re-feed to main model) ----
+
+/** Mode 2: force-optimize — re-feed the first draft to the main model for improvement. */
+export async function optimizePrivateTurn(opts: {
+  settings: AppSettings
+  contact: Contact
+  latestUserText: string
+  raw: string
+  bubbles: AiBubble[]
+  signal?: AbortSignal
+}): Promise<string | null> {
+  const name = displayName(opts.contact)
+  try {
+    const optimized = await chatCompletion({
+      apiKey: opts.settings.apiKey,
+      baseUrl: opts.settings.baseUrl,
+      model: opts.settings.model,
+      messages: [
+        {
+          role: 'system',
+          content: `你是${name}。优化以下回复草稿：让措辞更自然有趣、更符合人设。只修改messages里每条text的content文字，不要动JSON结构、不要合并或拆分messages数组、mood和thought必须保留原样。输出格式严格保持不变: {"messages":[{"type":"text","content":"..."}],"mood":"...","thought":"..."}\n\n人设: ${opts.contact.systemPrompt?.slice(0, 600)}\n关系: ${opts.contact.relationshipBase || '朋友'} ${opts.contact.relationshipDynamic || ''}\n对方: ${opts.latestUserText?.slice(0, 300)}`,
+        },
+        { role: 'user', content: `原始JSON（只优化每条content的文字 其他不动）:\n${opts.raw.slice(0, 2000)}` },
+      ],
+      jsonMode: false,
+      signal: opts.signal,
+    })
+    if (!optimized) return null
+    try {
+      const parsed = JSON.parse(optimized.trim())
+      if (parsed.messages && Array.isArray(parsed.messages) && parsed.messages.length > 0) return optimized.trim()
+    } catch { /* unparseable */ }
+    return null
+  } catch {
+    return null
+  }
 }
 
 export async function validateGroupTurn(opts: {

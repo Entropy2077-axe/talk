@@ -7,6 +7,7 @@ import { TopBar } from '../components/TopBar'
 import { Avatar } from '../components/Avatar'
 import { AvatarPicker } from '../components/AvatarPicker'
 import { useSettingsStore } from '../store/useSettingsStore'
+import { useModuleEnabled } from '../features'
 import { chatCompletion } from '../lib/deepseek'
 import { randomAvatarColor } from '../lib/colors'
 import { AVATAR_EMOJIS } from '../lib/avatarEmojis'
@@ -52,6 +53,8 @@ export function ContactAddPage() {
   const [customTag, setCustomTag] = useState('')
   const [ageRange, setAgeRange] = useState('')
   const [gender, setGender] = useState('')
+  const personalityEnabled = useModuleEnabled('personalityTraits')
+  const relEnabled = useModuleEnabled('relationship')
   const [relationship, setRelationship] = useState('')
   const [personalityTrait, setPersonalityTrait] = useState('')
   const [hobbies, setHobbies] = useState<string[]>([])
@@ -175,10 +178,12 @@ export function ContactAddPage() {
         memoryStyle: '',
         memoryUpdatedAt: 0,
         memoryMessageCursor: 0,
-        warmth: initialWarmthForBase(relationship || '朋友', parsed.personalityTrait),
+        ...(relEnabled
+          ? { warmth: initialWarmthForBase(relationship || '朋友', personalityTrait) }
+          : {}),
         relationshipBase: relationship || '朋友',
         relationshipDynamic: '',
-        personalityTrait: parsed.personalityTrait,
+        personalityTrait: personalityTrait || '无',
         schedule: parsed.schedule,
         scheduleOverrides: [],
       })
@@ -319,31 +324,37 @@ export function ContactAddPage() {
           ))}
         </div>
 
-        <label className="mb-2 block text-xs font-medium text-gray-400">性格特质</label>
-        <div className="mb-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setPersonalityTrait('')}
-            className={`rounded-full px-3 py-1.5 text-xs ${
-              personalityTrait === '' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'
-            }`}
-          >
-            AI自动判断
-          </button>
-          {PERSONALITY_TRAIT_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => setPersonalityTrait(personalityTrait === opt.value ? '' : opt.value)}
-              className={`rounded-full px-3 py-1.5 text-xs ${
-                personalityTrait === opt.value ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'
-              }`}
-              title={opt.description}
-            >
-              {opt.value}
-            </button>
+        {personalityEnabled && (
+          <>
+            <label className="mb-2 block text-xs font-medium text-gray-400">性格特质</label>
+            <div className="mb-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const traits = PERSONALITY_TRAIT_OPTIONS.filter((o) => o.value !== '无')
+                  const pick = traits[Math.floor(Math.random() * traits.length)]
+                  setPersonalityTrait(pick.value)
+                }}
+                className="rounded-full bg-gray-100 px-3 py-1.5 text-xs text-gray-600"
+              >
+                🎲 随机
+              </button>
+              {PERSONALITY_TRAIT_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setPersonalityTrait(personalityTrait === opt.value ? '' : opt.value)}
+                  className={`rounded-full px-3 py-1.5 text-xs ${
+                    personalityTrait === opt.value ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'
+                  }`}
+                  title={opt.description}
+                >
+                  {opt.value}
+                </button>
           ))}
-        </div>
+            </div>
+          </>
+        )}
 
         {/* 兴趣爱好（可选） */}
         <div className="mb-4">

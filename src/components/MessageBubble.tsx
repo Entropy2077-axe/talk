@@ -1,7 +1,5 @@
-import { forwardRef, useState } from 'react'
+import { forwardRef } from 'react'
 import type React from 'react'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '../db/db'
 import { Avatar } from './Avatar'
 import { formatBubbleTime } from '../lib/time'
 import { useLongPress } from '../hooks/useLongPress'
@@ -15,7 +13,6 @@ interface MessageBubbleProps {
   userAvatar: string
   stickerUrl?: string
   highlighted?: boolean
-  adminMode?: boolean
   mentionNames?: string[]
   replyPreview?: string
   onReply?: () => void
@@ -32,7 +29,6 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
     userAvatar,
     stickerUrl,
     highlighted,
-    adminMode,
     mentionNames = [],
     replyPreview,
     onReply,
@@ -42,15 +38,6 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
   ref,
 ) {
   const isUser = message.role === 'user'
-  const [expanded, setExpanded] = useState(false)
-  const aiTurnDebug = useLiveQuery(() => (message.debugAiTurnId ? db.aiTurns.get(message.debugAiTurnId) : undefined), [
-    message.debugAiTurnId,
-  ])
-  const debugPayload = aiTurnDebug ?? {
-    message,
-    parsedBubble: message.debugParsedBubble,
-    rawAiResponse: message.debugRawAiResponse,
-  }
   const longPress = useLongPress(() => onLongPress?.())
   return (
     <div ref={ref} {...longPress} className={`px-3 py-1.5 ${highlighted ? 'bg-yellow-50' : ''}`}>
@@ -131,21 +118,6 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
               </button>
             )}
           </div>
-          {adminMode && !isUser && (
-            <div className="mt-1 w-full">
-              <button
-                onClick={() => setExpanded((v) => !v)}
-                className="rounded bg-gray-100 px-2 py-1 text-[10px] text-gray-500"
-              >
-                {expanded ? '收起 JSON' : '展开 JSON'}
-              </button>
-              {expanded && (
-                <pre className="mt-1 max-h-64 w-[min(20rem,calc(100vw-6rem))] overflow-auto whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-2 font-mono text-[10px] leading-relaxed text-gray-600">
-                  {JSON.stringify(debugPayload, null, 2)}
-                </pre>
-              )}
-            </div>
-          )}
         </div>
       </div>
     </div>

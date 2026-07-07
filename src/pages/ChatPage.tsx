@@ -7,12 +7,13 @@ import { MessageBubble } from '../components/MessageBubble'
 import { SearchOverlay } from '../components/SearchOverlay'
 import { ActionSheet } from '../components/ActionSheet'
 import { useSettingsStore } from '../store/useSettingsStore'
+import { useModuleEnabled } from '../features'
 import { useChatUiStore } from '../store/useChatUiStore'
 import { DEFAULT_RUNTIME_STATE, regenerateAiTurn, sendMessage, useChatEngineStore } from '../lib/chatEngine'
 import { regenerateGroupAiTurn, sendGroupMessage } from '../lib/groupChatEngine'
 import { displayName } from '../lib/contact'
 import { applyMessageFeedback } from '../lib/messageFeedback'
-import { buildGroupStatusLine, buildPrivateStatusLine } from '../lib/contactStatus'
+import { buildPrivateStatusLine } from '../lib/contactStatus'
 import type { Contact, Message } from '../types'
 
 const EMPTY_MESSAGES: Message[] = []
@@ -24,6 +25,7 @@ export function ChatPage() {
   const navigate = useNavigate()
   const settings = useSettingsStore()
   const setActiveConversation = useChatUiStore((s) => s.setActiveConversation)
+  const mindReadingEnabled = useModuleEnabled('mindReading')
 
   const conversation = useLiveQuery(
     () => (conversationId ? db.conversations.get(conversationId) : undefined),
@@ -55,14 +57,25 @@ export function ChatPage() {
     ) ?? EMPTY_MESSAGES
   const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? []
   const stickerByName = new Map(stickers.map((s) => [s.name, s.dataUrl]))
-  const statusLine =
-    useLiveQuery(
-      () => {
-        if (isGroupConv) return groupMembers.length > 0 ? buildGroupStatusLine(groupMembers) : Promise.resolve('')
-        return contact ? buildPrivateStatusLine(contact) : Promise.resolve('')
-      },
-      [isGroupConv, contact, groupMembers],
-    ) ?? ''
+  const [statusLine, setStatusLine] = useState('')
+  useEffect(() => {
+    // Group chats don't get a status line.
+    if (isGroupConv) {
+      setStatusLine('')
+      return
+    }
+    if (!contact) {
+      setStatusLine('')
+      return
+    }
+    let cancelled = false
+    buildPrivateStatusLine(contact).then((text) => {
+      if (!cancelled) setStatusLine(text)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [isGroupConv, contact])
 
   // The AI-turn state (typing indicator / error) lives in a module-level
   // store, not local state — it keeps running in the background even when
@@ -297,7 +310,7 @@ export function ChatPage() {
           const bubbleName = isGroupConv ? (speaker ? displayName(speaker) : group!.name) : displayName(contact!)
           const bubbleAvatar = isGroupConv ? (speaker ? speaker.avatar : group!.avatar) : contact!.avatar
           const bubbleAvatarColor = isGroupConv ? (speaker ? speaker.avatarColor : group!.avatarColor) : contact!.avatarColor
-          return (
+          const msgBubble = (
             <MessageBubble
               key={m.id}
               ref={(el) => {
@@ -312,12 +325,30 @@ export function ChatPage() {
               mentionNames={(m.mentions ?? []).map((id) => memberById.get(id)).filter((c): c is Contact => !!c).map(displayName)}
               replyPreview={m.replyToMessageId ? previewForReply(messageById.get(m.replyToMessageId) ?? m) : undefined}
               highlighted={flashId === m.id}
-              adminMode={!!settings.adminModeEnabled}
               onReply={isGroupConv ? () => setReplyToId(m.id) : undefined}
               onLongPress={() => setMenuMessageId(m.id)}
               onLinkClick={() => setToast('小程序功能正在开发中')}
             />
           )
+          const showThought = mindReadingEnabled && m.thought && m.role === 'assistant'
+          if (showThought) {
+            return (
+              <div key={m.id}>
+                {msgBubble}
+                <div className="flex justify-start px-3">
+                  <div className="ml-10 max-w-[85%]">
+                    <div className="rounded-2xl rounded-tl-md border border-purple-200 bg-purple-50 px-3.5 py-2">
+                      <p className="text-[11px] leading-relaxed text-purple-600">
+                        <span className="font-medium">🔮 </span>
+                        {m.thought}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+          }
+          return msgBubble
         })}
         {aiTyping && (
           <div className="flex items-center gap-2 px-3 py-1.5">

@@ -11,14 +11,33 @@ import { displayName } from '../lib/contact'
 import { activeUpcomingPlans, activeUpcomingPlansText, resetMemory } from '../lib/memory'
 import { cascadeDeleteContactSocialData } from '../lib/moments'
 import { removeContactFromAllGroups } from '../lib/groupChat'
-import { pruneExpiredOverrides, describeCurrentSchedule, describeUpcomingScheduleText } from '../lib/schedule'
+import { pruneExpiredOverrides, describeCurrentSchedule, describeUpcomingScheduleText, isPhoneAvailable } from '../lib/schedule'
 import { WEEKDAYS, describeCurrentTime } from '../lib/time'
-import { RELATIONSHIP_OPTIONS, AVAILABLE_LINK_APPS, buildSystemPromptSections } from '../lib/prompt'
-import { warmthLabel } from '../lib/relationship'
+import { RELATIONSHIP_OPTIONS, formatSpeechSamplesForScene, buildRawChatPrompt, buildJsonConversionPrompt } from '../lib/prompt'
+import { useModuleEnabled, isModuleEnabled } from '../features'
+import { warmthLabel, relationshipLine } from '../lib/relationship'
 import { buildUserProfileText } from '../lib/chatEngine'
-import { knowledgeDigestText } from '../lib/knowledgeBase'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { PERSONALITY_TRAIT_OPTIONS } from '../types'
+
+function LatestAiTurnJson({ contactId }: { contactId: string }) {
+  const latestTurn = useLiveQuery(async () => {
+    const conv = await db.conversations.where('contactId').equals(contactId).first()
+    if (!conv) return null
+    const turns = await db.aiTurns.where('conversationId').equals(conv.id).reverse().sortBy('createdAt')
+    return turns[0] ?? null
+  }, [contactId])
+
+  if (!latestTurn?.raw) return null
+  return (
+    <section className="mt-3 bg-white px-4 py-4">
+      <h3 className="mb-2 text-xs font-medium text-gray-400">📋 最新AI原始JSON</h3>
+      <pre className="whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-2.5 font-mono text-[10px] leading-relaxed text-gray-600">
+        {latestTurn.raw}
+      </pre>
+    </section>
+  )
+}
 
 export function ContactCardPage() {
   const { contactId } = useParams()
@@ -31,6 +50,10 @@ export function ContactCardPage() {
   const [pickingAvatar, setPickingAvatar] = useState(false)
   const [pickingRelationshipType, setPickingRelationshipType] = useState(false)
   const [pickingPersonalityTrait, setPickingPersonalityTrait] = useState(false)
+  const relEnabled = useModuleEnabled('relationship')
+  const personalityEnabled = useModuleEnabled('personalityTraits')
+  const adminEnabled = useModuleEnabled('adminMode')
+  const moodEnabled = useModuleEnabled('mood')
 
   const contact = useLiveQuery(() => (contactId ? db.contacts.get(contactId) : undefined), [contactId])
   const conversation = useLiveQuery(
@@ -38,7 +61,6 @@ export function ContactCardPage() {
     [contactId],
   )
   const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? []
-  const knowledgeEntries = useLiveQuery(() => db.knowledgeEntries.toArray(), []) ?? []
   if (contact === undefined) return null
   if (contact === null || !contactId) {
     return (
@@ -88,27 +110,33 @@ export function ContactCardPage() {
   // contact instead of going through the "read once then clear" flow.
   const now = new Date()
   const pendingEvents = contact.pendingEvents ?? []
-  const promptSections = settings.adminModeEnabled
-    ? buildSystemPromptSections({
-        stylePrompt: settings.globalSystemPrompt,
+  // ---- admin-mode prompt preview (two-step pipeline) ----
+  const mainModelPrompt = adminEnabled
+    ? buildRawChatPrompt({
+        name: contact.name,
         persona: contact.systemPrompt,
-        relationshipBase: contact.relationshipBase || '朋友',
-        relationshipDynamic: contact.relationshipDynamic || '',
-        warmth: contact.warmth ?? 0,
-        memoryFacts: contact.memoryFacts,
-        memoryStyle: contact.memoryStyle,
+        stylePrompt: settings.globalSystemPrompt,
+        personalityTrait: personalityEnabled ? contact.personalityTrait : undefined,
+        worldviewText: isModuleEnabled('worldview') ? (settings.worldview || undefined) : undefined,
+        recentContext: [
+          `【你和对方的关系】${relationshipLine(
+            relEnabled ? (contact.relationshipBase || '朋友') : '朋友',
+            relEnabled ? (contact.relationshipDynamic || '') : '',
+            relEnabled ? (contact.warmth ?? 0) : 0,
+          )}`,
+          `【你对TA的了解】${contact.memoryFacts || '（刚开始聊）'}`,
+          `【相处习惯】${contact.memoryStyle || '（还没有形成习惯）'}`,
+          `【当前情境】现在: ${describeCurrentTime(now)}。对方: ${buildUserProfileText(settings)}。${contact.mood?.text ? `你的心情: ${contact.mood.text}。` : ''}【日程】${describeCurrentSchedule(contact, now) ? `\n当前: ${describeCurrentSchedule(contact, now)}` : '\n当前: 暂无安排'}${describeUpcomingScheduleText(contact, now) ? `\n接下来:\n${describeUpcomingScheduleText(contact, now)}` : '\n接下来: 暂无安排'}${activeUpcomingPlansText(contact, now) ? `\n约定: ${activeUpcomingPlansText(contact, now)}` : ''}${pendingEvents.length > 0 ? `\n最近: ${pendingEvents.join('；')}` : ''}`,
+          formatSpeechSamplesForScene(contact.speechSamples, 'private', 3)
+            ? `【说话样例】\n${formatSpeechSamplesForScene(contact.speechSamples, 'private', 3)}`
+            : '',
+        ].filter(Boolean).join('\n\n'),
         stickerNames: stickers.map((s) => s.name),
-        linkApps: AVAILABLE_LINK_APPS,
-        currentTimeText: describeCurrentTime(now),
-        userProfileText: buildUserProfileText(settings),
-        recentEventsText: pendingEvents.length > 0 ? pendingEvents.join('；') : undefined,
-        upcomingPlansText: activeUpcomingPlansText(contact, now) || undefined,
-        currentScheduleText: describeCurrentSchedule(contact, now) || undefined,
-        upcomingScheduleText: describeUpcomingScheduleText(contact, now) || undefined,
-        worldviewText: settings.worldview || undefined,
-        knowledgeDigestText: knowledgeDigestText(knowledgeEntries) || undefined,
       })
-    : []
+    : ''
+  const conversionPrompt = adminEnabled
+    ? buildJsonConversionPrompt('【AI的原始回复文字会放在这里】')
+    : ''
 
   return (
     <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
@@ -153,17 +181,42 @@ export function ContactCardPage() {
           <span className="text-[15px] text-gray-900">关系定位</span>
           <span className="text-sm text-gray-400">{contact.relationshipBase || '未设置'}</span>
         </button>
-        <button
-          onClick={() => setPickingPersonalityTrait(true)}
-          className="flex w-full items-center justify-between px-4 py-3.5 text-left active:bg-gray-50"
-        >
-          <span className="text-[15px] text-gray-900">性格特质</span>
-          <span className="text-sm text-gray-400">{contact.personalityTrait || '无'}</span>
-        </button>
+        {personalityEnabled && (
+          <button
+            onClick={() => setPickingPersonalityTrait(true)}
+            className="flex w-full items-center justify-between px-4 py-3.5 text-left active:bg-gray-50"
+          >
+            <span className="text-[15px] text-gray-900">性格特质</span>
+            <span className="text-sm text-gray-400">{contact.personalityTrait || '无'}</span>
+          </button>
+        )}
+        {moodEnabled && (
+          <div className="flex w-full items-center justify-between px-4 py-3.5">
+            <span className="text-[15px] text-gray-900">心情</span>
+            <span className="text-sm text-gray-400">
+              {contact.mood?.text && Date.now() < contact.mood.expiresAt ? contact.mood.text : '暂无'}
+            </span>
+          </div>
+        )}
+        <div className="flex w-full items-center justify-between px-4 py-3.5">
+          <span className="text-[15px] text-gray-900">状态</span>
+          <span className="text-sm text-gray-400">
+            {isPhoneAvailable(contact, new Date())
+              ? '📱 可聊天 · 可发朋友圈'
+              : '📵 正在忙 · 暂不可联系'}
+          </span>
+        </div>
+        {relEnabled && (
+          <div className="flex w-full items-center justify-between px-4 py-3.5">
+            <span className="text-[15px] text-gray-900">好感度</span>
+            <span className="text-sm text-gray-400">
+              {contact.warmth !== undefined
+                ? `${contact.warmth}（${warmthLabel(contact.warmth)}）${contact.relationshipDynamic ? ` · ${contact.relationshipDynamic}` : ''}`
+                : '未评估（下次聊天时自动评估）'}
+            </span>
+          </div>
+        )}
       </div>
-      <p className="mt-1.5 px-4 text-[11px] text-gray-400">
-        好感度: {contact.warmth ?? 0}（{warmthLabel(contact.warmth ?? 0)}）{contact.relationshipDynamic ? ` · ${contact.relationshipDynamic}` : ''}
-      </p>
 
       <section className="mt-3 bg-white px-4 py-4">
         <div className="mb-2 flex items-center justify-between">
@@ -201,33 +254,52 @@ export function ContactCardPage() {
       </section>
 
       <section className="mt-3 bg-white px-4 py-4">
-        <h3 className="mb-2 text-xs font-medium text-gray-400">日程（自动生成，仅展示）</h3>
+        <h3 className="mb-2 text-xs font-medium text-gray-400">日程</h3>
         {schedule.length === 0 ? (
           <p className="text-sm text-gray-400">暂无日程安排</p>
         ) : (
-          <div className="space-y-1.5">
-            {WEEKDAYS.map((label, day) => {
-              const blocks = [...schedule].filter((b) => b.dayOfWeek === day).sort((a, b) => a.startHour - b.startHour)
-              if (blocks.length === 0) return null
-              return (
-                <p key={day} className="text-sm leading-relaxed text-gray-600">
-                  <span className="font-medium text-gray-800">{label} </span>
-                  {blocks
-                    .map(
-                      (b) =>
-                        `${b.startHour}-${b.endHour}点 ${b.activity}(${b.location})${
-                          b.phoneAccess === 'unavailable' ? ' 📴' : ''
-                        }`,
-                    )
-                    .join('、')}
-                </p>
-              )
-            })}
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px]">
+              <thead>
+                <tr>
+                  <th className="py-1 pr-1 text-left text-gray-400 font-normal"></th>
+                  {WEEKDAYS.map((label) => (
+                    <th key={label} className="px-0.5 py-1 text-center font-medium text-gray-500">{label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { range: '上午', start: 6, end: 12 },
+                  { range: '下午', start: 12, end: 18 },
+                  { range: '晚上', start: 18, end: 24 },
+                ].map(({ range, start, end }) => (
+                  <tr key={range}>
+                    <td className="py-0.5 pr-1 text-gray-400">{range}</td>
+                    {[0, 1, 2, 3, 4, 5, 6].map((day) => {
+                      const blocks = schedule
+                        .filter((b) => b.dayOfWeek === day && b.startHour < end && b.endHour > start)
+                        .sort((a, b) => a.startHour - b.startHour)
+                      if (blocks.length === 0) return <td key={day} className="px-0.5 py-0.5 text-center text-gray-300">—</td>
+                      const b = blocks[0]
+                      return (
+                        <td key={day} className="px-0.5 py-0.5 text-center">
+                          <span className={b.phoneAccess === 'unavailable' ? 'text-red-400' : 'text-green-500'}>
+                            {b.phoneAccess === 'unavailable' ? '📵' : '📱'}
+                          </span>
+                          <div className="text-[10px] text-gray-600 leading-tight">{b.activity}</div>
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
         {activeOverrides.length > 0 && (
           <div className="mt-3 border-t border-gray-100 pt-3">
-            <h4 className="mb-1 text-xs font-medium text-gray-400">近期例外安排</h4>
+            <h4 className="mb-1 text-xs font-medium text-gray-400">例外安排</h4>
             {activeOverrides.map((o) => (
               <p key={o.id} className="text-sm text-gray-600">
                 [{o.date}] {o.summary}
@@ -237,18 +309,40 @@ export function ContactCardPage() {
         )}
       </section>
 
-      {settings.adminModeEnabled && (
+      {adminEnabled && (
+        <LatestAiTurnJson contactId={contactId!} />
+      )}
+
+      {adminEnabled && (
         <section className="mt-3 bg-white px-4 py-4">
-          <h3 className="mb-2 text-xs font-medium text-gray-400">当前系统提示词（管理员模式，按类别分开）</h3>
-          <div className="space-y-3">
-            {promptSections.map((s) => (
-              <div key={s.label} className="rounded-lg bg-gray-50 p-2.5">
-                <h4 className="mb-1 text-xs font-medium text-gray-500">{s.label}</h4>
-                <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-gray-700">
-                  {s.content}
+          <h3 className="mb-2 text-xs font-medium text-gray-400">提示词预览（管理员模式）</h3>
+
+          <div className="space-y-4">
+            {/* Step 1: main model */}
+            <div className="rounded-lg border-2 border-gray-800">
+              <div className="border-b border-gray-200 bg-gray-100 px-3 py-1.5">
+                <span className="text-xs font-bold text-gray-800">{`📤 发给主模型（${settings.model}）`}</span>
+                <span className="ml-2 text-[10px] text-gray-400">生成自然语言回复 + 括号想法</span>
+              </div>
+              <div className="p-3">
+                <pre className="whitespace-pre-wrap break-words font-sans text-[11px] leading-relaxed text-gray-700">
+                  {mainModelPrompt}
                 </pre>
               </div>
-            ))}
+            </div>
+
+            {/* Step 2: utility model */}
+            <div className="rounded-lg border-2 border-gray-800">
+              <div className="border-b border-gray-200 bg-gray-100 px-3 py-1.5">
+                <span className="text-xs font-bold text-gray-800">{`📥 发给多功能模型（${settings.utilityModel}）`}</span>
+                <span className="ml-2 text-[10px] text-gray-400">原始文字 → JSON（提取mood/thought/表情包）</span>
+              </div>
+              <div className="p-3">
+                <pre className="whitespace-pre-wrap break-words font-sans text-[11px] leading-relaxed text-gray-700">
+                  {conversionPrompt}
+                </pre>
+              </div>
+            </div>
           </div>
         </section>
       )}

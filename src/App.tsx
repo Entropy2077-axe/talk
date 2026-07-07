@@ -1,9 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Route, Routes } from 'react-router-dom'
 import { App as CapacitorApp } from '@capacitor/app'
 import { useSettingsStore } from './store/useSettingsStore'
 import { refreshMoments } from './lib/moments'
-import { AUTONOMOUS_TICK_INTERVAL_MS, maybeTriggerProactiveMessage } from './lib/proactiveChat'
+import { maybeTriggerProactiveMessage } from './lib/proactiveChat'
 import { installConsoleCapture } from './lib/consoleCapture'
 import { TabLayout } from './components/TabLayout'
 import { MessagesPage } from './pages/MessagesPage'
@@ -15,16 +15,12 @@ import { ContactCardPage } from './pages/ContactCardPage'
 import { ContactAddPage } from './pages/ContactAddPage'
 import { GroupAddPage } from './pages/GroupAddPage'
 import { GroupInfoPage } from './pages/GroupInfoPage'
-import { TodoPage } from './pages/TodoPage'
-import { RelationshipsPage } from './pages/RelationshipsPage'
-import { ShopPage } from './pages/ShopPage'
-import { WarehousePage } from './pages/WarehousePage'
 import { MomentsPage } from './pages/MomentsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { StickersPage } from './pages/StickersPage'
 import { ProfileEditPage } from './pages/ProfileEditPage'
-import { WorldSettingsPage } from './pages/WorldSettingsPage'
-import { SkyEyePage } from './pages/SkyEyePage'
+import { ModulesPage } from './pages/ModulesPage'
+import { ALL_MODULES, useModuleEnabled } from './features'
 import { NotificationBanner } from './components/NotificationBanner'
 // Runs once at module load, regardless of admin mode — so there's already
 // log history by the time someone opens "天眼".
@@ -38,7 +34,7 @@ installConsoleCapture()
  * runs once the tab is closed — see the design discussion in CLAUDE.md.
  */
 function useAutonomousBehaviorTimer() {
-  const enabled = useSettingsStore((s) => s.autonomousBehaviorEnabled)
+  const enabled = useModuleEnabled('proactiveChat')
 
   useEffect(() => {
     if (!enabled) return
@@ -47,7 +43,7 @@ function useAutonomousBehaviorTimer() {
       refreshMoments(settings).catch(() => {})
       maybeTriggerProactiveMessage(settings).catch(() => {})
     }
-    const id = setInterval(tick, AUTONOMOUS_TICK_INTERVAL_MS)
+    const id = setInterval(tick, useSettingsStore.getState().proactiveTickIntervalMs)
     return () => clearInterval(id)
   }, [enabled])
 }
@@ -82,6 +78,23 @@ function App() {
   useAutonomousBehaviorTimer()
   useAndroidBackButton()
   const themeMode = useSettingsStore((s) => s.themeMode ?? 'light')
+  const enabledModules = useSettingsStore((s) => s.enabledModules)
+
+  // Build deduplicated route list from enabled modules (worldview &
+  // knowledgeBase both register /world-settings, for example).
+  const moduleRoutes = useMemo(() => {
+    const seen = new Set<string>()
+    const routes: { path: string; Component: React.ComponentType }[] = []
+    for (const m of ALL_MODULES) {
+      if (!enabledModules.includes(m.id)) continue
+      for (const r of m.routes ?? []) {
+        if (seen.has(r.path)) continue
+        seen.add(r.path)
+        routes.push({ path: r.path, Component: r.component })
+      }
+    }
+    return routes
+  }, [enabledModules])
 
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode
@@ -94,7 +107,6 @@ function App() {
         <Route element={<TabLayout />}>
           <Route path="/" element={<MessagesPage />} />
           <Route path="/contacts" element={<ContactsPage />} />
-          <Route path="/todos" element={<TodoPage />} />
           <Route path="/discover" element={<DiscoverPage />} />
           <Route path="/me" element={<MePage />} />
         </Route>
@@ -103,15 +115,14 @@ function App() {
         <Route path="/contact/:contactId" element={<ContactCardPage />} />
         <Route path="/group/new" element={<GroupAddPage />} />
         <Route path="/group/:groupId" element={<GroupInfoPage />} />
-        <Route path="/relationships" element={<RelationshipsPage />} />
-        <Route path="/shop" element={<ShopPage />} />
-        <Route path="/warehouse" element={<WarehousePage />} />
         <Route path="/moments" element={<MomentsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/stickers" element={<StickersPage />} />
         <Route path="/profile/edit" element={<ProfileEditPage />} />
-        <Route path="/world-settings" element={<WorldSettingsPage />} />
-        <Route path="/sky-eye" element={<SkyEyePage />} />
+        <Route path="/modules" element={<ModulesPage />} />
+        {moduleRoutes.map((r) => (
+          <Route key={r.path} path={r.path} element={<r.Component />} />
+        ))}
       </Routes>
     </div>
   )

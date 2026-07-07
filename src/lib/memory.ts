@@ -4,6 +4,7 @@ import { chatCompletion } from './deepseek'
 import { clampWarmthDelta, applyWarmthDelta, maxWarmthForTrait, warmthStage, shouldUpdateBase, containsBreakupLanguage, WARMTH_BREAKUP_PENALTY, traitWarmthModifier } from './relationship'
 import { displayName } from './contact'
 import { describeCurrentTime, toDateKey } from './time'
+import { isModuleEnabled } from '../features'
 import type { AppSettings, Contact, Message, PlanItem } from '../types'
 
 /** How many *new* messages accumulate before we bother refreshing memory. Keeps the extra API call rare. */
@@ -176,20 +177,31 @@ export async function maybeUpdateMemory(
     if (!updated) return
 
     const now = Date.now()
-    const oldWarmth = contact.warmth ?? 0
-    let warmthDelta = traitWarmthModifier(contact.personalityTrait, updated.warmthDelta, oldWarmth)
 
-    // Breakup → immediate large warmth penalty, so the model doesn't
-    // act like nothing happened. Applied on top of the model's own delta.
+    // Relationship scoring is only active when the 好感度 module is enabled.
+    // Memory (facts/style/plans) always updates regardless.
+    const relEnabled = isModuleEnabled('relationship')
+    const personalityEnabled = isModuleEnabled('personalityTraits')
+
+    const oldWarmth = contact.warmth ?? 0
+    const rawDelta = relEnabled ? updated.warmthDelta : 0
+    let warmthDelta = personalityEnabled
+      ? traitWarmthModifier(contact.personalityTrait, rawDelta, oldWarmth)
+      : rawDelta
+
     const dynamic = updated.relationshipAssessment || contact.relationshipDynamic
-    if (containsBreakupLanguage(dynamic)) {
+    if (relEnabled && containsBreakupLanguage(dynamic)) {
       warmthDelta = applyWarmthDelta(warmthDelta, WARMTH_BREAKUP_PENALTY)
     }
 
-    const newWarmth = applyWarmthDelta(oldWarmth, warmthDelta, maxWarmthForTrait(contact.personalityTrait))
+    const newWarmth = relEnabled
+      ? applyWarmthDelta(oldWarmth, warmthDelta, personalityEnabled ? maxWarmthForTrait(contact.personalityTrait) : 100)
+      : oldWarmth
     let base = contact.relationshipBase
-    const newBase = shouldUpdateBase(dynamic, newWarmth)
-    if (newBase) base = newBase
+    if (relEnabled) {
+      const newBase = shouldUpdateBase(dynamic, newWarmth)
+      if (newBase) base = newBase
+    }
 
     await db.contacts.update(contact.id, {
       memoryFacts: updated.facts,
@@ -197,9 +209,9 @@ export async function maybeUpdateMemory(
       memoryUpdatedAt: now,
       memoryMessageCursor: allMessages.length,
       upcomingPlans: mergePlans(contact.upcomingPlans ?? [], updated.plans, now),
-      warmth: newWarmth,
-      relationshipDynamic: dynamic,
-      relationshipBase: base,
+      ...(relEnabled
+        ? { warmth: newWarmth, relationshipDynamic: dynamic, relationshipBase: base }
+        : {}),
     })
   } catch {
     // best-effort only

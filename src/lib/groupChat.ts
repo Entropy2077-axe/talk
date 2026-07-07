@@ -3,6 +3,7 @@ import { extractJsonObject, parseKnowledgeQueriesField } from './aiProtocol'
 import { activeUpcomingPlansText } from './memory'
 import { formatSpeechSamplesForScene } from './prompt'
 import { describeCurrentSchedule } from './schedule'
+import { isModuleEnabled } from '../features'
 import type { Contact, GroupAiBubble, GroupAiResponse } from '../types'
 
 /** Group chats above this size don't have every member answer every turn — only a random 3 do (see pickSpeakers). */
@@ -11,6 +12,7 @@ const LARGE_GROUP_THRESHOLD = 3
 
 /** Warmer contacts get picked to speak more often (also reused by proactiveChat.ts). */
 export function relationshipWeight(warmth: number): number {
+  if (!isModuleEnabled('relationship')) return 1 // uniform when 好感度 disabled
   return Math.max(1, (warmth + 100) / 2)
 }
 
@@ -111,7 +113,7 @@ export function buildGroupSystemPrompt(opts: {
       const plansLine = plansText ? `\n【和用户的约定】${plansText}` : ''
       const trait = c.personalityTrait?.trim()
       const traitLine =
-        trait && trait !== '无'
+        isModuleEnabled('personalityTraits') && trait && trait !== '无'
           ? `\n【性格特质】${trait}（影响情感反应模式，不是说话风格——说话风格已在人设里描述）`
           : ''
       const samplesLine = formatSpeechSamplesForScene(c.speechSamples, 'group', 2)

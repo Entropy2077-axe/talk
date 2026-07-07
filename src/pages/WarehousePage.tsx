@@ -8,6 +8,7 @@ import { Avatar } from '../components/Avatar'
 import { displayName } from '../lib/contact'
 import { formatCurrency } from '../lib/wallet'
 import { useSettingsStore } from '../store/useSettingsStore'
+import { useModuleEnabled } from '../features'
 import { triggerAiTurn } from '../lib/chatEngine'
 import type { InventoryItem } from '../types'
 
@@ -17,6 +18,7 @@ export function WarehousePage() {
   const contacts = useLiveQuery(() => db.contacts.toArray(), []) ?? []
   const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? []
   const settings = useSettingsStore()
+  const shopEnabled = useModuleEnabled('shop')
   const [gifting, setGifting] = useState<InventoryItem | null>(null)
 
   async function handleGift(contactId: string) {
@@ -46,7 +48,9 @@ export function WarehousePage() {
       <TopBar title="仓库" showBack />
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {items.length === 0 ? (
-          <p className="py-10 text-center text-sm text-gray-400">仓库还是空的 去商城逛逛吧</p>
+          <p className="py-10 text-center text-sm text-gray-400">
+                {shopEnabled ? '仓库还是空的 去商城逛逛吧' : '仓库还是空的'}
+              </p>
         ) : (
           <div className="grid grid-cols-2 gap-3">
             {items.map((item) => (

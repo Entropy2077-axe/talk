@@ -4,6 +4,7 @@ export interface ParsedAiTurn {
   bubbles: AiBubble[]
   knowledgeQueries: string[]
   mood?: string
+  thought?: string
 }
 
 export function parseAiResponse(raw: string): ParsedAiTurn {
@@ -19,6 +20,7 @@ export function parseAiResponse(raw: string): ParsedAiTurn {
       bubbles: jsonResult.bubbles,
       knowledgeQueries: jsonResult.knowledgeQueries,
       mood: jsonResult.mood,
+      thought: jsonResult.thought,
     }
   }
 
@@ -75,7 +77,8 @@ function tryParseJson(trimmedRaw: string): ParsedAiTurn | null {
     }
   }
   const mood = typeof parsed.mood === 'string' && parsed.mood.trim() ? parsed.mood.trim().slice(0, 20) : undefined
-  return { bubbles, knowledgeQueries: parseKnowledgeQueriesField(parsed.knowledgeQueries), mood }
+  const thought = typeof parsed.thought === 'string' && parsed.thought.trim() ? parsed.thought.trim().slice(0, 100) : undefined
+  return { bubbles, knowledgeQueries: parseKnowledgeQueriesField(parsed.knowledgeQueries), mood, thought }
 }
 
 function parseScheduleChangeBubble(m: Record<string, unknown>): AiBubble | null {
