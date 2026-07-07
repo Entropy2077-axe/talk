@@ -44,7 +44,7 @@ export const useSettingsStore = create<SettingsState>()(
       customCurrencyEmoji: '💎',
       moodExpiryMs: 30 * 60 * 1000,
       validatorMode: 'quality',
-      enabledModules: ['shop', 'warehouse', 'worldview', 'knowledgeBase', 'relationship', 'personalityTraits'],
+      enabledModules: ['shop', 'warehouse', 'worldview', 'knowledgeBase', 'relationship', 'personalityTraits', 'mood', 'validator'],
       setSettings: (patch) => set(patch),
     }),
     { name: 'talk-settings' },
