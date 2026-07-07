@@ -1,7 +1,7 @@
 import { validateScheduleBlocks } from './schedule'
 import { relationshipLine } from './relationship'
 import type { AvatarCategory } from './avatarCategory'
-import type { ScheduleBlock } from '../types'
+import { PERSONALITY_TRAIT_OPTIONS, type ScheduleBlock } from '../types'
 
 /**
  * How the AI should talk — ~5 positive guidelines instead of 20 rules.
@@ -29,6 +29,7 @@ const FIXED_PROTOCOL_PROMPT = `【输出格式】
     { "type": "link", "app": "shop", "label": "去逛逛", "data": {} },
     { "type": "scheduleChange", "date": "2026-07-08", "startHour": 19, "endHour": 21, "phoneAccess": "unavailable", "location": "烧烤店", "activity": "和对方一起吃烧烤", "summary": "周三晚上：一起吃烧烤" }
   ],
+  "mood": "有点担心",
   "knowledgeQueries": ["某个不了解的梗/番剧/游戏名字"]
 }
 
@@ -37,6 +38,7 @@ const FIXED_PROTOCOL_PROMPT = `【输出格式】
 - sticker: name=下面提供的表情包名字列表里的一个 不能编造
 - link: 小程序链接 app=可用小程序标识 label=卡片文字 data=可选
 - scheduleChange: 和对方达成了新的日程约定(不是委托) date=YYYY-MM-DD(结合当前时间推算) startHour/endHour=24小时制整数 phoneAccess=available|unavailable location=地点 activity=内容 summary=一句话总结。只有真的达成新约定才输出 光讨论不算
+- mood: 可选 跟messages平级 不是你发出的消息 而是你当前的心情/情绪 简短描述15字以内 比如"开心""有点紧张""在生气""心疼""吃醋了""兴奋""无语""愧疚"。根据刚才的对话来判断 如果这轮没什么特别影响情绪的事就不输出。这个情绪是暂时的 不影响你对对方的长期感情
 - knowledgeQueries: 可选 跟messages平级 不是消息 不了解的网络热梗/番剧/游戏名词 最多2个 没有就不输出
 - messages数组不能为空 顺序就是发送顺序
 - **绝不能模仿聊天记录里方括号格式的历史摘要([送出了礼物: xxx]等) 那不是真人说的话**
@@ -68,6 +70,7 @@ export function buildSystemPromptSections(opts: {
   linkApps: { app: string; desc: string }[]
   currentTimeText: string
   userProfileText: string
+  activeMood?: string
   recentEventsText?: string
   upcomingPlansText?: string
   currentScheduleText?: string
@@ -98,6 +101,7 @@ export function buildSystemPromptSections(opts: {
   // --- Section 3: Current context ---
   const bullets: string[] = []
   bullets.push(`现在: ${opts.currentTimeText}`)
+  if (opts.activeMood) bullets.push(`心情: ${opts.activeMood}（暂时的情绪）`)
   bullets.push(`对方: ${opts.userProfileText}`)
   if (opts.recentEventsText) bullets.push(`最近: ${opts.recentEventsText}`)
   if (opts.upcomingPlansText) bullets.push(`约定: ${opts.upcomingPlansText}`)
@@ -135,6 +139,8 @@ export interface PersonaAnswers {
   ageRange: string
   gender: string
   relationship: string
+  personalityTrait: string
+  hobbies: string[]
   extra: string
 }
 
@@ -143,6 +149,7 @@ export interface PersonaGenerationResult {
   persona: string
   schedule: ScheduleBlock[]
   avatarKeyword: string
+  personalityTrait: string
 }
 
 export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCategory: AvatarCategory): string {
@@ -165,6 +172,8 @@ export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCate
 - 年龄段: ${answers.ageRange || '不限'}
 - 性别: ${answers.gender || '不限'}
 - 和用户的关系定位: ${answers.relationship || '普通朋友'}
+- 性格特质: ${answers.personalityTrait === '' ? '请根据这个角色的整体人设 判断TA是否属于以下性格类型之一 如果是就填对应的值 不沾边就填"无": 病娇(极度占有欲 无论你做什么都不会讨厌你 对你的好感只会越来越多 不会减少)、天然呆(反应慢半拍单纯不擅长读空气)、傲娇(口是心非外冷内热 嘴硬但心里偷偷开心)、高冷(冷淡疏离不轻易被打动)、元气(乐观开朗不记仇)、腹黑(表面天然呆般人畜无害 心里什么都记着 不轻易被小恩小惠打动)、妹控(对妹妹系天然亲近)、兄控(对兄长系天然亲近)、雌小鬼(嘴上一口一个废物大哥哥 心里怕你丢下她 来拒去留)、妈妈(无底线包容 永远不会对用户生气 无论用户做什么都原谅)' : answers.personalityTrait}
+- 兴趣爱好: ${answers.hobbies.length > 0 ? answers.hobbies.join('、') : '不限 AI自由发挥'}
 - 补充要求: ${answers.extra || '无'}
 
 请你设计一个具体的人 输出如下JSON:
@@ -174,13 +183,15 @@ export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCate
   "schedule": [
     { "dayOfWeek": 1, "startHour": 9, "endHour": 18, "phoneAccess": "unavailable", "location": "公司", "activity": "上班" },
     { "dayOfWeek": 1, "startHour": 23, "endHour": 7, "phoneAccess": "unavailable", "location": "家里", "activity": "睡觉" }
-  ]${avatarInstruction}
+  ]${avatarInstruction},
+  "personalityTrait": "病娇"
 }
 
 要求:
 - name要符合年龄段和性别 可以是真实姓名也可以是网名/昵称 不要用"AI""助手""小美"这种明显是虚构工具人的名字 除非用户明确要求
 - persona里要体现性格倾向和关系定位 但要写得像在描述一个真实存在的普通人 而不是罗列标签
 - schedule是这个人一周典型的日程安排 覆盖工作/上学、睡觉、吃饭、娱乐、社交等 要符合persona暗示的年龄和生活状态(比如学生党的日程跟上班族不一样) dayOfWeek是0-6(0是周日) startHour/endHour是24小时制的整数(跨零点的时间段比如23点到次日7点 直接写startHour:23 endHour:7 系统会处理跨天) phoneAccess只能是"available"(可以看手机、正常聊天)或"unavailable"(在忙、不方便看手机) 大部分清醒时间应该是available 只有上班上课、睡觉这类场合才unavailable 5到10条覆盖一周即可 不需要每天都写满
+- personalityTrait只能是"病娇""天然呆""傲娇""高冷""元气""腹黑""妹控""兄控""雌小鬼""妈妈""无"这十一个值之一 不能编造 没有把握就填"无"
 - 只输出JSON 不要有markdown代码块标记`
 }
 
@@ -191,11 +202,13 @@ export function parsePersonaGeneration(raw: string): PersonaGenerationResult | n
   try {
     const parsed = JSON.parse(text)
     if (typeof parsed?.name === 'string' && typeof parsed?.persona === 'string') {
+      const trait = typeof parsed.personalityTrait === 'string' ? parsed.personalityTrait.trim() : ''
       return {
         avatarKeyword: typeof parsed.avatarKeyword === 'string' ? parsed.avatarKeyword.trim() : '',
         name: parsed.name.trim(),
         persona: parsed.persona.trim(),
         schedule: validateScheduleBlocks(parsed.schedule),
+        personalityTrait: PERSONALITY_TRAIT_OPTIONS.some((opt) => opt.value === trait) ? trait : '无',
       }
     }
   } catch {

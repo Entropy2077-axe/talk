@@ -3,18 +3,23 @@ import type { AiBubble, AiResponse } from '../types'
 export interface ParsedAiTurn {
   bubbles: AiBubble[]
   knowledgeQueries: string[]
+  mood?: string
 }
 
 export function parseAiResponse(raw: string): ParsedAiTurn {
   const trimmedRaw = raw.trim()
 
   if (!trimmedRaw) {
-    return { bubbles: [], knowledgeQueries: [] }
+    return { bubbles: [], knowledgeQueries: [], mood: undefined }
   }
 
   const jsonResult = tryParseJson(trimmedRaw)
   if (jsonResult && jsonResult.bubbles.length > 0) {
-    return { bubbles: jsonResult.bubbles, knowledgeQueries: jsonResult.knowledgeQueries }
+    return {
+      bubbles: jsonResult.bubbles,
+      knowledgeQueries: jsonResult.knowledgeQueries,
+      mood: jsonResult.mood,
+    }
   }
 
   const fallbackBubbles: AiBubble[] = trimmedRaw
@@ -22,7 +27,7 @@ export function parseAiResponse(raw: string): ParsedAiTurn {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((content) => ({ type: 'text', content }))
-  return { bubbles: fallbackBubbles, knowledgeQueries: [] }
+  return { bubbles: fallbackBubbles, knowledgeQueries: [], mood: undefined }
 }
 
 export function parseKnowledgeQueriesField(raw: unknown): string[] {
@@ -35,7 +40,7 @@ export function parseKnowledgeQueriesField(raw: unknown): string[] {
   return result
 }
 
-function tryParseJson(trimmedRaw: string): { bubbles: AiBubble[]; knowledgeQueries: string[] } | null {
+function tryParseJson(trimmedRaw: string): ParsedAiTurn | null {
   let text = trimmedRaw
   const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
   if (fenceMatch) text = fenceMatch[1].trim()
@@ -69,7 +74,8 @@ function tryParseJson(trimmedRaw: string): { bubbles: AiBubble[]; knowledgeQueri
       if (scheduleChange) bubbles.push(scheduleChange)
     }
   }
-  return { bubbles, knowledgeQueries: parseKnowledgeQueriesField(parsed.knowledgeQueries) }
+  const mood = typeof parsed.mood === 'string' && parsed.mood.trim() ? parsed.mood.trim().slice(0, 20) : undefined
+  return { bubbles, knowledgeQueries: parseKnowledgeQueriesField(parsed.knowledgeQueries), mood }
 }
 
 function parseScheduleChangeBubble(m: Record<string, unknown>): AiBubble | null {

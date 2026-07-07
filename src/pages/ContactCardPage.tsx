@@ -18,6 +18,7 @@ import { warmthLabel } from '../lib/relationship'
 import { buildUserProfileText } from '../lib/chatEngine'
 import { knowledgeDigestText } from '../lib/knowledgeBase'
 import { useSettingsStore } from '../store/useSettingsStore'
+import { PERSONALITY_TRAIT_OPTIONS } from '../types'
 
 export function ContactCardPage() {
   const { contactId } = useParams()
@@ -29,6 +30,7 @@ export function ContactCardPage() {
   const [clearMemoryConfirm, setClearMemoryConfirm] = useState(false)
   const [pickingAvatar, setPickingAvatar] = useState(false)
   const [pickingRelationshipType, setPickingRelationshipType] = useState(false)
+  const [pickingPersonalityTrait, setPickingPersonalityTrait] = useState(false)
 
   const contact = useLiveQuery(() => (contactId ? db.contacts.get(contactId) : undefined), [contactId])
   const conversation = useLiveQuery(
@@ -146,10 +148,17 @@ export function ContactCardPage() {
         </button>
         <button
           onClick={() => setPickingRelationshipType(true)}
-          className="flex w-full items-center justify-between px-4 py-3.5 text-left active:bg-gray-50"
+          className="flex w-full items-center justify-between border-b border-gray-100 px-4 py-3.5 text-left active:bg-gray-50"
         >
           <span className="text-[15px] text-gray-900">关系定位</span>
           <span className="text-sm text-gray-400">{contact.relationshipBase || '未设置'}</span>
+        </button>
+        <button
+          onClick={() => setPickingPersonalityTrait(true)}
+          className="flex w-full items-center justify-between px-4 py-3.5 text-left active:bg-gray-50"
+        >
+          <span className="text-[15px] text-gray-900">性格特质</span>
+          <span className="text-sm text-gray-400">{contact.personalityTrait || '无'}</span>
         </button>
       </div>
       <p className="mt-1.5 px-4 text-[11px] text-gray-400">
@@ -267,6 +276,16 @@ export function ContactCardPage() {
           options={RELATIONSHIP_OPTIONS.map((label) => ({
             label,
             onSelect: () => db.contacts.update(contactId!, { relationshipBase: label }),
+          }))}
+        />
+      )}
+
+      {pickingPersonalityTrait && (
+        <ActionSheet
+          onClose={() => setPickingPersonalityTrait(false)}
+          options={PERSONALITY_TRAIT_OPTIONS.map((opt) => ({
+            label: opt.value,
+            onSelect: () => db.contacts.update(contactId!, { personalityTrait: opt.value }),
           }))}
         />
       )}

@@ -1,7 +1,7 @@
 import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { chatCompletion } from './deepseek'
-import { clampWarmthDelta, applyWarmthDelta, warmthStage, shouldUpdateBase, containsBreakupLanguage, WARMTH_BREAKUP_PENALTY, traitWarmthModifier } from './relationship'
+import { clampWarmthDelta, applyWarmthDelta, maxWarmthForTrait, warmthStage, shouldUpdateBase, containsBreakupLanguage, WARMTH_BREAKUP_PENALTY, traitWarmthModifier } from './relationship'
 import { displayName } from './contact'
 import { describeCurrentTime, toDateKey } from './time'
 import type { AppSettings, Contact, Message, PlanItem } from '../types'
@@ -177,7 +177,7 @@ export async function maybeUpdateMemory(
 
     const now = Date.now()
     const oldWarmth = contact.warmth ?? 0
-    let warmthDelta = traitWarmthModifier(contact.personalityTrait, updated.warmthDelta)
+    let warmthDelta = traitWarmthModifier(contact.personalityTrait, updated.warmthDelta, oldWarmth)
 
     // Breakup → immediate large warmth penalty, so the model doesn't
     // act like nothing happened. Applied on top of the model's own delta.
@@ -186,7 +186,7 @@ export async function maybeUpdateMemory(
       warmthDelta = applyWarmthDelta(warmthDelta, WARMTH_BREAKUP_PENALTY)
     }
 
-    const newWarmth = applyWarmthDelta(oldWarmth, warmthDelta)
+    const newWarmth = applyWarmthDelta(oldWarmth, warmthDelta, maxWarmthForTrait(contact.personalityTrait))
     let base = contact.relationshipBase
     const newBase = shouldUpdateBase(dynamic, newWarmth)
     if (newBase) base = newBase

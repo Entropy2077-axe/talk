@@ -10,11 +10,19 @@
 export const WARMTH_MIN = -100
 export const WARMTH_MAX = 100
 
+/** Some traits have a different upper bound on warmth (e.g. 病娇 has no cap). */
+export function maxWarmthForTrait(trait?: string): number {
+  if (trait === '病娇') return Infinity
+  return WARMTH_MAX
+}
+
 /** Extra warmth penalty applied when breakup language is detected in the assessment. */
 export const WARMTH_BREAKUP_PENALTY = -30
 
-/** Initial warmth for a brand-new contact, biased by the relationship-base label. */
-export function initialWarmthForBase(base: string): number {
+/** Initial warmth for a brand-new contact, biased by the relationship-base label and personality trait. */
+export function initialWarmthForBase(base: string, trait?: string): number {
+  if (trait === '病娇') return 100
+  if (trait === '妈妈') return 75
   switch (base) {
     case '恋人':
       return 60
@@ -48,15 +56,70 @@ export function clampWarmthDelta(delta: number): number {
  *   airhead → all deltas halved (slow to change)
  *   tsundere → negative deltas doubled when warmth > 40 (defensive)
  */
-export function traitWarmthModifier(_trait: string | undefined, delta: number): number {
-  // Pass-through: no trait modifiers implemented yet.
-  // When adding a trait, return the modified delta here.
-  return delta
+export function traitWarmthModifier(trait: string | undefined, delta: number, warmth: number): number {
+  if (!trait || trait === '无') return delta
+
+  switch (trait) {
+    case '病娇':
+      // Obsessive, one-way attachment. Can only love you more, never less.
+      // Starts at 100 and has no upper limit — warmth can climb indefinitely.
+      if (delta < 0) return 0
+      return Math.round(delta * 2.0)
+
+    case '天然呆':
+      // Slow to register emotional changes either way.
+      return Math.round(delta * 0.5)
+
+    case '傲娇':
+      // Once they actually care (warmth > 40), the tsun defense kicks in:
+      // criticism stings more — but they secretly treasure kindness just as much.
+      // The "unable to show it" is behavior (persona), not feeling (warmth).
+      if (warmth > 40 && delta < 0) return Math.round(delta * 2.0)
+      if (warmth > 40 && delta > 0) return Math.round(delta * 1.2)
+      return delta
+
+    case '高冷':
+      // Hard to warm up to — positive deltas muted until the ice breaks.
+      if (warmth < 40 && delta > 0) return Math.round(delta * 0.5)
+      return delta
+
+    case '元气':
+      // Bounces back quickly from negatives; full warm reception for positives.
+      if (delta < 0) return Math.round(delta * 0.5)
+      return delta
+
+    case '腹黑':
+      // Surface calm like 天然呆, but underneath is calculating.
+      // Remembers every slight (neg normal), hard to win over (pos muted).
+      if (delta < 0) return delta
+      return Math.round(delta * 0.7)
+
+    case '妹控':
+    case '兄控':
+      // Warmer toward their "type", cooler to everyone else — until the threshold is broken.
+      if (warmth < 40 && delta > 0) return Math.round(delta * 0.7)
+      return delta
+
+    case '雌小鬼':
+      // Surface: always mocking, never sincere. Underneath: terrified of being abandoned.
+      // Once attached, criticism hits twice as hard (来拒), but kindness is secretly treasured (去留).
+      if (warmth > 40 && delta < 0) return Math.round(delta * 2.0)
+      if (warmth > 40 && delta > 0) return Math.round(delta * 1.2)
+      return delta
+
+    case '妈妈':
+      // Unconditional love — warmth never goes down, no matter what you say.
+      if (delta < 0) return 0
+      return delta
+
+    default:
+      return delta
+  }
 }
 
-/** Apply delta and clamp to the valid range. */
-export function applyWarmthDelta(current: number, delta: number): number {
-  return Math.max(WARMTH_MIN, Math.min(WARMTH_MAX, Math.round(current + delta)))
+/** Apply delta and clamp to the valid range. Some traits (e.g. 病娇) have a higher or no upper bound. */
+export function applyWarmthDelta(current: number, delta: number, maxWarmth = WARMTH_MAX): number {
+  return Math.max(WARMTH_MIN, Math.min(maxWarmth, Math.round(current + delta)))
 }
 
 // ---- stage tiers (display only) ----
@@ -85,7 +148,9 @@ export function warmthStage(warmth: number): WarmthStage {
   for (const stage of WARMTH_STAGES) {
     if (warmth >= stage.min && warmth <= stage.max) return stage
   }
-  return WARMTH_STAGES[warmth >= 0 ? 5 : 2]
+  // Out of normal range (e.g. 病娇 above 100, or edge-case below -100).
+  if (warmth > WARMTH_MAX) return WARMTH_STAGES[WARMTH_STAGES.length - 1]
+  return WARMTH_STAGES[0]
 }
 
 export function warmthLabel(warmth: number): string {

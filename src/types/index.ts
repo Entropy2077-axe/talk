@@ -17,7 +17,12 @@ export interface Contact {
   warmth: number
   relationshipBase: string // label the user picked at creation: 恋人/朋友/家人/... — only changes by explicit user action or explicit model assessment (e.g. "已经分手了")
   relationshipDynamic: string // short natural-language summary of what the relationship currently feels like, updated by the utility model on every memory update
-  personalityTrait?: string // reserved for future character archetypes: 'yandere'(病娇), 'airhead'(天然呆), etc. Affects warmth change rate via traitWarmthModifier. Empty = normal.
+  personalityTrait?: string // 病娇/天然呆/傲娇/无. Affects warmth change rate via traitWarmthModifier; missing/无 = normal.
+  /** Short-term emotional state, assessed by the model each turn. Expires after ~30 min. Separate from warmth (long-term relationship). */
+  mood?: {
+    text: string
+    expiresAt: number
+  }
   // ---- moments (朋友圈) ----
   lastMomentAt?: number // when this contact last posted a moment, used for the "hasn't posted in 10 min" eligibility check
   pendingEvents?: string[] // short notes about notable things to naturally mention next chat (e.g. "对方刚给你的朋友圈点了赞"), cleared once used
@@ -78,6 +83,26 @@ export const CONTACT_RELATION_LABELS = [
   '对头',
 ] as const
 export type ContactRelationLabel = (typeof CONTACT_RELATION_LABELS)[number]
+
+export const PERSONALITY_TRAIT_OPTIONS = [
+  { value: '病娇', description: '初始好感100且无上限 好感只升不降 被温暖双倍心动 极度占有' },
+  { value: '天然呆', description: '反应慢半拍 单纯 情绪变化缓慢 不太会读空气' },
+  { value: '傲娇', description: '口是心非 越在意越表现得冷淡 防御心强 不擅长坦率' },
+  { value: '高冷', description: '冷淡疏离 不轻易被打动 熟了之后才会放下防备' },
+  { value: '元气', description: '乐观开朗 情绪恢复快 不记仇 永远活力满满' },
+  { value: '腹黑', description: '表面天然呆般人畜无害 心里什么都记着 不轻易被收买' },
+  { value: '妹控', description: '对妹妹系的人天然亲近 其他人较难打开心扉' },
+  { value: '兄控', description: '对兄长系的人天然亲近 其他人较难打开心扉' },
+  { value: '雌小鬼', description: '表面嘲讽捉弄 来拒去留 嘴上不饶人心里怕被丢下' },
+  { value: '妈妈', description: '无底线包容 好感度永远不会下降 初始好感度固定为75' },
+  { value: '无', description: '普通性格 没有特殊的情绪反应模式' },
+] as const
+export type PersonalityTrait = (typeof PERSONALITY_TRAIT_OPTIONS)[number]['value']
+
+export const HOBBY_TAG_OPTIONS = [
+  '养猫', '养狗', '打游戏', '运动健身', '追剧看电影',
+  '看书', '美食探店', '旅行', '音乐', '画画', '摄影', '二次元',
+] as const
 
 export interface ContactRelationLink {
   id: string
@@ -304,6 +329,8 @@ export type AiBubble = AiBubbleText | AiBubbleSticker | AiBubbleLink | AiBubbleS
 
 export interface AiResponse {
   messages: AiBubble[]
+  /** Short emotional-state summary the model assesses about itself this turn. Optional; omit when nothing notable. */
+  mood?: string
   /** Sibling of `messages`, not a bubble — up to 2 short topics the model wants the knowledge base to look up (see lib/knowledgeBase.ts), e.g. a slang term the user just used that it doesn't recognize. Optional; most turns won't set this. */
   knowledgeQueries?: string[]
 }

@@ -15,7 +15,7 @@ import { initialWarmthForBase } from '../lib/relationship'
 import { displayName } from '../lib/contact'
 import { pickAvatarCategory } from '../lib/avatarCategory'
 import { randomAnimeAvatar, searchPexelsPhoto } from '../lib/photoSearch'
-import { CONTACT_RELATION_LABELS, type ContactRelationLabel } from '../types'
+import { CONTACT_RELATION_LABELS, HOBBY_TAG_OPTIONS, PERSONALITY_TRAIT_OPTIONS, type ContactRelationLabel } from '../types'
 import {
   AGE_RANGE_OPTIONS,
   GENDER_OPTIONS,
@@ -53,6 +53,8 @@ export function ContactAddPage() {
   const [ageRange, setAgeRange] = useState('')
   const [gender, setGender] = useState('')
   const [relationship, setRelationship] = useState('')
+  const [personalityTrait, setPersonalityTrait] = useState('')
+  const [hobbies, setHobbies] = useState<string[]>([])
   const [extra, setExtra] = useState('')
   const [avatar, setAvatar] = useState(AVATAR_EMOJIS[Math.floor(Math.random() * AVATAR_EMOJIS.length)])
   const [avatarManuallySet, setAvatarManuallySet] = useState(false)
@@ -118,6 +120,8 @@ export function ContactAddPage() {
                 ageRange,
                 gender,
                 relationship,
+                personalityTrait,
+                hobbies,
                 extra,
               },
               avatarCategory,
@@ -170,9 +174,10 @@ export function ContactAddPage() {
         memoryStyle: '',
         memoryUpdatedAt: 0,
         memoryMessageCursor: 0,
-        warmth: initialWarmthForBase(relationship || '朋友'),
+        warmth: initialWarmthForBase(relationship || '朋友', parsed.personalityTrait),
         relationshipBase: relationship || '朋友',
         relationshipDynamic: '',
+        personalityTrait: parsed.personalityTrait,
         schedule: parsed.schedule,
         scheduleOverrides: [],
       })
@@ -311,6 +316,57 @@ export function ContactAddPage() {
               {v}
             </button>
           ))}
+        </div>
+
+        <label className="mb-2 block text-xs font-medium text-gray-400">性格特质</label>
+        <div className="mb-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setPersonalityTrait('')}
+            className={`rounded-full px-3 py-1.5 text-xs ${
+              personalityTrait === '' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'
+            }`}
+          >
+            AI自动判断
+          </button>
+          {PERSONALITY_TRAIT_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setPersonalityTrait(personalityTrait === opt.value ? '' : opt.value)}
+              className={`rounded-full px-3 py-1.5 text-xs ${
+                personalityTrait === opt.value ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'
+              }`}
+              title={opt.description}
+            >
+              {opt.value}
+            </button>
+          ))}
+        </div>
+
+        {/* 兴趣爱好（可选） */}
+        <div className="mb-4">
+          <label className="mb-2 block text-xs font-medium text-gray-400">兴趣爱好（可选）</label>
+          <div className="flex flex-wrap gap-2">
+            {HOBBY_TAG_OPTIONS.map((hobby) => (
+              <button
+                key={hobby}
+                type="button"
+                onClick={() =>
+                  setHobbies(
+                    hobbies.includes(hobby)
+                      ? hobbies.filter((h) => h !== hobby)
+                      : [...hobbies, hobby],
+                  )
+                }
+                className={`rounded-full px-3 py-1.5 text-xs ${
+                  hobbies.includes(hobby) ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'
+                }`}
+              >
+                {hobby}
+              </button>
+            ))}
+          </div>
         </div>
 
         {existingContacts.length > 0 && (

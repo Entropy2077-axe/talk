@@ -57,9 +57,18 @@ export function getConversationRuntimeState(conversationId: string): Conversatio
 
 // Bookkeeping that doesn't need to be reactive — plain module-level maps,
 // keyed by conversationId, so they survive regardless of component mounts.
+/** How long a mood lasts before expiring back to neutral. */
+const MOOD_EXPIRY_MS = 30 * 60 * 1000
 const streamByConversation = new Map<string, string>()
 const timersByConversation = new Map<string, ReturnType<typeof setTimeout>[]>()
 const abortByConversation = new Map<string, AbortController>()
+
+function getActiveMood(contact: Contact, now: number): string | undefined {
+  if (!contact.mood || !contact.mood.text) return undefined
+  if (now > contact.mood.expiresAt) return undefined
+  return contact.mood.text
+}
+
 function clearPending(conversationId: string) {
   timersByConversation.get(conversationId)?.forEach(clearTimeout)
   timersByConversation.set(conversationId, [])
@@ -111,7 +120,7 @@ export function formatStructuredHistoryEvent(
   }
 }
 
-function parseAiTurnDebugPayload(raw: string, bubbles: AiBubble[], knowledgeQueries: string[]): unknown {
+function parseAiTurnDebugPayload(raw: string, bubbles: AiBubble[], knowledgeQueries: string[], mood?: string): unknown {
   const trimmed = raw.trim()
   const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
   const text = fenceMatch ? fenceMatch[1].trim() : trimmed
@@ -127,7 +136,7 @@ function parseAiTurnDebugPayload(raw: string, bubbles: AiBubble[], knowledgeQuer
       }
     }
   }
-  return { raw, parsedBubbles: bubbles, knowledgeQueries }
+  return { raw, parsedBubbles: bubbles, knowledgeQueries, mood }
 }
 
 export function buildUserProfileText(settings: AppSettings): string {
@@ -202,6 +211,8 @@ async function runAiTurn(
   _triggeringUserText = '',
 ): Promise<void> {
   const engine = useChatEngineStore.getState()
+  const now = Date.now()
+  const activeMood = getActiveMood(contact, now)
   engine.patch(conversationId, { aiTyping: true, error: '' })
   console.log(`[chat] 开始生成回复 对方=${displayName(contact)} conversationId=${conversationId}`)
   try {
@@ -226,6 +237,7 @@ async function runAiTurn(
       linkApps: AVAILABLE_LINK_APPS,
       currentTimeText: describeCurrentTime(new Date()),
       userProfileText: buildUserProfileText(settings),
+      activeMood,
       recentEventsText: pendingEvents.length > 0 ? pendingEvents.join('；') : undefined,
       upcomingPlansText: activeUpcomingPlansText(contact, new Date()) || undefined,
       currentScheduleText: describeCurrentSchedule(contact, new Date()) || undefined,
@@ -256,7 +268,7 @@ async function runAiTurn(
     })
 
     if (streamByConversation.get(conversationId) !== streamId) return
-    const { bubbles, knowledgeQueries } = parseAiResponse(raw)
+    const { bubbles, knowledgeQueries, mood: turnMood } = parseAiResponse(raw)
     console.log(`[chat] 收到回复(${raw.length}字) 解析出${bubbles.length}条气泡 对方=${displayName(contact)}`)
     if (bubbles.length === 0) {
       console.warn(`[chat] 本轮没有正常回复 对方=${displayName(contact)} 原始内容: ${raw.slice(0, 200)}`)
@@ -268,12 +280,12 @@ async function runAiTurn(
       id: aiTurnId,
       conversationId,
       raw,
-      parsed: parseAiTurnDebugPayload(raw, bubbles, knowledgeQueries),
+      parsed: parseAiTurnDebugPayload(raw, bubbles, knowledgeQueries, turnMood),
       knowledgeQueries,
       createdAt: Date.now(),
     })
     processKnowledgeQueries(knowledgeQueries, settings)
-    revealBubbles(conversationId, contact, settings, bubbles, streamId, aiTurnId, _triggeringUserText)
+    revealBubbles(conversationId, contact, settings, bubbles, streamId, aiTurnId, _triggeringUserText, turnMood)
   } catch (err) {
     if (streamByConversation.get(conversationId) !== streamId) return
     if (err instanceof DOMException && err.name === 'AbortError') return
@@ -291,6 +303,7 @@ function revealBubbles(
   streamId: string,
   aiTurnId: string,
   _triggeringUserText: string,
+  turnMood?: string,
 ): void {
   const timers: ReturnType<typeof setTimeout>[] = []
   let cumulative = 0
@@ -368,6 +381,11 @@ function revealBubbles(
       if (i === bubbles.length - 1) {
         useChatEngineStore.getState().patch(conversationId, { aiTyping: false })
         maybeUpdateMemory(contact.id, conversationId, settings)
+        if (turnMood) {
+          await db.contacts.update(contact.id, {
+            mood: { text: turnMood, expiresAt: Date.now() + MOOD_EXPIRY_MS },
+          })
+        }
       }
     }, cumulative)
     timers.push(timer)
