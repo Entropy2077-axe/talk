@@ -169,6 +169,7 @@ export function ContactAddPage() {
         avatarPhotographer,
         avatarPhotographerUrl,
         systemPrompt: parsed.persona,
+        speechSamples: parsed.speechSamples,
         createdAt: now,
         memoryFacts: '',
         memoryStyle: '',

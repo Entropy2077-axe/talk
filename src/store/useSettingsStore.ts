@@ -28,6 +28,7 @@ export const useSettingsStore = create<SettingsState>()(
       userBio: '',
       walletBalance: INITIAL_WALLET_BALANCE,
       momentsCoverPhoto: '',
+      momentsLastReadAt: 0,
       autonomousBehaviorEnabled: false,
       proactiveDailyCap: 3,
       proactiveProbability: 0.25,

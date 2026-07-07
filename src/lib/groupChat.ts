@@ -1,6 +1,7 @@
 import { db } from '../db/db'
 import { extractJsonObject, parseKnowledgeQueriesField } from './aiProtocol'
 import { activeUpcomingPlansText } from './memory'
+import { formatSpeechSamplesForScene } from './prompt'
 import { describeCurrentSchedule } from './schedule'
 import type { Contact, GroupAiBubble, GroupAiResponse } from '../types'
 
@@ -39,9 +40,18 @@ export function weightedSampleWithoutReplacement(contacts: Contact[], k: number)
  * once it's big enough that "everyone replies every time" would be noisy,
  * only 3 do, weighted toward whoever's closer to the user.
  */
-export function pickSpeakers(members: Contact[]): Contact[] {
-  if (members.length <= LARGE_GROUP_THRESHOLD) return members
-  return weightedSampleWithoutReplacement(members, MAX_SPEAKERS_WHEN_LARGE)
+export function pickSpeakers(members: Contact[], preferredContactIds: string[] = []): Contact[] {
+  const preferredIds = new Set(preferredContactIds)
+  const preferred = members.filter((m) => preferredIds.has(m.id))
+  if (members.length <= LARGE_GROUP_THRESHOLD) return preferred.length > 0 ? preferred : members
+
+  const limit = Math.min(MAX_SPEAKERS_WHEN_LARGE, members.length)
+  const picked = preferred.slice(0, limit)
+  if (picked.length >= limit) return picked
+
+  const pickedIds = new Set(picked.map((m) => m.id))
+  const rest = members.filter((m) => !pickedIds.has(m.id))
+  return [...picked, ...weightedSampleWithoutReplacement(rest, limit - picked.length)]
 }
 
 export function groupTypingDelayMs(bubble: GroupAiBubble): number {
@@ -83,6 +93,8 @@ export function buildGroupSystemPrompt(opts: {
   stickerNames: string[]
   currentTimeText: string
   userProfileText: string
+  targetedContextText?: string
+  recentEventsText?: string
   worldviewText?: string
   knowledgeDigestText?: string
 }): string {
@@ -97,9 +109,16 @@ export function buildGroupSystemPrompt(opts: {
       const factsFallback = `（还没有具体的聊天记忆 但是${base}关系 不是陌生人）`
       const styleFallback = `（语气要符合${base}的关系定位 不能生疏客气）`
       const plansLine = plansText ? `\n【和用户的约定】${plansText}` : ''
+      const trait = c.personalityTrait?.trim()
+      const traitLine =
+        trait && trait !== '无'
+          ? `\n【性格特质】${trait}（影响情感反应模式，不是说话风格——说话风格已在人设里描述）`
+          : ''
+      const samplesLine = formatSpeechSamplesForScene(c.speechSamples, 'group', 2)
       return `发言人${i + 1}: ${c.name}
 与用户的关系: ${base}${dynamic}
-【人设 - 必须严格遵守】${c.systemPrompt || '自由发挥'}
+【人设 - 必须严格遵守】${c.systemPrompt || '自由发挥'}${traitLine}
+${samplesLine ? `【说话样例】\n${samplesLine}\n` : ''}
 【当前状态】${scheduleText || '没有特别安排'}
 【对用户的了解】${c.memoryFacts || factsFallback}
 【和用户相处的习惯】${c.memoryStyle || styleFallback}${plansLine}`
@@ -115,6 +134,10 @@ export function buildGroupSystemPrompt(opts: {
   const knowledgeLine = opts.knowledgeDigestText
     ? `\n热梗资讯: ${opts.knowledgeDigestText}`
     : ''
+  const targetedContextLine = opts.targetedContextText
+    ? `\nTargeted group-chat context:\n${opts.targetedContextText}\nIf the user @mentions someone, that person should answer first. If the user replies to a message, answer that referenced message directly before changing topic. Keep it natural and short.`
+    : ''
+  const recentEventsLine = opts.recentEventsText ? `\n最近发生的事:\n${opts.recentEventsText}` : ''
   const userNickname = opts.userProfileText.match(/昵称:\s*([^·\n]+)/)?.[1]?.trim()
 
   return `【场景】
@@ -137,7 +160,7 @@ ${speakerBlocks}
 
 【当前】
 时间: ${opts.currentTimeText}
-用户（群成员之一）: ${opts.userProfileText}${knowledgeLine}
+用户（群成员之一）: ${opts.userProfileText}${knowledgeLine}${targetedContextLine}${recentEventsLine}
 
 【输出格式】
 整个输出必须是JSON:

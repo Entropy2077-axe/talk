@@ -15,6 +15,8 @@ import { describeCurrentTime } from './time'
 import { displayName } from './contact'
 import { previewForMessage } from './messagePreview'
 import { buildUserProfileText, useChatEngineStore } from './chatEngine'
+import { validateGroupTurn } from './responseQuality'
+import { recentSocialEventsText, recordSocialEvent } from './socialEvents'
 import { useChatUiStore } from '../store/useChatUiStore'
 import type { AppSettings, Contact, Group, GroupAiBubble, Message, Sticker } from '../types'
 
@@ -58,6 +60,61 @@ function parseGroupTurnDebugPayload(raw: string, bubbles: GroupAiBubble[], knowl
   return { raw, parsedBubbles: bubbles, knowledgeQueries }
 }
 
+function messageLabel(message: Message, contactById: Map<string, Contact>, userNickname: string): string {
+  if (message.role === 'user') return userNickname || '我'
+  const speaker = message.speakerContactId ? contactById.get(message.speakerContactId) : undefined
+  return speaker ? displayName(speaker) : '某人'
+}
+
+function messageBody(message: Message): string {
+  if (message.type === 'sticker') return `[表情: ${message.content}]`
+  if (message.type === 'link') return `[链接: ${message.content}]`
+  if (message.type === 'gift') return `[礼物: ${message.content}]`
+  if (message.type === 'scheduleChange') return `[日程: ${message.content}]`
+  return message.content
+}
+
+function formatGroupHistoryMessage(
+  message: Message,
+  contactById: Map<string, Contact>,
+  messageById: Map<string, Message>,
+  userNickname: string,
+): ChatMessage {
+  const speakerLabel = messageLabel(message, contactById, userNickname)
+  const parts: string[] = []
+  if (message.mentions?.length) {
+    const names = message.mentions.map((id) => contactById.get(id)).filter((c): c is Contact => !!c).map(displayName)
+    if (names.length > 0) parts.push(`@${names.join(' @')}`)
+  }
+  if (message.replyToMessageId) {
+    const replied = messageById.get(message.replyToMessageId)
+    if (replied) parts.push(`replying to ${messageLabel(replied, contactById, userNickname)}: "${messageBody(replied)}"`)
+  }
+  parts.push(messageBody(message))
+  return { role: message.role, content: `${speakerLabel}: ${parts.join(' | ')}` }
+}
+
+function targetedContextText(
+  latestUserMessage: Message | undefined,
+  contactById: Map<string, Contact>,
+  messageById: Map<string, Message>,
+  userNickname: string,
+): string {
+  if (!latestUserMessage) return ''
+  const lines: string[] = []
+  if (latestUserMessage.mentions?.length) {
+    const names = latestUserMessage.mentions.map((id) => contactById.get(id)).filter((c): c is Contact => !!c).map(displayName)
+    if (names.length > 0) lines.push(`User explicitly @mentioned: ${names.join(', ')}`)
+  }
+  if (latestUserMessage.replyToMessageId) {
+    const replied = messageById.get(latestUserMessage.replyToMessageId)
+    if (replied) {
+      lines.push(`User is replying to ${messageLabel(replied, contactById, userNickname)}: "${messageBody(replied)}"`)
+    }
+  }
+  return lines.join('\n')
+}
+
 export async function sendGroupMessage(
   conversationId: string,
   group: Group,
@@ -65,6 +122,8 @@ export async function sendGroupMessage(
   settings: AppSettings,
   stickers: Sticker[],
   text: string,
+  mentionContactIds: string[] = [],
+  replyToMessageId?: string,
 ): Promise<void> {
   if (!text.trim()) return
   if (!settings.apiKey) {
@@ -83,12 +142,63 @@ export async function sendGroupMessage(
     role: 'user',
     type: 'text',
     content: text.trim(),
+    mentions: mentionContactIds.length > 0 ? Array.from(new Set(mentionContactIds)) : undefined,
+    replyToMessageId,
     createdAt: Date.now(),
   }
   await db.messages.add(msg)
   await db.conversations.update(conversationId, { updatedAt: Date.now() })
+  if (msg.mentions?.length || msg.replyToMessageId) {
+    const mentionedNames = msg.mentions
+      ?.map((id) => members.find((member) => member.id === id))
+      .filter((member): member is Contact => !!member)
+      .map(displayName)
+      .join('、')
+    await recordSocialEvent({
+      type: 'group_targeted_message',
+      actorId: 'user',
+      relatedContactIds: Array.from(new Set([...(msg.mentions ?? []), ...group.memberContactIds])),
+      conversationId,
+      groupId: group.id,
+      messageId: msg.id,
+      summary: mentionedNames
+        ? `群聊"${group.name}"里，用户@了${mentionedNames}: ${text.trim()}`
+        : `群聊"${group.name}"里，用户回复了一条消息: ${text.trim()}`,
+      importance: 2,
+    })
+  }
 
   runGroupAiTurn(conversationId, group, members, settings, stickers, streamId)
+}
+
+export async function regenerateGroupAiTurn(
+  conversationId: string,
+  group: Group,
+  members: Contact[],
+  settings: AppSettings,
+  stickers: Sticker[],
+  aiTurnId: string,
+): Promise<void> {
+  if (!settings.apiKey) {
+    useChatEngineStore.getState().patch(conversationId, { error: '还没有配置 API Key，请先去“我 / 设置”里填写' })
+    return
+  }
+
+  const streamId = uuid()
+  streamByConversation.set(conversationId, streamId)
+  clearPending(conversationId)
+  useChatEngineStore.getState().patch(conversationId, { error: '' })
+
+  const turnMessages = await db.messages
+    .where('conversationId')
+    .equals(conversationId)
+    .filter((message) => message.debugAiTurnId === aiTurnId)
+    .toArray()
+  if (turnMessages.length > 0) await db.messages.bulkDelete(turnMessages.map((message) => message.id))
+  await db.aiTurns.delete(aiTurnId)
+  await db.conversations.update(conversationId, { updatedAt: Date.now() })
+
+  await runGroupAiTurn(conversationId, group, members, settings, stickers, streamId)
 }
 
 async function runGroupAiTurn(
@@ -108,12 +218,19 @@ async function runGroupAiTurn(
       return
     }
 
-    const speakers = pickSpeakers(members)
-    console.log(`[group] 本轮发言人: ${speakers.map((s) => s.name).join('、')}`)
     const contactById = new Map(members.map((c) => [c.id, c]))
 
     const history = await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt')
+    const messageById = new Map(history.map((m) => [m.id, m]))
+    const latestUserMessage = [...history].reverse().find((m) => m.role === 'user')
+    const preferredSpeakerIds = new Set(latestUserMessage?.mentions ?? [])
+    const replied = latestUserMessage?.replyToMessageId ? messageById.get(latestUserMessage.replyToMessageId) : undefined
+    if (replied?.role === 'assistant' && replied.speakerContactId) preferredSpeakerIds.add(replied.speakerContactId)
+    const speakers = pickSpeakers(members, Array.from(preferredSpeakerIds))
+    console.log(`[group] 本轮发言人: ${speakers.map((s) => s.name).join('、')}`)
     const knowledgeEntries = await db.knowledgeEntries.toArray()
+    const targetContext = targetedContextText(latestUserMessage, contactById, messageById, settings.userNickname)
+    const recentEventsText = await recentSocialEventsText(members.map((m) => m.id), 4)
 
     const systemPrompt = buildGroupSystemPrompt({
       stylePrompt: settings.globalSystemPrompt,
@@ -123,6 +240,8 @@ async function runGroupAiTurn(
       stickerNames: stickers.map((s) => s.name),
       currentTimeText: describeCurrentTime(new Date()),
       userProfileText: buildUserProfileText(settings),
+      targetedContextText: targetContext,
+      recentEventsText: recentEventsText || undefined,
       worldviewText: settings.worldview || undefined,
       knowledgeDigestText: knowledgeDigestText(knowledgeEntries) || undefined,
     })
@@ -134,12 +253,7 @@ async function runGroupAiTurn(
     // people, and role:"assistant" alone can't distinguish them across turns.
     const chatMessages: ChatMessage[] = coalesceConsecutiveRoles([
       { role: 'system', content: systemPrompt },
-      ...recentHistory.map((m): ChatMessage => {
-        const speakerContact = m.role === 'assistant' && m.speakerContactId ? contactById.get(m.speakerContactId) : undefined
-        const speakerLabel = m.role === 'user' ? settings.userNickname || '我' : displayName(speakerContact ?? { name: '某人' })
-        const body = m.type === 'sticker' ? `[发了一个表情: ${m.content}]` : m.content
-        return { role: m.role, content: `${speakerLabel}: ${body}` }
-      }),
+      ...recentHistory.map((m): ChatMessage => formatGroupHistoryMessage(m, contactById, messageById, settings.userNickname)),
     ])
 
     const controller = new AbortController()
@@ -153,8 +267,26 @@ async function runGroupAiTurn(
     })
 
     if (streamByConversation.get(conversationId) !== streamId) return
-    const { bubbles, knowledgeQueries } = parseGroupAiResponse(raw, speakers.length)
-    console.log(`[group] 收到回复(${raw.length}字) 解析出${bubbles.length}条气泡 群=${group.name}`)
+    let finalRaw = raw
+    let { bubbles, knowledgeQueries } = parseGroupAiResponse(finalRaw, speakers.length)
+    if (bubbles.length > 0) {
+      const checked = await validateGroupTurn({
+        settings,
+        groupName: group.name,
+        speakers,
+        targetedContext: targetContext,
+        raw: finalRaw,
+        bubbles,
+        signal: controller.signal,
+      })
+      if (streamByConversation.get(conversationId) !== streamId) return
+      if (checked.repaired) {
+        console.warn(`[group] 回复已被质量校验重写 群=${group.name} 原因=${checked.reason ?? 'unknown'}`)
+        finalRaw = checked.raw
+        ;({ bubbles, knowledgeQueries } = parseGroupAiResponse(finalRaw, speakers.length))
+      }
+    }
+    console.log(`[group] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 群=${group.name}`)
     if (bubbles.length === 0) {
       console.warn(`[group] 本轮没有人回复 群=${group.name} 原始内容: ${raw.slice(0, 200)}`)
       engine.patch(conversationId, { error: '群里这次没有人回复 可以再发一条试试', aiTyping: false })
@@ -164,8 +296,8 @@ async function runGroupAiTurn(
     await db.aiTurns.add({
       id: aiTurnId,
       conversationId,
-      raw,
-      parsed: parseGroupTurnDebugPayload(raw, bubbles, knowledgeQueries),
+      raw: finalRaw,
+      parsed: parseGroupTurnDebugPayload(finalRaw, bubbles, knowledgeQueries),
       knowledgeQueries,
       createdAt: Date.now(),
     })

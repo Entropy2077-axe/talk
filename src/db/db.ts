@@ -12,6 +12,7 @@ import type {
   MomentComment,
   MomentLike,
   SavedWorldview,
+  SocialEvent,
   Sticker,
   Todo,
 } from '../types'
@@ -31,6 +32,7 @@ export class TalkDB extends Dexie {
   knowledgeEntries!: Table<KnowledgeEntry, string>
   savedWorldviews!: Table<SavedWorldview, string>
   aiTurns!: Table<AiTurnDebug, string>
+  socialEvents!: Table<SocialEvent, string>
 
   constructor() {
     super('talk-db')
@@ -101,6 +103,9 @@ export class TalkDB extends Dexie {
           relationshipDynamic: '',
         })
       }
+    })
+    this.version(12).stores({
+      socialEvents: 'id, type, actorId, targetId, createdAt, *relatedContactIds',
     })
   }
 }

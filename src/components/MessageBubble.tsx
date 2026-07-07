@@ -1,8 +1,10 @@
 import { forwardRef, useState } from 'react'
+import type React from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/db'
 import { Avatar } from './Avatar'
 import { formatBubbleTime } from '../lib/time'
+import { useLongPress } from '../hooks/useLongPress'
 import type { Message } from '../types'
 
 interface MessageBubbleProps {
@@ -14,6 +16,10 @@ interface MessageBubbleProps {
   stickerUrl?: string
   highlighted?: boolean
   adminMode?: boolean
+  mentionNames?: string[]
+  replyPreview?: string
+  onReply?: () => void
+  onLongPress?: () => void
   onLinkClick?: (label: string) => void
 }
 
@@ -27,6 +33,10 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
     stickerUrl,
     highlighted,
     adminMode,
+    mentionNames = [],
+    replyPreview,
+    onReply,
+    onLongPress,
     onLinkClick,
   },
   ref,
@@ -41,8 +51,9 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
     parsedBubble: message.debugParsedBubble,
     rawAiResponse: message.debugRawAiResponse,
   }
+  const longPress = useLongPress(() => onLongPress?.())
   return (
-    <div ref={ref} className={`px-3 py-1.5 ${highlighted ? 'bg-yellow-50' : ''}`}>
+    <div ref={ref} {...longPress} className={`px-3 py-1.5 ${highlighted ? 'bg-yellow-50' : ''}`}>
       {!isUser && <p className="mb-1 text-[11px] text-gray-400">{contactName}</p>}
       <div className={`flex items-start gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
         {isUser ? (
@@ -52,13 +63,18 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
         )}
 
         <div className={`flex max-w-[68%] flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+          {replyPreview && (
+            <div className="mb-1 max-w-full truncate rounded-lg bg-black/5 px-2 py-1 text-[11px] text-gray-500">
+              {replyPreview}
+            </div>
+          )}
           {message.type === 'text' && (
             <div
               className={`whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-[14.5px] leading-relaxed ${
                 isUser ? 'bg-[#95ec69] text-gray-900' : 'bg-white text-gray-900'
               }`}
             >
-              {message.content}
+              <TextWithMentions text={message.content} names={mentionNames} />
             </div>
           )}
 
@@ -107,7 +123,14 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
             </div>
           )}
 
-          <span className="mt-0.5 px-1 text-[10px] text-gray-300">{formatBubbleTime(message.createdAt)}</span>
+          <div className={`mt-0.5 flex items-center gap-2 px-1 ${isUser ? 'flex-row-reverse' : ''}`}>
+            <span className="text-[10px] text-gray-300">{formatBubbleTime(message.createdAt)}</span>
+            {onReply && (
+              <button onClick={onReply} className="text-[10px] text-gray-400">
+                回复
+              </button>
+            )}
+          </div>
           {adminMode && !isUser && (
             <div className="mt-1 w-full">
               <button
@@ -128,3 +151,28 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
     </div>
   )
 })
+
+function TextWithMentions({ text, names }: { text: string; names: string[] }) {
+  if (names.length === 0) return <>{text}</>
+
+  const escaped = names
+    .filter(Boolean)
+    .map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  if (escaped.length === 0) return <>{text}</>
+
+  const pattern = new RegExp(`@(${escaped.join('|')})`, 'g')
+  const parts: React.ReactNode[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(text))) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index))
+    parts.push(
+      <span key={`${match[0]}-${match.index}`} className="font-medium text-[#576b95]">
+        {match[0]}
+      </span>,
+    )
+    lastIndex = match.index + match[0].length
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex))
+  return <>{parts}</>
+}

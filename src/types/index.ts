@@ -6,6 +6,7 @@ export interface Contact {
   avatar: string // emoji or data URL
   avatarColor: string // fallback background color
   systemPrompt: string // persona description generated at creation time — never shown to the user, never edited after creation
+  speechSamples?: string[] // short scene-labeled examples generated at creation time, used sparingly to stabilize voice
   bio?: string
   createdAt: number
   // ---- adaptive memory ----
@@ -144,6 +145,30 @@ export interface MomentLike {
   createdAt: number
 }
 
+export type SocialEventType =
+  | 'moment_posted'
+  | 'moment_liked'
+  | 'moment_commented'
+  | 'group_targeted_message'
+  | 'message_feedback'
+
+export interface SocialEvent {
+  id: string
+  type: SocialEventType
+  /** 'user' or a contact id. */
+  actorId: string
+  /** 'user', a contact id, or omitted for broadcast events. */
+  targetId?: string
+  relatedContactIds: string[]
+  summary: string
+  conversationId?: string
+  groupId?: string
+  momentId?: string
+  messageId?: string
+  importance: number
+  createdAt: number
+}
+
 export interface Conversation {
   id: string
   contactId?: string // set for a 1:1 chat — exactly one of contactId/groupId is set
@@ -197,6 +222,8 @@ export interface Message {
   role: MessageRole
   type: MessageType
   content: string // text content, sticker name, link/gift label
+  mentions?: string[] // group chats: contact ids explicitly @-mentioned by this message
+  replyToMessageId?: string // group chats: message id this message is replying to
   link?: LinkPayload
   gift?: GiftPayload
   scheduleChange?: ScheduleChangePayload
@@ -257,6 +284,7 @@ export interface AppSettings {
   userBio: string
   walletBalance: number // 金币(coins) the user can spend in the shop
   momentsCoverPhoto: string // data URL for the 朋友圈 page's cover banner, empty until the user sets one
+  momentsLastReadAt?: number // updated when the user opens MomentsPage; drives Discover red dots
   // ---- autonomous behavior (see lib/proactiveChat.ts) ----
   autonomousBehaviorEnabled: boolean // master switch: AI can post moments / proactively open a chat on a timer while the app is open. Off by default — it makes real API calls without a direct user action.
   proactiveMessageLog?: { date: string; count: number } // rolling daily counter backing the global cap on proactive chat-opens, keyed by local date

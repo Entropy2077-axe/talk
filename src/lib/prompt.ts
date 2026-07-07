@@ -77,6 +77,7 @@ export function buildSystemPromptSections(opts: {
   upcomingScheduleText?: string
   worldviewText?: string
   knowledgeDigestText?: string
+  speechSamplesText?: string
 }): PromptSection[] {
   const stickersText =
     opts.stickerNames.length > 0
@@ -91,7 +92,8 @@ export function buildSystemPromptSections(opts: {
   // --- Section 1: Who you are ---
   const worldviewPrefix = opts.worldviewText ? `这个世界: ${opts.worldviewText}。` : ''
   const relLine = relationshipLine(opts.relationshipBase, opts.relationshipDynamic, opts.warmth)
-  const whoSection = `${opts.stylePrompt}\n\n【你是谁】\n${worldviewPrefix}${opts.persona || '（自由发挥 扮演一个普通朋友）'}\n\n【你和对方的关系】\n${relLine}`.trim()
+  const samplesLine = opts.speechSamplesText ? `\n\n【说话样例】\n${opts.speechSamplesText}` : ''
+  const whoSection = `${opts.stylePrompt}\n\n【你是谁】\n${worldviewPrefix}${opts.persona || '（自由发挥 扮演一个普通朋友）'}\n\n【你和对方的关系】\n${relLine}${samplesLine}`.trim()
 
   // --- Section 2: Memory ---
   const factsFallback = `（还没有具体的共同经历 但你们已经是${opts.relationshipBase}关系 不是陌生人）`
@@ -127,6 +129,19 @@ export function buildSystemPrompt(opts: Parameters<typeof buildSystemPromptSecti
     .join('\n\n')
 }
 
+export function formatSpeechSamplesForScene(samples: string[] | undefined, scene: 'private' | 'group' | 'moment', max = 3): string {
+  if (!samples || samples.length === 0) return ''
+  const sceneWords =
+    scene === 'private'
+      ? ['私聊', '亲近', '生气', '敷衍']
+      : scene === 'group'
+        ? ['群聊', '@', '插话']
+        : ['朋友圈', '动态', '评论']
+  const preferred = samples.filter((sample) => sceneWords.some((word) => sample.includes(word)))
+  const picked = (preferred.length > 0 ? preferred : samples).slice(0, max)
+  return picked.map((sample) => `- ${sample}`).join('\n')
+}
+
 export const AVAILABLE_LINK_APPS: { app: string; desc: string }[] = [
   { app: 'shop', desc: '虚拟网购小程序' },
   { app: 'todo', desc: 'TODO任务清单小程序' },
@@ -150,6 +165,7 @@ export interface PersonaGenerationResult {
   schedule: ScheduleBlock[]
   avatarKeyword: string
   personalityTrait: string
+  speechSamples: string[]
 }
 
 export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCategory: AvatarCategory): string {
@@ -184,7 +200,16 @@ export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCate
     { "dayOfWeek": 1, "startHour": 9, "endHour": 18, "phoneAccess": "unavailable", "location": "公司", "activity": "上班" },
     { "dayOfWeek": 1, "startHour": 23, "endHour": 7, "phoneAccess": "unavailable", "location": "家里", "activity": "睡觉" }
   ]${avatarInstruction},
-  "personalityTrait": "病娇"
+  "personalityTrait": "病娇",
+  "speechSamples": [
+    "私聊开心: 哈哈哈你这个也太离谱了吧",
+    "私聊生气: 行 你要这么说我就不接了",
+    "私聊敷衍: 嗯嗯 听见了",
+    "亲近时: 过来点 我跟你说个事",
+    "群聊插话: 等下 这个我有话说",
+    "朋友圈动态: 今天风有点大 但心情还行",
+    "朋友圈评论: 你这也太会挑时间了"
+  ]
 }
 
 要求:
@@ -192,6 +217,7 @@ export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCate
 - persona里要体现性格倾向和关系定位 但要写得像在描述一个真实存在的普通人 而不是罗列标签
 - schedule是这个人一周典型的日程安排 覆盖工作/上学、睡觉、吃饭、娱乐、社交等 要符合persona暗示的年龄和生活状态(比如学生党的日程跟上班族不一样) dayOfWeek是0-6(0是周日) startHour/endHour是24小时制的整数(跨零点的时间段比如23点到次日7点 直接写startHour:23 endHour:7 系统会处理跨天) phoneAccess只能是"available"(可以看手机、正常聊天)或"unavailable"(在忙、不方便看手机) 大部分清醒时间应该是available 只有上班上课、睡觉这类场合才unavailable 5到10条覆盖一周即可 不需要每天都写满
 - personalityTrait只能是"病娇""天然呆""傲娇""高冷""元气""腹黑""妹控""兄控""雌小鬼""妈妈""无"这十一个值之一 不能编造 没有把握就填"无"
+- speechSamples写6到8条 每条不超过35字 必须像这个人真实会发出来的话 带场景标签(私聊开心/私聊生气/私聊敷衍/亲近时/群聊插话/朋友圈动态/朋友圈评论等) 不要写解释
 - 只输出JSON 不要有markdown代码块标记`
 }
 
@@ -203,12 +229,19 @@ export function parsePersonaGeneration(raw: string): PersonaGenerationResult | n
     const parsed = JSON.parse(text)
     if (typeof parsed?.name === 'string' && typeof parsed?.persona === 'string') {
       const trait = typeof parsed.personalityTrait === 'string' ? parsed.personalityTrait.trim() : ''
+      const speechSamples = Array.isArray(parsed.speechSamples)
+        ? parsed.speechSamples
+            .filter((sample: unknown): sample is string => typeof sample === 'string' && sample.trim().length > 0)
+            .map((sample: string) => sample.trim().slice(0, 80))
+            .slice(0, 8)
+        : []
       return {
         avatarKeyword: typeof parsed.avatarKeyword === 'string' ? parsed.avatarKeyword.trim() : '',
         name: parsed.name.trim(),
         persona: parsed.persona.trim(),
         schedule: validateScheduleBlocks(parsed.schedule),
         personalityTrait: PERSONALITY_TRAIT_OPTIONS.some((opt) => opt.value === trait) ? trait : '无',
+        speechSamples,
       }
     }
   } catch {

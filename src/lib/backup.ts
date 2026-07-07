@@ -20,6 +20,7 @@ export const BACKUP_TABLES = [
   'knowledgeEntries',
   'savedWorldviews',
   'aiTurns',
+  'socialEvents',
 ] as const
 
 export type BackupTableName = (typeof BACKUP_TABLES)[number]
@@ -61,6 +62,7 @@ export function assertTalkBackup(value: unknown): asserts value is TalkBackup {
   if (backup.schemaVersion !== BACKUP_SCHEMA_VERSION) throw new Error('备份版本暂不支持')
   if (!backup.tables || typeof backup.tables !== 'object') throw new Error('备份文件缺少数据表')
   for (const name of BACKUP_TABLES) {
+    if (name === 'socialEvents' && backup.tables[name] === undefined) continue
     if (!Array.isArray(backup.tables[name])) throw new Error(`备份文件缺少 ${name} 表`)
   }
 }
@@ -73,7 +75,7 @@ export async function restoreBackup(backup: TalkBackup) {
     async () => {
       for (const name of BACKUP_TABLES) await table(name).clear()
       for (const name of BACKUP_TABLES) {
-        const rows = backup.tables[name]
+        const rows = backup.tables[name] ?? []
         if (rows.length > 0) await table(name).bulkPut(rows)
       }
     },

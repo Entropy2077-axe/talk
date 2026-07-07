@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
@@ -7,6 +7,7 @@ import { Avatar } from '../components/Avatar'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { displayName } from '../lib/contact'
 import { generateMomentReply, parseCommentSticker, postUserMoment, refreshMoments } from '../lib/moments'
+import { recordSocialEvent } from '../lib/socialEvents'
 import { resizeImageDataUrl } from '../lib/image'
 import { formatListTime } from '../lib/time'
 import type { Contact, MomentComment, MomentLike } from '../types'
@@ -29,6 +30,13 @@ export function MomentsPage() {
   const [commentDraft, setCommentDraft] = useState('')
   const [replyTarget, setReplyTarget] = useState<{ commentId: string; authorLabel: string } | null>(null)
   const coverInput = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    settings.setSettings({ momentsLastReadAt: Date.now() })
+    // only mark read when entering the page; new items arriving while here
+    // are visible immediately through live queries.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const contactById = useMemo(() => new Map(contacts.map((c) => [c.id, c])), [contacts])
   const stickerByName = useMemo(() => new Map(stickers.map((s) => [s.name, s])), [stickers])
@@ -84,6 +92,18 @@ export function MomentsPage() {
       createdAt: Date.now(),
       replyToCommentId: replyTarget?.commentId,
     })
+    if (posterContactId) {
+      const poster = contactById.get(posterContactId)
+      await recordSocialEvent({
+        type: 'moment_commented',
+        actorId: 'user',
+        targetId: posterContactId,
+        relatedContactIds: [posterContactId],
+        momentId,
+        summary: `用户评论了${poster ? displayName(poster) : '对方'}的朋友圈: ${text}`,
+        importance: 2,
+      })
+    }
     setCommentDraft('')
     setCommentingId(null)
     setReplyTarget(null)
@@ -142,6 +162,15 @@ export function MomentsPage() {
     await db.momentLikes.add({ id: uuid(), momentId, likerId: 'user', createdAt: Date.now() })
     const contact = posterContactId ? contactById.get(posterContactId) : undefined
     if (contact) {
+      await recordSocialEvent({
+        type: 'moment_liked',
+        actorId: 'user',
+        targetId: posterContactId,
+        relatedContactIds: [posterContactId!],
+        momentId,
+        summary: `用户赞了${displayName(contact)}的朋友圈`,
+        importance: 1,
+      })
       const events = contact.pendingEvents ?? []
       await db.contacts.update(posterContactId!, { pendingEvents: [...events, '你发的朋友圈刚被对方点赞了'] })
     }

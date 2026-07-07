@@ -3,13 +3,15 @@ import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { chatCompletion, coalesceConsecutiveRoles, type ChatMessage } from './deepseek'
 import { extractJsonObject, parseAiResponse, typingDelayMs } from './aiProtocol'
-import { buildSystemPrompt, AVAILABLE_LINK_APPS } from './prompt'
+import { buildSystemPrompt, AVAILABLE_LINK_APPS, formatSpeechSamplesForScene } from './prompt'
 import { CONTEXT_WINDOW_SIZE, activeUpcomingPlansText, maybeUpdateMemory } from './memory'
 import { describeCurrentTime, ageFromBirthday } from './time'
 import { describeCurrentSchedule, describeUpcomingScheduleText, pruneExpiredOverrides } from './schedule'
 import { knowledgeDigestText, processKnowledgeQueries } from './knowledgeBase'
 import { displayName } from './contact'
 import { previewForMessage } from './messagePreview'
+import { validatePrivateTurn } from './responseQuality'
+import { recentSocialEventsText } from './socialEvents'
 import { useChatUiStore } from '../store/useChatUiStore'
 import type { AiBubble, AppSettings, Contact, Message, MessageType, ScheduleOverride, Sticker } from '../types'
 
@@ -202,6 +204,35 @@ export async function triggerAiTurn(
   await runAiTurn(conversationId, contact, settings, stickers, streamId)
 }
 
+export async function regenerateAiTurn(
+  conversationId: string,
+  contact: Contact,
+  settings: AppSettings,
+  stickers: Sticker[],
+  aiTurnId: string,
+): Promise<void> {
+  if (!settings.apiKey) {
+    useChatEngineStore.getState().patch(conversationId, { error: '还没有配置 API Key，请先去“我 / 设置”里填写' })
+    return
+  }
+
+  const streamId = uuid()
+  streamByConversation.set(conversationId, streamId)
+  clearPending(conversationId)
+  useChatEngineStore.getState().patch(conversationId, { error: '' })
+
+  const turnMessages = await db.messages
+    .where('conversationId')
+    .equals(conversationId)
+    .filter((message) => message.debugAiTurnId === aiTurnId)
+    .toArray()
+  if (turnMessages.length > 0) await db.messages.bulkDelete(turnMessages.map((message) => message.id))
+  await db.aiTurns.delete(aiTurnId)
+  await db.conversations.update(conversationId, { updatedAt: Date.now() })
+
+  await runAiTurn(conversationId, contact, settings, stickers, streamId)
+}
+
 async function runAiTurn(
   conversationId: string,
   contact: Contact,
@@ -223,6 +254,8 @@ async function runAiTurn(
     // than sitting there forever or requiring a proactive-message system.
     const pendingEvents = contact.pendingEvents ?? []
     if (pendingEvents.length > 0) await db.contacts.update(contact.id, { pendingEvents: [] })
+    const socialEventsText = await recentSocialEventsText([contact.id], 4)
+    const recentEventsText = [pendingEvents.join('；'), socialEventsText].filter(Boolean).join('\n')
 
     const knowledgeEntries = await db.knowledgeEntries.toArray()
     const systemPrompt = buildSystemPrompt({
@@ -238,12 +271,13 @@ async function runAiTurn(
       currentTimeText: describeCurrentTime(new Date()),
       userProfileText: buildUserProfileText(settings),
       activeMood,
-      recentEventsText: pendingEvents.length > 0 ? pendingEvents.join('；') : undefined,
+      recentEventsText: recentEventsText || undefined,
       upcomingPlansText: activeUpcomingPlansText(contact, new Date()) || undefined,
       currentScheduleText: describeCurrentSchedule(contact, new Date()) || undefined,
       upcomingScheduleText: describeUpcomingScheduleText(contact, new Date()) || undefined,
       worldviewText: settings.worldview || undefined,
       knowledgeDigestText: knowledgeDigestText(knowledgeEntries) || undefined,
+      speechSamplesText: formatSpeechSamplesForScene(contact.speechSamples, 'private', 3) || undefined,
     })
     const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
     const chatMessages: ChatMessage[] = coalesceConsecutiveRoles([
@@ -268,8 +302,25 @@ async function runAiTurn(
     })
 
     if (streamByConversation.get(conversationId) !== streamId) return
-    const { bubbles, knowledgeQueries, mood: turnMood } = parseAiResponse(raw)
-    console.log(`[chat] 收到回复(${raw.length}字) 解析出${bubbles.length}条气泡 对方=${displayName(contact)}`)
+    let finalRaw = raw
+    let { bubbles, knowledgeQueries, mood: turnMood } = parseAiResponse(finalRaw)
+    if (bubbles.length > 0) {
+      const checked = await validatePrivateTurn({
+        settings,
+        contact,
+        latestUserText: _triggeringUserText,
+        raw: finalRaw,
+        bubbles,
+        signal: controller.signal,
+      })
+      if (streamByConversation.get(conversationId) !== streamId) return
+      if (checked.repaired) {
+        console.warn(`[chat] 回复已被质量校验重写 对方=${displayName(contact)} 原因=${checked.reason ?? 'unknown'}`)
+        finalRaw = checked.raw
+        ;({ bubbles, knowledgeQueries, mood: turnMood } = parseAiResponse(finalRaw))
+      }
+    }
+    console.log(`[chat] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 对方=${displayName(contact)}`)
     if (bubbles.length === 0) {
       console.warn(`[chat] 本轮没有正常回复 对方=${displayName(contact)} 原始内容: ${raw.slice(0, 200)}`)
       engine.patch(conversationId, { error: '对方这次没有正常回复 可以再发一条试试', aiTyping: false })
@@ -279,8 +330,8 @@ async function runAiTurn(
     await db.aiTurns.add({
       id: aiTurnId,
       conversationId,
-      raw,
-      parsed: parseAiTurnDebugPayload(raw, bubbles, knowledgeQueries, turnMood),
+      raw: finalRaw,
+      parsed: parseAiTurnDebugPayload(finalRaw, bubbles, knowledgeQueries, turnMood),
       knowledgeQueries,
       createdAt: Date.now(),
     })

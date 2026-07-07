@@ -4,6 +4,8 @@ import { chatCompletion } from './deepseek'
 import { canReactToMoments } from './contactRelations'
 import { describeCurrentSchedule, isPhoneAvailable } from './schedule'
 import { searchPexelsPhoto } from './photoSearch'
+import { recordSocialEvent } from './socialEvents'
+import { formatSpeechSamplesForScene } from './prompt'
 import type { AppSettings, Contact } from '../types'
 
 const ELIGIBLE_WINDOW_MS = 10 * 60 * 1000
@@ -78,6 +80,7 @@ export function pickPosterCount(eligibleCount: number, totalContacts: number): n
 interface ReactorPlan {
   contact: Contact
   willComment: boolean
+  relationLabel: string
 }
 
 /** For one posting contact, decides (via the relationship graph + dice rolls, not the LLM) which of their linked friends react, and whether each reaction includes a comment. */
@@ -89,18 +92,22 @@ async function planReactors(poster: Contact, contactsById: Map<string, Contact>)
     .equals(poster.id)
     .toArray()
 
-  const candidates: Contact[] = []
+  const candidates: { contact: Contact; relationLabel: string }[] = []
   for (const link of links) {
     if (!canReactToMoments(link.label)) continue
     const otherId = link.fromContactId === poster.id ? link.toContactId : link.fromContactId
     const other = contactsById.get(otherId)
-    if (other) candidates.push(other)
+    if (other) candidates.push({ contact: other, relationLabel: link.label || '普通朋友' })
   }
 
   const plans: ReactorPlan[] = []
   for (const candidate of candidates) {
     if (Math.random() > REACT_PROBABILITY) continue // relationship was fine, still scrolled past
-    plans.push({ contact: candidate, willComment: Math.random() < COMMENT_SHARE })
+    plans.push({
+      contact: candidate.contact,
+      willComment: Math.random() < COMMENT_SHARE,
+      relationLabel: candidate.relationLabel || '普通朋友',
+    })
   }
   return plans
 }
@@ -117,7 +124,10 @@ function buildMomentsPrompt(
         e.commenters.length > 0
           ? e.commenters
               .filter((c) => c.willComment)
-              .map((c, j) => `  评论者${j + 1}: ${c.contact.name} 人设: ${c.contact.systemPrompt}`)
+              .map(
+                (c, j) =>
+                  `  评论者${j + 1}: ${c.contact.name}\n  人设: ${c.contact.systemPrompt}\n  性格特质: ${c.contact.personalityTrait?.trim() || '无'}\n  说话样例: ${formatSpeechSamplesForScene(c.contact.speechSamples, 'moment', 1) || '无'}\n  与发布者的关系: ${c.relationLabel || '普通朋友'}`,
+              )
               .join('\n')
           : '  （这条没有人评论）'
       const scheduleLine = describeCurrentSchedule(e.poster, now)
@@ -125,13 +135,17 @@ function buildMomentsPrompt(
       const photoLine = e.willHavePhoto
         ? `这条动态会配一张照片 你还需要为它写一个"imageKeyword"(简短英文搜图短语 贴合你写的这条朋友圈内容 用来找一张对应的照片)\n`
         : ''
-      return `人物${i + 1}: ${e.poster.name}\n人设: ${e.poster.systemPrompt}\n${statusLine}${photoLine}这条朋友圈下会评论的人(按顺序):\n${commenterLines}`
+      return `人物${i + 1}: ${e.poster.name}\n人设: ${e.poster.systemPrompt}\n性格特质: ${e.poster.personalityTrait?.trim() || '无'}\n说话样例: ${formatSpeechSamplesForScene(e.poster.speechSamples, 'moment', 2) || '无'}\n${statusLine}${photoLine}这条朋友圈下会评论的人(按顺序):\n${commenterLines}`
     })
     .join('\n\n')
 
   const worldviewSection = worldviewText ? `【这个世界的设定 所有人的朋友圈内容都要符合这个设定】\n${worldviewText}\n\n` : ''
 
-  return `${worldviewSection}你是一个朋友圈内容生成器 只输出JSON 不要有任何其他文字
+  return `${worldviewSection}【场景】
+你是一个朋友圈内容生成器。下面有几个人准备发朋友圈，请你扮演他们每个人写出符合各自人设的内容。
+这不是私聊——朋友圈是公开广播，不能写成"我跟你说""咱们"这种对着特定人的语气。
+
+你是一个朋友圈内容生成器 只输出JSON 不要有任何其他文字
 
 下面有几个人分别要发一条朋友圈动态 请你分别为每个人写一条符合他们性格的纯文字朋友圈内容(30到80字 口语化随性 不要用括号描述动作神态)。**朋友圈是发给所有人看的公开动态 不是私聊 绝对不能写成"我跟你说""告诉你""咱们"这种对着某个特定的人说话的语气** 就当是发一条谁都能看到的广播 可以用"大家""谁"这类泛指 也可以什么都不带纯粹自言自语 然后为每条动态下面标注的评论者也各自写一条符合他们性格、符合他们和发布者关系的评论(简短口语化 不用括号 评论本身是回复给发布者看的 可以正常用"你")
 ${stickerCommentInstruction(stickerNames)}
@@ -258,12 +272,31 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
       imagePhotographer,
       imagePhotographerUrl,
     })
+    await recordSocialEvent({
+      type: 'moment_posted',
+      actorId: poster.id,
+      relatedContactIds: [poster.id],
+      momentId,
+      summary: `${poster.name}发了一条朋友圈: ${content}`,
+      importance: 1,
+      createdAt: now + i,
+    })
     await db.contacts.update(poster.id, { lastMomentAt: now })
 
     let commentIndex = 0
     for (const reactor of commenters) {
       // everyone in the reactor plan reacts with at least a like
       await db.momentLikes.add({ id: uuid(), momentId, likerId: reactor.contact.id, createdAt: now })
+      await recordSocialEvent({
+        type: 'moment_liked',
+        actorId: reactor.contact.id,
+        targetId: poster.id,
+        relatedContactIds: [reactor.contact.id, poster.id],
+        momentId,
+        summary: `${reactor.contact.name}赞了${poster.name}的朋友圈`,
+        importance: 1,
+        createdAt: now,
+      })
       if (reactor.willComment) {
         const commentText = comments[commentIndex++]
         if (commentText) {
@@ -272,6 +305,16 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
             momentId,
             authorContactId: reactor.contact.id,
             content: commentText,
+            createdAt: now,
+          })
+          await recordSocialEvent({
+            type: 'moment_commented',
+            actorId: reactor.contact.id,
+            targetId: poster.id,
+            relatedContactIds: [reactor.contact.id, poster.id],
+            momentId,
+            summary: `${reactor.contact.name}评论了${poster.name}的朋友圈: ${commentText}`,
+            importance: 2,
             createdAt: now,
           })
         }
@@ -306,7 +349,8 @@ function buildUserMomentCommentPrompt(content: string, commenters: Contact[], wo
   const commenterLines = commenters
     .map((c, i) => {
       const scheduleLine = describeCurrentSchedule(c, now)
-      return `评论者${i + 1}: ${c.name} 人设: ${c.systemPrompt}${scheduleLine ? ` ${scheduleLine}` : ''}`
+      const samples = formatSpeechSamplesForScene(c.speechSamples, 'moment', 1)
+      return `评论者${i + 1}: ${c.name} 人设: ${c.systemPrompt}${samples ? ` 说话样例: ${samples}` : ''}${scheduleLine ? ` ${scheduleLine}` : ''}`
     })
     .join('\n')
   const worldviewSection = worldviewText ? `【这个世界的设定】\n${worldviewText}\n\n` : ''
@@ -391,6 +435,16 @@ export async function postUserMoment(content: string, settings: AppSettings): Pr
   let commentIndex = 0
   for (const plan of plans) {
     await db.momentLikes.add({ id: uuid(), momentId, likerId: plan.contact.id, createdAt: now })
+    await recordSocialEvent({
+      type: 'moment_liked',
+      actorId: plan.contact.id,
+      targetId: 'user',
+      relatedContactIds: [plan.contact.id],
+      momentId,
+      summary: `${plan.contact.name}赞了用户的朋友圈: ${content}`,
+      importance: 1,
+      createdAt: now,
+    })
     if (plan.willComment) {
       const text = comments[commentIndex++]
       if (text) {
@@ -399,6 +453,16 @@ export async function postUserMoment(content: string, settings: AppSettings): Pr
           momentId,
           authorContactId: plan.contact.id,
           content: text,
+          createdAt: now,
+        })
+        await recordSocialEvent({
+          type: 'moment_commented',
+          actorId: plan.contact.id,
+          targetId: 'user',
+          relatedContactIds: [plan.contact.id],
+          momentId,
+          summary: `${plan.contact.name}评论了用户的朋友圈: ${text}`,
+          importance: 2,
           createdAt: now,
         })
       }
@@ -425,7 +489,8 @@ function buildMomentReplyPrompt(
   const scheduleLine = describeCurrentSchedule(poster, new Date())
   const scheduleSection = scheduleLine ? `你${scheduleLine}(回复内容可以但不强制符合这个状态)\n` : ''
 
-  return `${worldviewSection}你是${poster.name} 人设: ${poster.systemPrompt}
+  const samples = formatSpeechSamplesForScene(poster.speechSamples, 'moment', 2)
+  return `${worldviewSection}你是${poster.name} 人设: ${poster.systemPrompt}${samples ? `\n说话样例:\n${samples}` : ''}
 ${scheduleSection}
 你发的这条朋友圈: "${momentContent}"
 
@@ -491,6 +556,15 @@ export async function generateMomentReply(
       content: cleaned,
       createdAt: Date.now(),
       replyToCommentId: triggeringCommentId,
+    })
+    await recordSocialEvent({
+      type: 'moment_commented',
+      actorId: poster.id,
+      targetId: 'user',
+      relatedContactIds: [poster.id],
+      momentId,
+      summary: `${poster.name}在自己的朋友圈下回复了用户: ${cleaned}`,
+      importance: 2,
     })
   } catch {
     // best-effort background reply; failing silently is fine, same as the other moments background jobs

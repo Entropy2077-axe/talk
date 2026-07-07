@@ -4,6 +4,8 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/db'
 import { UnreadBadge } from './UnreadBadge'
 import { unreadCountFor } from '../lib/unread'
+import { momentsUnreadCount } from '../lib/momentsUnread'
+import { useSettingsStore } from '../store/useSettingsStore'
 
 const TABS = [
   { to: '/', label: '消息', icon: MessageIcon },
@@ -18,6 +20,9 @@ const EMPTY_ARRAY: never[] = []
 export function BottomNav() {
   const conversations = useLiveQuery(() => db.conversations.toArray(), []) ?? EMPTY_ARRAY
   const messages = useLiveQuery(() => db.messages.toArray(), []) ?? EMPTY_ARRAY
+  const moments = useLiveQuery(() => db.moments.toArray(), []) ?? EMPTY_ARRAY
+  const socialEvents = useLiveQuery(() => db.socialEvents.toArray(), []) ?? EMPTY_ARRAY
+  const momentsLastReadAt = useSettingsStore((s) => s.momentsLastReadAt)
 
   const totalUnread = useMemo(() => {
     const messagesByConv = new Map<string, typeof messages>()
@@ -31,6 +36,10 @@ export function BottomNav() {
       0,
     )
   }, [conversations, messages])
+  const momentsUnread = useMemo(
+    () => momentsUnreadCount({ lastReadAt: momentsLastReadAt, moments, socialEvents }),
+    [momentsLastReadAt, moments, socialEvents],
+  )
 
   return (
     <nav className="flex shrink-0 border-t border-gray-100 bg-white pb-[env(safe-area-inset-bottom)]">
@@ -50,6 +59,7 @@ export function BottomNav() {
               <div className="relative">
                 <Icon active={isActive} />
                 {to === '/' && <UnreadBadge count={totalUnread} className="absolute -top-1 -right-2" />}
+                {to === '/discover' && <UnreadBadge count={momentsUnread} className="absolute -top-1 -right-2" />}
               </div>
               <span>{label}</span>
             </>
