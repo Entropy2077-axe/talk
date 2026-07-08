@@ -10,6 +10,7 @@ import { moodModule } from './mood'
 import { mindReadingModule } from './mindReading'
 import { intentModule } from './intent'
 import { selfIterationModule } from './selfIteration'
+import { storyOutlineModule } from './storyOutline'
 import type { FeatureModule, ParentModule } from './types'
 
 // ---- parent modules (accordion groups in the UI) ----
@@ -51,6 +52,7 @@ export const ALL_MODULES: FeatureModule[] = [
   mindReadingModule,
   intentModule,
   selfIterationModule,
+  storyOutlineModule,
 ]
 
 /** Modules that don't belong to any parent — shown as standalone toggles. */
@@ -123,7 +125,7 @@ export function getEnabledDiscoverEntries(): { to: string; icon: string; label: 
 
 // ---- defaults ----
 
-/** Every module is on by default except costlier/experimental background modules. */
+/** Every module is on by default except opt-in background/debug modules. */
 export const DEFAULT_ENABLED_MODULES: string[] = ALL_MODULES
   .filter((m) => m.id !== 'proactiveChat' && m.id !== 'mindReading' && m.id !== 'selfIteration')
   .map((m) => m.id)

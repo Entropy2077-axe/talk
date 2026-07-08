@@ -18,6 +18,7 @@ import { useModuleEnabled, isModuleEnabled } from '../features'
 import { warmthLabel, relationshipLine } from '../lib/relationship'
 import { buildUserProfileText } from '../lib/chatEngine'
 import { useSettingsStore } from '../store/useSettingsStore'
+import type { ContactMemoryScope } from '../types'
 import { PERSONALITY_TRAIT_OPTIONS } from '../types'
 import { activeIntentPrompt, activeIntents, clearIntentQueue } from '../lib/intent'
 
@@ -40,6 +41,12 @@ function LatestAiTurnJson({ contactId }: { contactId: string }) {
   )
 }
 
+const MEMORY_SCOPE_LABELS: Record<ContactMemoryScope, string> = {
+  private: '个人结构化记忆',
+  group: '群聊记忆',
+  interpersonal: '与其他人的记忆',
+}
+
 export function ContactCardPage() {
   const { contactId } = useParams()
   const navigate = useNavigate()
@@ -60,6 +67,18 @@ export function ContactCardPage() {
   const conversation = useLiveQuery(
     () => (contactId ? db.conversations.where('contactId').equals(contactId).first() : undefined),
     [contactId],
+  )
+  const structuredMemories = useLiveQuery(
+    () => (contactId ? db.contactMemories.where('contactId').equals(contactId).reverse().sortBy('updatedAt') : []),
+    [contactId],
+  ) ?? []
+  const structuredMemoryGroups = structuredMemories.reduce(
+    (acc, memory) => {
+      const scope = memory.scope ?? 'private'
+      acc[scope].push(memory)
+      return acc
+    },
+    { private: [], group: [], interpersonal: [] } as Record<ContactMemoryScope, typeof structuredMemories>,
   )
   const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? []
   if (contact === undefined) return null
@@ -104,7 +123,7 @@ export function ContactCardPage() {
     .filter((intent) => intent.status === 'used')
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, 5)
-  const hasMemory = contact.memoryFacts || contact.memoryStyle || activePlans.length > 0
+  const hasMemory = contact.memoryFacts || contact.memoryStyle || activePlans.length > 0 || structuredMemories.length > 0
   const schedule = contact.schedule ?? []
   const activeOverrides = pruneExpiredOverrides(contact.scheduleOverrides ?? [], new Date())
 
@@ -257,6 +276,27 @@ export function ContactCardPage() {
                 </ul>
               </div>
             )}
+            {(['private', 'group', 'interpersonal'] as ContactMemoryScope[]).map((scope) => {
+              const memories = structuredMemoryGroups[scope].slice(0, 8)
+              if (memories.length === 0) return null
+              return (
+                <div key={scope}>
+                  <span className="text-xs text-gray-400">{MEMORY_SCOPE_LABELS[scope]} </span>
+                  <ul className="mt-1 space-y-1">
+                    {memories.map((memory) => (
+                      <li key={memory.id} className="rounded-lg bg-gray-50 px-2.5 py-1.5">
+                        <p>{memory.content}</p>
+                        {memory.tags.length > 0 && (
+                          <p className="mt-0.5 text-[11px] text-gray-400">
+                            {memory.tags.slice(0, 4).map((tag) => `#${tag}`).join(' ')}
+                          </p>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )
+            })}
           </div>
         ) : (
           <p className="text-sm text-gray-400">还没有形成记忆 多聊几句之后会自己记住一些关于你的事</p>

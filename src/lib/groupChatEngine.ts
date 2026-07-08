@@ -10,23 +10,25 @@ import {
   stripSpeakerNamePrefix,
 } from './groupChat'
 import { extractJsonObject } from './aiProtocol'
-import { CONTEXT_WINDOW_SIZE, maybeUpdateGroupMemory, recentMemoriesText } from './memory'
+import { CONTEXT_WINDOW_SIZE, activeUpcomingPlansText, maybeUpdateGroupMemory, nonGroupScopedMemoriesText } from './memory'
 import { knowledgeDigestText, processKnowledgeQueries } from './knowledgeBase'
 import { isModuleEnabled } from '../features'
 import { describeCurrentTime } from './time'
+import { describeCurrentSchedule } from './schedule'
 import { displayName } from './contact'
 import { previewForMessage } from './messagePreview'
 import { buildUserProfileText, useChatEngineStore } from './chatEngine'
 import { validateGroupDraft, validateGroupTurn } from './responseQuality'
 import { recentSocialEventsText, recordSocialEvent } from './socialEvents'
 import { useChatUiStore } from '../store/useChatUiStore'
+import { generateGroupStoryOutline, storyOutlinePromptSection } from './storyOutline'
 import type { AppSettings, Contact, Group, GroupAiBubble, Message, Sticker } from '../types'
 
 /** Load recent structured memories for each speaker in parallel. */
 async function loadSpeakerMemories(speakers: Contact[]): Promise<Map<string, string>> {
   const map = new Map<string, string>()
   const results = await Promise.all(speakers.map(async (s) => {
-    const text = await recentMemoriesText(s.id)
+    const text = await nonGroupScopedMemoriesText(s.id)
     return { id: s.id, text }
   }))
   for (const { id, text } of results) {
@@ -65,23 +67,26 @@ function parseGroupTurnDebugPayload(
   knowledgeQueries: string[],
   turnSummary: string,
   groupVibe: string,
+  storyOutline?: string,
 ): unknown {
   const trimmed = finalRaw.trim()
   const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
   const text = fenceMatch ? fenceMatch[1].trim() : trimmed
   try {
-    return JSON.parse(text)
+    const parsed = JSON.parse(text)
+    return parsed && typeof parsed === 'object' ? { ...(parsed as Record<string, unknown>), rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, storyOutline } : parsed
   } catch {
     const extracted = extractJsonObject(text)
     if (extracted) {
       try {
-        return JSON.parse(extracted)
+        const parsed = JSON.parse(extracted)
+        return parsed && typeof parsed === 'object' ? { ...(parsed as Record<string, unknown>), rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, storyOutline } : parsed
       } catch {
         // fall through
       }
     }
   }
-  return { rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, knowledgeQueries, turnSummary, groupVibe }
+  return { rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, knowledgeQueries, turnSummary, groupVibe, storyOutline }
 }
 
 function parseCompressedGroupMemory(raw: string): string | null {
@@ -323,6 +328,7 @@ async function runGroupAiTurn(
     const targetContext = targetedContextText(latestUserMessage, contactById, messageById, settings.userNickname)
     const recentEventsText = await recentSocialEventsText(members.map((m) => m.id), 4)
 
+    const speakerMemoriesMap = await loadSpeakerMemories(speakers)
     const systemPrompt = buildGroupRawChatPrompt({
       stylePrompt: settings.globalSystemPrompt,
       groupName: group.name,
@@ -340,21 +346,68 @@ async function runGroupAiTurn(
       worldviewText: isModuleEnabled('worldview') ? (settings.worldview || undefined) : undefined,
       knowledgeDigestText: isModuleEnabled('knowledgeBase') ? (knowledgeDigestText(knowledgeEntries) || undefined) : undefined,
       selfIterationGlobalText: isModuleEnabled('selfIteration') ? settings.selfIterationGlobalPrompt : undefined,
-      speakerMemoriesMap: await loadSpeakerMemories(speakers),
+      speakerMemoriesMap,
     })
 
     const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
+    const controller = new AbortController()
+    abortByConversation.set(conversationId, controller)
+
+    let storyOutline = ''
+    if (isModuleEnabled('storyOutline')) {
+      const speakerPremises = speakers
+        .map((speaker, i) => {
+          const recentMemo = speakerMemoriesMap.get(speaker.id)
+          return `发言人${i + 1}: ${displayName(speaker)}
+人设: ${speaker.systemPrompt || '自由发挥'}
+关系: ${speaker.relationshipBase || '朋友'}${speaker.relationshipDynamic ? `（${speaker.relationshipDynamic}）` : ''}
+记忆: ${speaker.memoryFacts || '暂无'}
+相处习惯: ${speaker.memoryStyle || '暂无'}
+当前状态: ${describeCurrentSchedule(speaker, new Date()) || '没有特别安排'}
+约定: ${activeUpcomingPlansText(speaker, new Date()) || '无'}${recentMemo ? `\n最近记忆碎片:\n${recentMemo}` : ''}`
+        })
+        .join('\n\n')
+      const premiseText = [
+        `【群名】${group.name}`,
+        `【群成员】\n${members.map((m) => `- ${displayName(m)}`).join('\n')}`,
+        group.memory ? `【群聊记忆】\n${group.memory}` : '',
+        group.vibe ? `【群聊氛围】\n${group.vibe}` : '',
+        `【当前时间】${describeCurrentTime(new Date())}`,
+        `【用户资料】${buildUserProfileText(settings)}`,
+        targetContext ? `【本轮定向上下文】\n${targetContext}` : '',
+        recentEventsText ? `【最近发生的事】\n${recentEventsText}` : '',
+        isModuleEnabled('worldview') && settings.worldview ? `【世界设定】\n${settings.worldview}` : '',
+        `【发言人逻辑前提】\n${speakerPremises}`,
+      ].filter(Boolean).join('\n\n')
+      try {
+        storyOutline = await generateGroupStoryOutline({
+          settings,
+          groupName: group.name,
+          members,
+          speakers,
+          premiseText,
+          history: recentHistory,
+          allowAiChatter: group.allowAiChatter ?? true,
+          energyLevel: group.energyLevel ?? 'normal',
+          signal: controller.signal,
+        })
+        if (storyOutline) console.log(`[story-outline][group] 群=${group.name}\n${storyOutline}`)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.warn(`[story-outline][group] 生成失败 群=${group.name}: ${message}`)
+      }
+      if (streamByConversation.get(conversationId) !== streamId) return
+    }
+
+    const outlineSection = storyOutlinePromptSection(storyOutline)
     // Group history needs an explicit "who said this" label per line — unlike
     // 1:1 chat where the single assistant persona is implicit from the system
     // prompt, a group turn's assistant block can contain several different
     // people, and role:"assistant" alone can't distinguish them across turns.
     const chatMessages: ChatMessage[] = coalesceConsecutiveRoles([
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: outlineSection ? `${systemPrompt}\n\n${outlineSection}` : systemPrompt },
       ...recentHistory.map((m): ChatMessage => formatGroupHistoryMessage(m, contactById, messageById, settings.userNickname)),
     ])
-
-    const controller = new AbortController()
-    abortByConversation.set(conversationId, controller)
     let rawText = await chatCompletion({
       apiKey: settings.apiKey,
       baseUrl: settings.baseUrl,
@@ -396,7 +449,11 @@ ${draftFeedback}
 【上一版草稿】
 ${rawText}
 
-必须重新输出群聊纯文本草稿，不要解释，不要输出JSON。尤其注意：AI互聊规则、群聊热闹程度、每行必须有（想法）和[心情]。`,
+必须重新输出群聊纯文本草稿，不要解释，不要输出JSON。
+第一行第一个字符必须是 <。
+每一行必须严格是: <人名>（想法）[心情]“消息内容”
+尤其注意：AI互聊规则、群聊热闹程度、每行必须有非空（想法）和非空[心情]，消息内容里不要残留人名冒号/括号/方括号。
+如果上一版反复使用同一个特殊词、梗、比喻、称号或外号，这一版必须减少复读，并自然收束或换到相邻话题。`,
           },
         ]),
         signal: controller.signal,
@@ -452,7 +509,7 @@ ${rawText}
       id: aiTurnId,
       conversationId,
       raw: finalRaw,
-      parsed: parseGroupTurnDebugPayload(rawText, draftFeedback, jsonRaw, finalRaw, bubbles, knowledgeQueries, turnSummary, groupVibe),
+      parsed: parseGroupTurnDebugPayload(rawText, draftFeedback, jsonRaw, finalRaw, bubbles, knowledgeQueries, turnSummary, groupVibe, storyOutline),
       knowledgeQueries,
       createdAt: Date.now(),
     })

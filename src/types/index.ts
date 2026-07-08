@@ -388,10 +388,16 @@ export type MemoryKind =
   | 'open_thread'
   | 'world_state'
 
+export type ContactMemoryScope = 'private' | 'group' | 'interpersonal'
+
 /** One structured fact / observation extracted from a conversation and stored in its own row. */
 export interface ContactMemory {
   id: string
   contactId: string
+  /** private=和用户私聊/普通个人记忆；group=群聊交流记忆；interpersonal=AI和其他AI之间的共同经历/关系记忆 */
+  scope?: ContactMemoryScope
+  groupId?: string
+  relatedContactIds?: string[]
   category: MemoryCategory
   kind: MemoryKind
   content: string

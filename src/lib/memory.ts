@@ -6,7 +6,7 @@ import { displayName } from './contact'
 import { describeCurrentTime, toDateKey } from './time'
 import { isModuleEnabled } from '../features'
 import { parseIntentsField, type ParsedIntent } from './intent'
-import type { AppSettings, Contact, ContactMemory, IntentItem, MemoryCategory, MemoryKind, Message, PlanItem } from '../types'
+import type { AppSettings, Contact, ContactMemory, ContactMemoryScope, IntentItem, MemoryCategory, MemoryKind, Message, PlanItem } from '../types'
 
 /** How many *new* messages accumulate before we bother refreshing memory. Keeps the extra API call rare. */
 export const MEMORY_UPDATE_INTERVAL = 10
@@ -140,7 +140,13 @@ interface ParsedMemoryItem {
   importance: number
   emotionalWeight: number
   confidence: number
+  scope?: ContactMemoryScope
+  relatedContactNames?: string[]
+  relatedContactIds?: string[]
+  groupId?: string
 }
+
+const VALID_MEMORY_SCOPES: Set<string> = new Set(['private', 'group', 'interpersonal'])
 
 function parseMemoryItemsField(raw: unknown): ParsedMemoryItem[] {
   if (!Array.isArray(raw)) return []
@@ -173,7 +179,15 @@ function parseMemoryItemsField(raw: unknown): ParsedMemoryItem[] {
     const emotionalWeight = clamp01((item as { emotionalWeight?: unknown }).emotionalWeight)
     const confidence = clamp01((item as { confidence?: unknown }).confidence)
     if (confidence < 0.5) continue // skip low-confidence items
-    result.push({ category: category as MemoryCategory, kind: kind as MemoryKind, content, tags, importance, emotionalWeight, confidence })
+    const scopeRaw = typeof (item as { scope?: unknown }).scope === 'string' ? (item as { scope: string }).scope.trim() : ''
+    const scope = VALID_MEMORY_SCOPES.has(scopeRaw) ? scopeRaw as ContactMemoryScope : undefined
+    const relatedContactNames = Array.isArray((item as { relatedContactNames?: unknown }).relatedContactNames)
+      ? (item as { relatedContactNames: unknown[] }).relatedContactNames
+          .filter((name): name is string => typeof name === 'string' && name.trim().length > 0)
+          .map((name) => name.trim().slice(0, 40))
+          .slice(0, 8)
+      : []
+    result.push({ category: category as MemoryCategory, kind: kind as MemoryKind, content, tags, importance, emotionalWeight, confidence, scope, relatedContactNames })
   }
   return result
 }
@@ -301,6 +315,7 @@ async function mergeMemoryItems(
   newItems: ParsedMemoryItem[],
   conversationId: string,
   now: number,
+  defaults: { scope?: ContactMemoryScope; groupId?: string; relatedContactIds?: string[] } = {},
 ): Promise<MergeMemoryStats> {
   const stats: MergeMemoryStats = { added: 0, updated: 0, skipped: 0 }
   if (newItems.length === 0) return stats
@@ -323,8 +338,18 @@ async function mergeMemoryItems(
 
   for (const item of newItems) {
     if (item.confidence < 0.5) continue
+    const scope = item.scope ?? defaults.scope ?? 'private'
+    const groupId = item.groupId ?? defaults.groupId
+    const relatedContactIds = Array.from(new Set([...(defaults.relatedContactIds ?? []), ...(item.relatedContactIds ?? [])]))
 
-    const candidates = byKind.get(item.kind) ?? []
+    const candidates = (byKind.get(item.kind) ?? []).filter((candidate) => {
+      const candidateScope = candidate.scope ?? 'private'
+      if (candidateScope !== scope) return false
+      if ((candidate.groupId ?? '') !== (groupId ?? '')) return false
+      if (relatedContactIds.length === 0) return true
+      const existingRelated = candidate.relatedContactIds ?? []
+      return relatedContactIds.some((id) => existingRelated.includes(id))
+    })
     let bestMatch: (typeof existing)[number] | null = null
     let bestScore = 0
 
@@ -360,12 +385,18 @@ async function mergeMemoryItems(
         confidence: mergedConfidence,
         updatedAt: now,
         sourceConversationId: conversationId,
+        scope,
+        groupId,
+        relatedContactIds: Array.from(new Set([...(bestMatch.relatedContactIds ?? []), ...relatedContactIds])),
       })
       stats.updated++
     } else {
       toAdd.push({
         id: uuid(),
         contactId,
+        scope,
+        groupId,
+        relatedContactIds,
         category: item.category,
         kind: item.kind,
         content: item.content,
@@ -565,12 +596,28 @@ export async function maybeUpdateMemory(
  *  Sorted by a composite score: importance × 0.6 + recency × 0.4.
  *  Retrieved memories get their lastUsedAt and usageCount bumped. */
 export async function recentMemoriesText(contactId: string, limit = 15): Promise<string> {
+  return recentMemoriesTextByScope(contactId, limit, { includeScopes: ['private'] })
+}
+
+export async function recentMemoriesTextByScope(
+  contactId: string,
+  limit = 15,
+  opts: { includeScopes?: ContactMemoryScope[]; excludeScopes?: ContactMemoryScope[]; title?: string } = {},
+): Promise<string> {
   try {
     const now = Date.now()
-    const items = await db.contactMemories
+    let items = await db.contactMemories
       .where('contactId')
       .equals(contactId)
       .toArray()
+    const include = opts.includeScopes ? new Set(opts.includeScopes) : null
+    const exclude = opts.excludeScopes ? new Set(opts.excludeScopes) : null
+    items = items.filter((item) => {
+      const scope = item.scope ?? 'private'
+      if (include && !include.has(scope)) return false
+      if (exclude && exclude.has(scope)) return false
+      return true
+    })
     if (items.length === 0) return ''
 
     // Composite score: importance (60%) + recency (40%).
@@ -618,10 +665,25 @@ export async function recentMemoriesText(contactId: string, limit = 15): Promise
       const lines = list.map((item) => `- ${item.content}`)
       blocks.push(`【${label}】\n${lines.join('\n')}`)
     }
-    return blocks.join('\n\n')
+    const text = blocks.join('\n\n')
+    return opts.title ? `【${opts.title}】\n${text}` : text
   } catch {
     return ''
   }
+}
+
+export async function socialMemoriesText(contactId: string, limit = 12): Promise<string> {
+  return recentMemoriesTextByScope(contactId, limit, {
+    includeScopes: ['group', 'interpersonal'],
+    title: '群聊与朋友记忆',
+  })
+}
+
+export async function nonGroupScopedMemoriesText(contactId: string, limit = 12): Promise<string> {
+  return recentMemoriesTextByScope(contactId, limit, {
+    excludeScopes: ['group'],
+    title: '个人与朋友关系记忆',
+  })
 }
 
 export async function resetMemory(contactId: string): Promise<void> {
@@ -659,7 +721,9 @@ function buildGroupMemoryUpdatePrompt(opts: {
   transcript: string
   currentTimeText: string
   speakers: Contact[]
+  allMembers: Contact[]
 }): string {
+  const allMemberNames = opts.allMembers.map((c) => c.name).join('、')
   const speakerBlocks = opts.speakers
     .map(
       (c, i) => `发言人${i + 1}: ${c.name}
@@ -669,10 +733,13 @@ function buildGroupMemoryUpdatePrompt(opts: {
     )
     .join('\n\n')
 
-  return `你是群聊记忆整理器 帮群聊"${opts.groupName}"里的每个角色更新对用户("对方")的记忆 输出JSON 不要有额外文字
+  return `你是群聊记忆整理器 帮群聊"${opts.groupName}"里的角色更新记忆 输出JSON 不要有额外文字
 
 【当前时间】
 ${opts.currentTimeText}
+
+【群成员】
+${allMemberNames}
 
 群聊记录:
 ${opts.transcript}
@@ -681,14 +748,17 @@ ${opts.transcript}
 ${speakerBlocks}
 
 输出:
-{"updates":[{"facts":"...","style":"...","plans":[{"text":"...","date":"YYYY-MM-DD或空字符串"}],"memoryItems":[{"category":"基础信息","kind":"user_fact","content":"...","tags":[],"importance":0.7,"emotionalWeight":0.3,"confidence":0.9}]}]}
+{"updates":[{"facts":"...","style":"...","plans":[{"text":"...","date":"YYYY-MM-DD或空字符串"}],"memoryItems":[{"category":"基础信息","kind":"user_fact","content":"...","tags":[],"importance":0.7,"emotionalWeight":0.3,"confidence":0.9}],"groupMemoryItems":[{"category":"话题历史","kind":"general","content":"...","tags":[],"importance":0.6,"emotionalWeight":0.2,"confidence":0.8}],"interpersonalMemoryItems":[{"category":"重要事件","kind":"relationship_event","content":"...","relatedContactNames":["雪乃"],"tags":[],"importance":0.7,"emotionalWeight":0.4,"confidence":0.85}]}]}
 
 要求:
 - updates数组顺序和上面发言人顺序一致 数量一致
 - facts客观信息≤200字 style相处语气≤150字
 - 没有新增内容的就原样返回已知信息 不要清空
 ${plansPromptFragment()}
-- memoryItems: 可选 每个发言人从自己能看到的聊天里提取的具体记忆条目 规则和1:1聊天记忆完全一样(含防污染规则: AI编造的内容不能记成user_fact 角色承诺记成character_promise 不确定就记general或跳过) 没有新素材就空数组
+- memoryItems: 只记录“该角色和用户”的记忆，规则和1:1聊天记忆一样。没有新素材就空数组。
+- groupMemoryItems: 记录“该角色知道这个群里发生/聊过什么”的群聊交流记忆，包含群成员名字和话题，例如“雪乃和柚柚在群里讨论过……”；不要重复写进memoryItems。
+- interpersonalMemoryItems: 只给本轮实际发言/被直接回应/被点名的角色记录“自己和其他AI成员做了什么、关系如何、共同经历是什么”。必须填写relatedContactNames，名字只能来自群成员。未参与聊天的人这里给空数组。
+- 如果用户提到某个群成员名字，必须把它当作群成员名字处理，不要当作番剧/二次元词汇。
 - 只输出JSON 不要markdown代码块标记`
 }
 
@@ -697,6 +767,8 @@ interface GroupMemoryUpdate {
   style: string
   plans: ParsedPlan[]
   memoryItems: ParsedMemoryItem[]
+  groupMemoryItems: ParsedMemoryItem[]
+  interpersonalMemoryItems: ParsedMemoryItem[]
 }
 
 function parseGroupMemoryResponse(raw: string, expectedCount: number): GroupMemoryUpdate[] | null {
@@ -715,12 +787,23 @@ function parseGroupMemoryResponse(raw: string, expectedCount: number): GroupMemo
         style: u.style.trim(),
         plans: parsePlansField(u.plans),
         memoryItems: parseMemoryItemsField((u as Record<string, unknown>).memoryItems),
+        groupMemoryItems: parseMemoryItemsField((u as Record<string, unknown>).groupMemoryItems),
+        interpersonalMemoryItems: parseMemoryItemsField((u as Record<string, unknown>).interpersonalMemoryItems),
       })
     }
     return result
   } catch {
     return null
   }
+}
+
+function attachRelatedContactIds(items: ParsedMemoryItem[], memberByName: Map<string, Contact>): ParsedMemoryItem[] {
+  return items.map((item) => {
+    const ids = (item.relatedContactNames ?? [])
+      .map((name) => memberByName.get(name)?.id)
+      .filter((id): id is string => !!id)
+    return { ...item, relatedContactIds: Array.from(new Set([...(item.relatedContactIds ?? []), ...ids])) }
+  })
 }
 
 /** Group-chat memory — no warmth scoring (intentional: group dynamics are too complex for a single score). */
@@ -747,9 +830,10 @@ export async function maybeUpdateGroupMemory(
           .map((m) => m.speakerContactId),
       ),
     )
-    const speakers = speakerIds.map((id) => memberById.get(id)).filter((c): c is Contact => !!c)
+    const directParticipantIds = new Set(speakerIds)
+    const targets = members
 
-    if (speakers.length === 0) {
+    if (targets.length === 0) {
       await db.groups.update(groupId, { memoryMessageCursor: allMessages.length })
       return
     }
@@ -765,7 +849,8 @@ export async function maybeUpdateGroupMemory(
             groupName: group.name,
             transcript: formatGroupMessagesForMemory(newMessages, memberById, settings.userNickname),
             currentTimeText: describeCurrentTime(new Date()),
-            speakers,
+            speakers: targets,
+            allMembers: members,
           }),
         },
         { role: 'user', content: '请生成' },
@@ -773,21 +858,29 @@ export async function maybeUpdateGroupMemory(
       jsonMode: true,
     })
 
-    const updates = parseGroupMemoryResponse(raw, speakers.length)
+    const updates = parseGroupMemoryResponse(raw, targets.length)
     if (!updates) {
       await db.groups.update(groupId, { memoryMessageCursor: allMessages.length })
       return
     }
 
     const now = Date.now()
-    for (let i = 0; i < speakers.length; i++) {
-      const contact = speakers[i]
+    const memberByName = new Map(members.map((member) => [displayName(member), member]))
+    for (const member of members) memberByName.set(member.name, member)
+    for (let i = 0; i < targets.length; i++) {
+      const contact = targets[i]
       const update = updates[i]
 
       // Write structured memory items for this speaker (deduped).
-      const memStats = await mergeMemoryItems(contact.id, update.memoryItems, conversationId, now)
-      if (memStats.added > 0 || memStats.updated > 0) {
-        console.log(`[memory] 群聊结构化记忆 ${contact.name}: +${memStats.added} 更新${memStats.updated}`)
+      const privateStats = await mergeMemoryItems(contact.id, update.memoryItems, conversationId, now, { scope: 'private' })
+      const groupStats = await mergeMemoryItems(contact.id, update.groupMemoryItems, conversationId, now, { scope: 'group', groupId })
+      const interpersonalItems = directParticipantIds.has(contact.id)
+        ? attachRelatedContactIds(update.interpersonalMemoryItems, memberByName)
+        : []
+      const interpersonalStats = await mergeMemoryItems(contact.id, interpersonalItems, conversationId, now, { scope: 'interpersonal', groupId })
+      const changed = privateStats.added + privateStats.updated + groupStats.added + groupStats.updated + interpersonalStats.added + interpersonalStats.updated
+      if (changed > 0) {
+        console.log(`[memory] 群聊结构化记忆 ${contact.name}: 私聊+${privateStats.added}/更${privateStats.updated} 群聊+${groupStats.added}/更${groupStats.updated} 人际+${interpersonalStats.added}/更${interpersonalStats.updated}`)
       }
 
       // character_promise items → also feed into upcomingPlans.

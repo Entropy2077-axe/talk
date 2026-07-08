@@ -5,7 +5,7 @@ import { chatCompletion, coalesceConsecutiveRoles, type ChatMessage } from './de
 import { extractJsonObject, parseAiResponse, typingDelayMs } from './aiProtocol'
 import { formatSpeechSamplesForScene, buildRawChatPrompt, buildJsonConversionPrompt } from './prompt'
 import { isModuleEnabled } from '../features'
-import { CONTEXT_WINDOW_SIZE, activeUpcomingPlansText, maybeUpdateMemory, recentMemoriesText } from './memory'
+import { CONTEXT_WINDOW_SIZE, activeUpcomingPlansText, maybeUpdateMemory, recentMemoriesText, socialMemoriesText } from './memory'
 import { activeIntentPrompt, activeIntents, markIntentsUsed } from './intent'
 import { describeCurrentTime, ageFromBirthday } from './time'
 import { describeCurrentSchedule, describeUpcomingScheduleText, pruneExpiredOverrides } from './schedule'
@@ -312,6 +312,15 @@ async function runAiTurn(
     // ---- Step 1: build context sections (no JSON protocol) ----
     const scheduleText = describeUpcomingScheduleText(contact, new Date())
     const recentMemories = await recentMemoriesText(contact.id)
+    const socialMemories = await socialMemoriesText(contact.id)
+    const relationshipText = `【你和对方的关系】${relationshipLine(
+      isModuleEnabled('relationship') ? (contact.relationshipBase || '朋友') : '朋友',
+      isModuleEnabled('relationship') ? (contact.relationshipDynamic || '') : '',
+      isModuleEnabled('relationship') ? (contact.warmth ?? 0) : 0,
+    )}`
+    const userMemoryText = `【你对TA的了解】${contact.memoryFacts || '（刚开始聊）'}`
+    const habitText = `【相处习惯】${contact.memoryStyle || '（还没有形成习惯）'}`
+    const situationText = `【当前情境】现在: ${describeCurrentTime(new Date())}。对方: ${buildUserProfileText(settings)}。${activeMood ? `你的心情: ${activeMood}。` : ''}【日程】${describeCurrentSchedule(contact, new Date()) ? `\n当前: ${describeCurrentSchedule(contact, new Date())}` : '\n当前: 暂无安排'}${scheduleText ? `\n接下来:\n${scheduleText}` : '\n接下来: 暂无安排'}${activeUpcomingPlansText(contact, new Date()) ? `\n约定: ${activeUpcomingPlansText(contact, new Date())}` : ''}${recentEventsText ? `\n最近: ${recentEventsText}` : ''}`
     const contextSections = buildRawChatPrompt({
       name: contact.name,
       persona: contact.systemPrompt,
@@ -323,14 +332,10 @@ async function runAiTurn(
       worldviewText: isModuleEnabled('worldview') ? (settings.worldview || undefined) : undefined,
       latestUserText: _triggeringUserText,
       recentContext: [
-        `【你和对方的关系】${relationshipLine(
-          isModuleEnabled('relationship') ? (contact.relationshipBase || '朋友') : '朋友',
-          isModuleEnabled('relationship') ? (contact.relationshipDynamic || '') : '',
-          isModuleEnabled('relationship') ? (contact.warmth ?? 0) : 0,
-        )}`,
-        `【你对TA的了解】${contact.memoryFacts || '（刚开始聊）'}`,
-        `【相处习惯】${contact.memoryStyle || '（还没有形成习惯）'}`,
-        `【当前情境】现在: ${describeCurrentTime(new Date())}。对方: ${buildUserProfileText(settings)}。${activeMood ? `你的心情: ${activeMood}。` : ''}【日程】${describeCurrentSchedule(contact, new Date()) ? `\n当前: ${describeCurrentSchedule(contact, new Date())}` : '\n当前: 暂无安排'}${scheduleText ? `\n接下来:\n${scheduleText}` : '\n接下来: 暂无安排'}${activeUpcomingPlansText(contact, new Date()) ? `\n约定: ${activeUpcomingPlansText(contact, new Date())}` : ''}${recentEventsText ? `\n最近: ${recentEventsText}` : ''}`,
+        relationshipText,
+        userMemoryText,
+        habitText,
+        situationText,
       ].filter(Boolean).join('\n\n'),
       activeIntentText: injectedIntentText,
       stickerNames: stickers.map((s) => s.name),
@@ -340,8 +345,10 @@ async function runAiTurn(
     })
 
     const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
+    const controller = new AbortController()
+    abortByConversation.set(conversationId, controller)
     const chatMessages: ChatMessage[] = coalesceConsecutiveRoles([
-      { role: 'system', content: contextSections },
+      { role: 'system', content: [contextSections, socialMemories].filter(Boolean).join('\n\n') },
       ...recentHistory.map((m): ChatMessage => {
         if (m.type === 'sticker') return formatStructuredHistoryEvent(m, 'sticker')
         if (m.type === 'link') return formatStructuredHistoryEvent(m, 'link')
@@ -350,9 +357,6 @@ async function runAiTurn(
         return { role: m.role, content: m.content }
       }),
     ])
-
-    const controller = new AbortController()
-    abortByConversation.set(conversationId, controller)
 
     // ---- Step 1: main model generates raw text (no JSON) ----
     const rawText = await chatCompletion({

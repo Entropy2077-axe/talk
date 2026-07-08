@@ -45,12 +45,12 @@ export const useSettingsStore = create<SettingsState>()(
       moodExpiryMs: 30 * 60 * 1000,
       selfIterationGlobalPrompt: '',
       adminModeEnabled: false,
-      enabledModules: ['shop', 'warehouse', 'worldview', 'knowledgeBase', 'relationship', 'personalityTraits', 'mood', 'intent'],
+      enabledModules: ['shop', 'warehouse', 'worldview', 'knowledgeBase', 'relationship', 'personalityTraits', 'mood', 'intent', 'storyOutline'],
       setSettings: (patch) => set(patch),
     }),
     {
       name: 'talk-settings',
-      version: 2,
+      version: 3,
       migrate: (persisted, version) => {
         const next = persisted as Partial<SettingsState>
         if (version < 1 && Array.isArray(next.enabledModules) && !next.enabledModules.includes('intent')) {
@@ -58,6 +58,9 @@ export const useSettingsStore = create<SettingsState>()(
         }
         if (version < 2 && Array.isArray(next.enabledModules)) {
           next.enabledModules = next.enabledModules.filter((id) => id !== 'validator')
+        }
+        if (version < 3 && Array.isArray(next.enabledModules) && !next.enabledModules.includes('storyOutline')) {
+          next.enabledModules = [...next.enabledModules, 'storyOutline']
         }
         if (typeof next.selfIterationGlobalPrompt !== 'string') {
           next.selfIterationGlobalPrompt = ''

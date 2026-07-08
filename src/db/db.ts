@@ -113,6 +113,11 @@ export class TalkDB extends Dexie {
     this.version(13).stores({
       contactMemories: 'id, contactId, kind, category, createdAt',
     })
+    // Structured memories gain optional scope/group/related-contact metadata.
+    // Existing rows remain valid; missing scope is treated as private.
+    this.version(14).stores({
+      contactMemories: 'id, contactId, scope, groupId, kind, category, createdAt, *relatedContactIds',
+    })
   }
 }
 

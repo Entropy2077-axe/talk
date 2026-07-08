@@ -173,10 +173,11 @@ export function SkyEyePage() {
                           </pre>
                         </div>
                         <div>
-                          <p className="mb-1 text-xs text-gray-400">记忆 / 内部意图 / 知识查询</p>
+                          <p className="mb-1 text-xs text-gray-400">剧情大纲 / 记忆 / 内部意图 / 知识查询</p>
                           <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap break-words rounded bg-white p-2 font-mono text-[11px] text-gray-700">
                             {JSON.stringify(
                               {
+                                storyOutline: parsed.storyOutline,
                                 memoryUpdate: parsed.memoryUpdate,
                                 injectedIntents: parsed.injectedIntents,
                                 knowledgeQueries: parsed.knowledgeQueries ?? turn.knowledgeQueries,
