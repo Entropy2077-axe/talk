@@ -18,7 +18,7 @@ import { useModuleEnabled, isModuleEnabled } from '../features'
 import { warmthLabel, relationshipLine } from '../lib/relationship'
 import { buildUserProfileText } from '../lib/chatEngine'
 import { useSettingsStore } from '../store/useSettingsStore'
-import type { ContactMemoryScope } from '../types'
+import type { ContactMemoryScope, ContactRelationLabel } from '../types'
 import { PERSONALITY_TRAIT_OPTIONS } from '../types'
 import { activeIntentPrompt, activeIntents, clearIntentQueue } from '../lib/intent'
 
@@ -72,6 +72,25 @@ export function ContactCardPage() {
     () => (contactId ? db.contactMemories.where('contactId').equals(contactId).reverse().sortBy('updatedAt') : []),
     [contactId],
   ) ?? []
+  const relationLinks = useLiveQuery(
+    async () => {
+      if (!contactId) return []
+      const links = await db.contactRelations
+        .filter((link) => link.fromContactId === contactId || link.toContactId === contactId)
+        .toArray()
+      const otherIds = Array.from(new Set(links.map((link) => (link.fromContactId === contactId ? link.toContactId : link.fromContactId))))
+      const contacts = await db.contacts.bulkGet(otherIds)
+      const contactById = new Map(contacts.filter((c): c is NonNullable<typeof c> => !!c).map((c) => [c.id, c]))
+      return links
+        .map((link) => {
+          const otherId = link.fromContactId === contactId ? link.toContactId : link.fromContactId
+          const other = contactById.get(otherId)
+          return other ? { id: link.id, name: displayName(other), label: link.label } : null
+        })
+        .filter((item): item is { id: string; name: string; label: ContactRelationLabel } => !!item)
+    },
+    [contactId],
+  ) ?? []
   const structuredMemoryGroups = structuredMemories.reduce(
     (acc, memory) => {
       const scope = memory.scope ?? 'private'
@@ -123,7 +142,7 @@ export function ContactCardPage() {
     .filter((intent) => intent.status === 'used')
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, 5)
-  const hasMemory = contact.memoryFacts || contact.memoryStyle || activePlans.length > 0 || structuredMemories.length > 0
+  const hasMemory = contact.memoryFacts || contact.memoryStyle || activePlans.length > 0 || structuredMemories.length > 0 || relationLinks.length > 0
   const schedule = contact.schedule ?? []
   const activeOverrides = pruneExpiredOverrides(contact.scheduleOverrides ?? [], new Date())
 
@@ -272,6 +291,16 @@ export function ContactCardPage() {
                 <ul className="mt-1 space-y-0.5">
                   {activePlans.map((p) => (
                     <li key={p.id}>{p.date ? `[${p.date}] ${p.text}` : p.text}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {relationLinks.length > 0 && (
+              <div>
+                <span className="text-xs text-gray-400">已知朋友关系 </span>
+                <ul className="mt-1 space-y-0.5">
+                  {relationLinks.map((link) => (
+                    <li key={link.id}>{link.name} 是TA的{link.label}</li>
                   ))}
                 </ul>
               </div>

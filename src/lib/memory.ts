@@ -6,7 +6,7 @@ import { displayName } from './contact'
 import { describeCurrentTime, toDateKey } from './time'
 import { isModuleEnabled } from '../features'
 import { parseIntentsField, type ParsedIntent } from './intent'
-import type { AppSettings, Contact, ContactMemory, ContactMemoryScope, IntentItem, MemoryCategory, MemoryKind, Message, PlanItem } from '../types'
+import type { AppSettings, Contact, ContactMemory, ContactMemoryScope, ContactRelationLabel, IntentItem, MemoryCategory, MemoryKind, Message, PlanItem } from '../types'
 
 /** How many *new* messages accumulate before we bother refreshing memory. Keeps the extra API call rare. */
 export const MEMORY_UPDATE_INTERVAL = 10
@@ -673,17 +673,79 @@ export async function recentMemoriesTextByScope(
 }
 
 export async function socialMemoriesText(contactId: string, limit = 12): Promise<string> {
-  return recentMemoriesTextByScope(contactId, limit, {
+  const structured = await recentMemoriesTextByScope(contactId, limit, {
     includeScopes: ['group', 'interpersonal'],
     title: '群聊与朋友记忆',
   })
+  const relations = await contactRelationMemoryText(contactId)
+  return [structured, relations].filter(Boolean).join('\n\n')
 }
 
 export async function nonGroupScopedMemoriesText(contactId: string, limit = 12): Promise<string> {
-  return recentMemoriesTextByScope(contactId, limit, {
+  const structured = await recentMemoriesTextByScope(contactId, limit, {
     excludeScopes: ['group'],
     title: '个人与朋友关系记忆',
   })
+  const relations = await contactRelationMemoryText(contactId)
+  return [structured, relations].filter(Boolean).join('\n\n')
+}
+
+export async function contactRelationMemoryText(contactId: string): Promise<string> {
+  try {
+    const links = await db.contactRelations
+      .filter((link) => link.fromContactId === contactId || link.toContactId === contactId)
+      .toArray()
+    if (links.length === 0) return ''
+    const otherIds = Array.from(new Set(links.map((link) => (link.fromContactId === contactId ? link.toContactId : link.fromContactId))))
+    const contacts = await db.contacts.bulkGet(otherIds)
+    const contactById = new Map(contacts.filter((c): c is Contact => !!c).map((c) => [c.id, c]))
+    const lines = links
+      .map((link) => {
+        const otherId = link.fromContactId === contactId ? link.toContactId : link.fromContactId
+        const other = contactById.get(otherId)
+        if (!other) return ''
+        return `- ${displayName(other)} 是你的${link.label}`
+      })
+      .filter(Boolean)
+    return lines.length > 0 ? `【已知朋友关系】\n${lines.join('\n')}` : ''
+  } catch {
+    return ''
+  }
+}
+
+export async function rememberInitialContactRelation(opts: {
+  fromContactId: string
+  toContactId: string
+  label: ContactRelationLabel
+  now?: number
+}): Promise<void> {
+  const now = opts.now ?? Date.now()
+  const [from, to] = await Promise.all([
+    db.contacts.get(opts.fromContactId),
+    db.contacts.get(opts.toContactId),
+  ])
+  if (!from || !to) return
+  const makeItem = (contactId: string, other: Contact): ContactMemory => ({
+    id: uuid(),
+    contactId,
+    scope: 'interpersonal',
+    relatedContactIds: [other.id],
+    category: '关系动态',
+    kind: 'relationship_event',
+    content: `${displayName(other)}是你的${opts.label}，这是创建角色时设定的朋友关系。`,
+    tags: ['朋友关系', opts.label, displayName(other)],
+    importance: 0.85,
+    emotionalWeight: 0.35,
+    confidence: 1,
+    sourceMessageIds: [],
+    createdAt: now,
+    updatedAt: now,
+    usageCount: 0,
+  })
+  await db.contactMemories.bulkAdd([
+    makeItem(opts.fromContactId, to),
+    makeItem(opts.toContactId, from),
+  ])
 }
 
 export async function resetMemory(contactId: string): Promise<void> {

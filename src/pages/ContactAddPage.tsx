@@ -13,6 +13,7 @@ import { randomAvatarColor } from '../lib/colors'
 import { AVATAR_EMOJIS } from '../lib/avatarEmojis'
 import { pickRandomTrait } from '../lib/randomTraits'
 import { initialWarmthForBase } from '../lib/relationship'
+import { rememberInitialContactRelation } from '../lib/memory'
 import { displayName } from '../lib/contact'
 import { pickAvatarCategory } from '../lib/avatarCategory'
 import { randomAnimeAvatar, searchPexelsPhoto } from '../lib/photoSearch'
@@ -202,6 +203,12 @@ export function ContactAddPage() {
           toContactId: row.targetContactId,
           label: row.label,
           createdAt: now,
+        })
+        await rememberInitialContactRelation({
+          fromContactId: id,
+          toContactId: row.targetContactId,
+          label: row.label,
+          now,
         })
       }
       navigate('/contacts')
