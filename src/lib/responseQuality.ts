@@ -1,5 +1,7 @@
 import { chatCompletion } from './deepseek'
 import { displayName } from './contact'
+import { activeUpcomingPlansText } from './memory'
+import { describeCurrentSchedule, describeUpcomingScheduleText } from './schedule'
 import type { AiBubble, AppSettings, Contact, GroupAiBubble } from '../types'
 
 interface QualityResult {
@@ -54,7 +56,7 @@ async function validateAndMaybeRepair(opts: {
   userPrompt: string
   raw: string
   signal?: AbortSignal
-}): Promise<{ raw: string; repaired: boolean; reason?: string }> {
+}): Promise<{ raw: string; repaired: boolean; reason?: string; detectedInvalid?: boolean }> {
   try {
     const judged = await chatCompletion({
       apiKey: opts.settings.apiKey,
@@ -68,7 +70,15 @@ async function validateAndMaybeRepair(opts: {
       ],
     })
     const result = parseQualityResult(judged)
-    if (!result || result.valid || !result.fixedRaw) return { raw: opts.raw, repaired: false, reason: result?.reason }
+    if (!result) {
+      return { raw: opts.raw, repaired: false }
+    }
+    if (result.valid) return { raw: opts.raw, repaired: false }
+    if (!result.fixedRaw) {
+      const reason = result.reason || 'invalid_without_fixedRaw'
+      console.warn('[quality] 判定无效但未提供fixedRaw，原样放行', reason)
+      return { raw: opts.raw, repaired: false, reason, detectedInvalid: true }
+    }
     return { raw: result.fixedRaw, repaired: true, reason: result.reason }
   } catch {
     return { raw: opts.raw, repaired: false }
@@ -83,10 +93,17 @@ export async function validatePrivateTurn(opts: {
   raw: string
   bubbles: AiBubble[]
   signal?: AbortSignal
-}): Promise<{ raw: string; repaired: boolean; reason?: string }> {
+}): Promise<{ raw: string; repaired: boolean; reason?: string; detectedInvalid?: boolean }> {
   const name = displayName(opts.contact)
+  const now = new Date()
+  const currentSchedule = describeCurrentSchedule(opts.contact, now)
+  const upcomingSchedule = describeUpcomingScheduleText(opts.contact, now)
+  const upcomingPlans = activeUpcomingPlansText(opts.contact, now)
+  const activeMood = opts.contact.mood?.text && Date.now() < opts.contact.mood.expiresAt ? opts.contact.mood.text : ''
   const systemPrompt = `You are a strict roleplay response reviewer. Output JSON only: {"valid":true/false,"reason":"short","fixedRaw":"optional"}.
-Check: (1) reply fits persona, (2) answers user, (3) no invented facts, (4) mood field is present and non-empty, (5) thought field is present and non-empty.
+Mandatory primary check: logical grounding. Decide whether the reply's inference is tightly supported by its premises: persona/identity, memory, relationship, mood, location, schedule/plans, recent events, and the latest user message.
+Then check: (1) reply fits persona, (2) answers user, (3) no invented facts, (4) mood field is present and non-empty, (5) thought field is present and non-empty.
+If the prose feels good but the premise→reply logic is weak, unsupported, contradictory, or loosely associated, it is invalid.
 If valid, return valid=true.
 If invalid, rewrite as fixedRaw. Must include mood and thought: {"messages":[{"type":"text","content":"..."}],"mood":"15字情绪","thought":"30字内心想法 和嘴上说的不一样"}. Keep it short.`
   const strictContinuityPrompt = `Extra invalid cases:
@@ -103,6 +120,10 @@ When rewriting, answer the latest user message first, keep it short, and admit a
 Persona: ${truncate(opts.contact.systemPrompt || '', 700)}
 Relationship: ${opts.contact.relationshipBase || '朋友'} ${truncate(opts.contact.relationshipDynamic || '', 160)}
 Memory/style: ${truncate(opts.contact.memoryStyle || opts.contact.memoryFacts || '', 260)}
+Current mood: ${activeMood || '(none)'}
+Current schedule/location: ${currentSchedule || '(none)'}
+Upcoming schedule: ${upcomingSchedule || '(none)'}
+Plans with user: ${upcomingPlans || '(none)'}
 Recent conversation:
 ${truncate(opts.recentConversationText || '(none)', 1200)}
 Latest user message: ${truncate(opts.latestUserText || '(background event)', 500)}
@@ -140,7 +161,7 @@ export async function optimizePrivateTurn(opts: {
       messages: [
         {
           role: 'system',
-          content: `你是${name}。优化以下回复草稿：让措辞更自然有趣、更符合人设。只修改messages里每条text的content文字，不要动JSON结构、不要合并或拆分messages数组、mood和thought必须保留原样。输出格式严格保持不变: {"messages":[{"type":"text","content":"..."}],"mood":"...","thought":"..."}\n\n人设: ${opts.contact.systemPrompt?.slice(0, 600)}\n关系: ${opts.contact.relationshipBase || '朋友'} ${opts.contact.relationshipDynamic || ''}\n对方: ${opts.latestUserText?.slice(0, 300)}`,
+          content: `你是${name}。优化以下回复草稿：逻辑和事实前提已经优先检查过，你只负责在不改变含义、不新增事实、不改关系/记忆/日程/身份判断的前提下，让措辞更自然有趣、更符合人设。只修改messages里每条text的content文字，不要动JSON结构、不要合并或拆分messages数组、mood和thought必须保留原样。输出格式严格保持不变: {"messages":[{"type":"text","content":"..."}],"mood":"...","thought":"..."}\n\n人设: ${opts.contact.systemPrompt?.slice(0, 600)}\n关系: ${opts.contact.relationshipBase || '朋友'} ${opts.contact.relationshipDynamic || ''}\n对方: ${opts.latestUserText?.slice(0, 300)}`,
         },
         { role: 'user', content: `原始JSON（只优化每条content的文字 其他不动）:\n${opts.raw.slice(0, 2000)}` },
       ],
@@ -166,7 +187,7 @@ export async function validateGroupTurn(opts: {
   raw: string
   bubbles: GroupAiBubble[]
   signal?: AbortSignal
-}): Promise<{ raw: string; repaired: boolean; reason?: string }> {
+}): Promise<{ raw: string; repaired: boolean; reason?: string; detectedInvalid?: boolean }> {
   const speakerText = opts.speakers
     .map((speaker, i) => `${i + 1}. ${displayName(speaker)}: ${truncate(speaker.systemPrompt || '', 260)}`)
     .join('\n')

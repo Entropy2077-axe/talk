@@ -336,7 +336,7 @@ export interface AppSettings {
   moodExpiryMs: number
   /** Validation mode: 'quality' = check+rewrite via utility model, 'optimize' = always re-feed to main model. */
   validatorMode: 'quality' | 'optimize'
-  /** Shared output of the self-iteration learner: expression habits, conversation style, and user expectation model. */
+  /** Shared output of the self-iteration learner: expression habits plus decontextualized user boundaries/preferences. */
   selfIterationGlobalPrompt: string
   selfIterationUpdatedAt?: number
   /** Feature-module toggles — see src/features/. Every module id listed here is active. */

@@ -13,7 +13,7 @@ import { cascadeDeleteContactSocialData } from '../lib/moments'
 import { removeContactFromAllGroups } from '../lib/groupChat'
 import { pruneExpiredOverrides, describeCurrentSchedule, describeUpcomingScheduleText, isPhoneAvailable } from '../lib/schedule'
 import { WEEKDAYS, describeCurrentTime } from '../lib/time'
-import { RELATIONSHIP_OPTIONS, formatSpeechSamplesForScene, buildRawChatPrompt, buildJsonConversionPrompt } from '../lib/prompt'
+import { RELATIONSHIP_OPTIONS, formatSpeechSamplesForScene, buildRawChatPromptParts, buildJsonConversionPrompt } from '../lib/prompt'
 import { useModuleEnabled, isModuleEnabled } from '../features'
 import { warmthLabel, relationshipLine } from '../lib/relationship'
 import { buildUserProfileText } from '../lib/chatEngine'
@@ -118,8 +118,8 @@ export function ContactCardPage() {
   const pendingEvents = contact.pendingEvents ?? []
   const previewActiveIntents = isModuleEnabled('intent') ? activeIntents(contact, now.getTime()) : []
   // ---- admin-mode prompt preview (two-step pipeline) ----
-  const mainModelPrompt = adminEnabled
-    ? buildRawChatPrompt({
+  const mainModelPromptParts = adminEnabled
+    ? buildRawChatPromptParts({
         name: contact.name,
         persona: contact.systemPrompt,
         stylePrompt: settings.globalSystemPrompt,
@@ -137,15 +137,13 @@ export function ContactCardPage() {
           `【你对TA的了解】${contact.memoryFacts || '（刚开始聊）'}`,
           `【相处习惯】${contact.memoryStyle || '（还没有形成习惯）'}`,
           `【当前情境】现在: ${describeCurrentTime(now)}。对方: ${buildUserProfileText(settings)}。${contact.mood?.text ? `你的心情: ${contact.mood.text}。` : ''}【日程】${describeCurrentSchedule(contact, now) ? `\n当前: ${describeCurrentSchedule(contact, now)}` : '\n当前: 暂无安排'}${describeUpcomingScheduleText(contact, now) ? `\n接下来:\n${describeUpcomingScheduleText(contact, now)}` : '\n接下来: 暂无安排'}${activeUpcomingPlansText(contact, now) ? `\n约定: ${activeUpcomingPlansText(contact, now)}` : ''}${pendingEvents.length > 0 ? `\n最近: ${pendingEvents.join('；')}` : ''}`,
-          formatSpeechSamplesForScene(contact.speechSamples, 'private', 3)
-            ? `【说话样例】\n${formatSpeechSamplesForScene(contact.speechSamples, 'private', 3)}`
-            : '',
         ].filter(Boolean).join('\n\n'),
         activeIntentText: activeIntentPrompt(previewActiveIntents),
         stickerNames: stickers.map((s) => s.name),
         mbti: contact.mbti || undefined,
+        speechSamplesText: formatSpeechSamplesForScene(contact.speechSamples, 'private', 3) || undefined,
       })
-    : ''
+    : null
   const conversionPrompt = adminEnabled
     ? buildJsonConversionPrompt('【AI的原始回复文字会放在这里】')
     : ''
@@ -388,9 +386,27 @@ export function ContactCardPage() {
                 <span className="ml-2 text-[10px] text-gray-400">生成自然语言回复 + 括号想法</span>
               </div>
               <div className="p-3">
-                <pre className="whitespace-pre-wrap break-words font-sans text-[11px] leading-relaxed text-gray-700">
-                  {mainModelPrompt}
-                </pre>
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-gray-200 bg-white">
+                    <div className="border-b border-gray-100 px-3 py-2">
+                      <p className="text-xs font-bold text-gray-900">逻辑</p>
+                      <p className="mt-0.5 text-[10px] text-gray-400">身份、记忆、地点、日程、心情、关系等硬前提，优先级最高</p>
+                    </div>
+                    <pre className="whitespace-pre-wrap break-words p-3 font-sans text-[11px] leading-relaxed text-gray-700">
+                      {mainModelPromptParts?.logic}
+                    </pre>
+                  </div>
+
+                  <div className="rounded-lg border border-gray-200 bg-gray-50">
+                    <div className="border-b border-gray-100 px-3 py-2">
+                      <p className="text-xs font-bold text-gray-700">感觉</p>
+                      <p className="mt-0.5 text-[10px] text-gray-400">在逻辑正确后再优化文笔、节奏、情绪和聊天感</p>
+                    </div>
+                    <pre className="whitespace-pre-wrap break-words p-3 font-sans text-[11px] leading-relaxed text-gray-600">
+                      {mainModelPromptParts?.feeling}
+                    </pre>
+                  </div>
+                </div>
               </div>
             </div>
 

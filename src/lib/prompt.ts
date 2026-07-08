@@ -386,6 +386,12 @@ export const RELATIONSHIP_OPTIONS = ['朋友', '暧昧对象', '恋人', '损友
 
 // ---- two-step generation: raw text → JSON conversion ----
 
+export interface RawChatPromptParts {
+  logic: string
+  feeling: string
+  full: string
+}
+
 /**
  * Step 1: Prompt the main model to generate natural chat text.
  * No JSON — just raw text with parenthetical private thoughts.
@@ -405,10 +411,31 @@ export function buildRawChatPrompt(opts: {
   stickerNames: string[]
   mbti?: string
   recentMemoriesText?: string
+  speechSamplesText?: string
 }): string {
+  return buildRawChatPromptParts(opts).full
+}
+
+export function buildRawChatPromptParts(opts: {
+  name: string
+  persona: string
+  stylePrompt: string
+  relationshipBase?: string
+  personalityTrait?: string
+  worldviewText?: string
+  recentContext: string
+  latestUserText?: string
+  activeIntentText?: string
+  selfIterationGlobalText?: string
+  selfIterationContactText?: string
+  stickerNames: string[]
+  mbti?: string
+  recentMemoriesText?: string
+  speechSamplesText?: string
+}): RawChatPromptParts {
   const worldviewLine = opts.worldviewText ? `这个世界: ${opts.worldviewText}。` : ''
   const traitLine = opts.personalityTrait && opts.personalityTrait !== '无'
-    ? `\n你的性格特质: ${opts.personalityTrait}（影响你的情感反应方式）`
+    ? `\n你的性格特质: ${opts.personalityTrait}（这是行为前提 会影响你如何理解关系、情绪和反应）`
     : ''
   const stickerHint = opts.stickerNames.length > 0
     ? `\n可用的表情包: ${opts.stickerNames.join('、')}。如果你想发某个表情包 在对应位置写 [sticker:表情名]`
@@ -419,8 +446,8 @@ export function buildRawChatPrompt(opts: {
 
   const mbtiLine = opts.mbti ? ` MBTI: ${opts.mbti}（你的性格底层框架 一切反应和决定都要符合这个类型）` : ''
   const selfIterationText = [
-    opts.selfIterationGlobalText ? `【用户相处模型 - 全局】\n${opts.selfIterationGlobalText}` : '',
-    opts.selfIterationContactText ? `【你和用户的自我迭代记录】\n${opts.selfIterationContactText}` : '',
+    opts.selfIterationGlobalText ? `【用户边界与偏好 - 全局】\n${opts.selfIterationGlobalText}` : '',
+    opts.selfIterationContactText ? `【你和用户的关系协商记录】\n${opts.selfIterationContactText}` : '',
   ].filter(Boolean).join('\n\n')
   const latestUserLine = opts.latestUserText ? `\n\n【本轮最新消息】\n${opts.latestUserText}` : ''
   const pragmaticRules = `\n\nConsistency and pragmatic-humor rules:
@@ -430,21 +457,39 @@ export function buildRawChatPrompt(opts: {
 - If you got the context wrong, admit it naturally and correct course.
 - Watch for pragmatic humor: if you asked for a specific answer and the user gives an over-broad, tautological, deliberately literal, or absurd answer, treat it as likely a joke. Example: you ask what they want to eat, they say "I want to eat food/rice"; catch the joke or tease lightly before continuing.`
   const memoriesLine = opts.recentMemoriesText ? `\n\n【最近的记忆碎片】\n${opts.recentMemoriesText}` : ''
-  return `你是${opts.name}。${mbtiLine}${worldviewLine}
-${stylePrompt}${traitLine}
-${opts.recentContext}${memoriesLine}${latestUserLine}${pragmaticRules}${selfIterationText ? `\n\n${selfIterationText}` : ''}${opts.activeIntentText ? `\n\n${opts.activeIntentText}` : ''}${stickerHint}
+  const speechSamplesLine = opts.speechSamplesText ? `\n\n【说话样例】\n${opts.speechSamplesText}` : ''
+
+  const logic = `【逻辑 — 第一优先级】
+先判断“前提 → 回复”的逻辑关系，再考虑文笔。身份、记忆、地点、日程、心情、关系、最近事件、用户本轮话语都属于硬前提；如果这些前提和感觉/文风冲突，必须服从逻辑。
+
+【你是谁】
+你是${opts.name}。${mbtiLine}${worldviewLine}
+${opts.persona || '（自由发挥 扮演一个普通朋友）'}${traitLine}
+
+${opts.recentContext}${memoriesLine}${latestUserLine}${pragmaticRules}${selfIterationText ? `\n\n${selfIterationText}` : ''}${opts.activeIntentText ? `\n\n${opts.activeIntentText}` : ''}
 
 一致性要求:
 - 先回应【本轮最新消息】本身，尤其是用户在质疑、纠正、反问你的时候，不要跳回旧话题继续演。
 - 严格区分“你自己的身份”和“对话里提到的第三方”。用户问“你是老师吗/你不是老师吧”这类问题时，必须按你的人设直接澄清。
 - 不要凭空编造上课、老师、课堂、现实见面、过去约定等具体场景；只有人设、记忆、最近聊天明确出现过才可以提。
-- 如果刚才说错、看错或接岔了，可以自然承认并修正，不要硬圆。
+- 如果刚才说错、看错或接岔了，可以自然承认并修正，不要硬圆。`
+
+  const feeling = `【感觉 — 第二优先级】
+只在【逻辑】已经成立的前提下优化文笔、节奏、情绪和聊天感。不要为了好听、有戏剧性、撒娇、吐槽或搞笑而改变事实前提。
+
+${stylePrompt}${speechSamplesLine}${stickerHint}
 
 回复要求:
 - 用换行把长回复拆成短句 每句占一行
 - 用括号()写内心想法 10字以上 第一人称"我" 不能出现"用户""对方" 想到什么写什么 比如"好啊(今天天气不错心情也跟着好了)" "嗯(他难得主动找我 有点意外)"
 - 至少1个括号想法
 - 不要输出JSON 就正常打字聊天`
+
+  return {
+    logic,
+    feeling,
+    full: `${logic}\n\n${feeling}`,
+  }
 }
 
 /**

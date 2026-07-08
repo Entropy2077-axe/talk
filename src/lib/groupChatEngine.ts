@@ -300,6 +300,8 @@ async function runGroupAiTurn(
         console.warn(`[group] 回复已被质量校验重写 群=${group.name} 原因=${checked.reason ?? 'unknown'}`)
         finalRaw = checked.raw
         ;({ bubbles, knowledgeQueries } = parseGroupAiResponse(finalRaw, speakers.length))
+      } else if (checked.detectedInvalid) {
+        console.warn(`[group] 审查发现问题但未能修复 群=${group.name} 原因=${checked.reason ?? 'unknown'}`)
       }
     }
     console.log(`[group] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 群=${group.name}`)

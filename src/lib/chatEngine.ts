@@ -135,7 +135,7 @@ function parseAiTurnDebugPayload(opts: {
   knowledgeQueries: string[]
   mood?: string
   thought?: string
-  validator: { enabled: boolean; mode: AppSettings['validatorMode']; repaired: boolean; optimized: boolean; reason?: string }
+  validator: { enabled: boolean; mode: AppSettings['validatorMode']; repaired: boolean; optimized: boolean; reason?: string; detectedInvalid?: boolean }
   injectedIntents: ReturnType<typeof activeIntents>
 }): unknown {
   const { finalRaw, jsonRaw, rawText, bubbles, knowledgeQueries, mood, thought, validator, injectedIntents } = opts
@@ -330,14 +330,12 @@ async function runAiTurn(
         `【你对TA的了解】${contact.memoryFacts || '（刚开始聊）'}`,
         `【相处习惯】${contact.memoryStyle || '（还没有形成习惯）'}`,
         `【当前情境】现在: ${describeCurrentTime(new Date())}。对方: ${buildUserProfileText(settings)}。${activeMood ? `你的心情: ${activeMood}。` : ''}【日程】${describeCurrentSchedule(contact, new Date()) ? `\n当前: ${describeCurrentSchedule(contact, new Date())}` : '\n当前: 暂无安排'}${scheduleText ? `\n接下来:\n${scheduleText}` : '\n接下来: 暂无安排'}${activeUpcomingPlansText(contact, new Date()) ? `\n约定: ${activeUpcomingPlansText(contact, new Date())}` : ''}${recentEventsText ? `\n最近: ${recentEventsText}` : ''}`,
-        formatSpeechSamplesForScene(contact.speechSamples, 'private', 3)
-          ? `【说话样例】\n${formatSpeechSamplesForScene(contact.speechSamples, 'private', 3)}`
-          : '',
       ].filter(Boolean).join('\n\n'),
       activeIntentText: injectedIntentText,
       stickerNames: stickers.map((s) => s.name),
       mbti: contact.mbti || undefined,
       recentMemoriesText: recentMemories || undefined,
+      speechSamplesText: formatSpeechSamplesForScene(contact.speechSamples, 'private', 3) || undefined,
     })
 
     const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
@@ -390,31 +388,34 @@ async function runAiTurn(
       repaired: false,
       optimized: false,
       reason: undefined as string | undefined,
+      detectedInvalid: false,
     }
 
-    // Validator module — two modes, both skipped when the module is off.
+    // Validator module — logic check is mandatory for every validator mode.
     if (validatorDebug.enabled && bubbles.length > 0) {
-      if (settings.validatorMode === 'quality') {
-        // Mode 1: quality check via utility model, rewrite on failure.
-        const checked = await validatePrivateTurn({
-          settings,
-          contact,
-          latestUserText: _triggeringUserText,
-          recentConversationText: formatRecentConversationForReview(recentHistory, contact),
-          raw: finalRaw,
-          bubbles,
-          signal: controller.signal,
-        })
-        if (streamByConversation.get(conversationId) !== streamId) return
-        if (checked.repaired) {
-          console.warn(`[chat] 校验器重写 对方=${displayName(contact)} 原因=${checked.reason ?? 'unknown'}`)
-          validatorDebug.repaired = true
-          validatorDebug.reason = checked.reason
-          finalRaw = checked.raw
-          ;({ bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw))
-        }
-      } else {
-        // Mode 2: force-optimize — re-feed to main model for improvement.
+      const checked = await validatePrivateTurn({
+        settings,
+        contact,
+        latestUserText: _triggeringUserText,
+        recentConversationText: formatRecentConversationForReview(recentHistory, contact),
+        raw: finalRaw,
+        bubbles,
+        signal: controller.signal,
+      })
+      if (streamByConversation.get(conversationId) !== streamId) return
+      validatorDebug.reason = checked.reason
+      if (checked.repaired) {
+        console.warn(`[chat] 校验器重写 对方=${displayName(contact)} 原因=${checked.reason ?? 'unknown'}`)
+        validatorDebug.repaired = true
+        finalRaw = checked.raw
+        ;({ bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw))
+      } else if (checked.detectedInvalid) {
+        validatorDebug.detectedInvalid = true
+        console.warn(`[chat] 审查发现问题但未能修复 对方=${displayName(contact)} 原因=${checked.reason ?? 'unknown'}`)
+      }
+
+      if (settings.validatorMode === 'optimize' && bubbles.length > 0) {
+        // Mode 2: after mandatory logic check, re-feed to main model for wording improvement.
         const optimized = await optimizePrivateTurn({
           settings,
           contact,

@@ -20,30 +20,21 @@ export function ValidatorSettingsPage() {
         <div className="mx-4 mt-3 overflow-hidden rounded-xl bg-white">
           <div className="flex items-center justify-between border-b border-gray-100 px-4 py-4">
             <div className="flex-1 pr-4">
-              <p className="text-[15px] font-medium text-gray-900">合格性鉴定</p>
+              <p className="text-[15px] font-medium text-gray-900">检查逻辑（必选）</p>
               <p className="mt-0.5 text-xs text-gray-400">
-                多功能模型判断是否合格 → 不合格则重写。消耗较少 token。
+                必审 AI 回复的前提和推论是否紧密：身份、记忆、地点、日程、心情、关系等不能松散乱接。
               </p>
             </div>
-            <button
-              onClick={() => setSettings({ validatorMode: 'quality' })}
-              className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors ${
-                isQuality ? 'bg-[#07c160]' : 'bg-gray-200'
-              }`}
-            >
-              <span
-                className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
-                  isQuality ? 'translate-x-6' : 'translate-x-1'
-                }`}
-              />
-            </button>
+            <span className="shrink-0 rounded-full bg-[#07c160]/10 px-2.5 py-1 text-xs font-medium text-[#07c160]">
+              已启用
+            </span>
           </div>
 
           <div className="flex items-center justify-between px-4 py-4">
             <div className="flex-1 pr-4">
               <p className="text-[15px] font-medium text-gray-900">强制优化</p>
               <p className="mt-0.5 text-xs text-gray-400">
-                每次回复直接扔回主模型优化。质量更高，消耗更多 token。
+                先检查逻辑，再把合格或已修复的回复扔回主模型润色。质量更高，消耗更多 token。
               </p>
             </div>
             <button

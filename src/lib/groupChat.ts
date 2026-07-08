@@ -114,7 +114,7 @@ export function buildGroupSystemPrompt(opts: {
       const factsFallback = `（还没有具体的聊天记忆 但是${base}关系 不是陌生人）`
       const styleFallback = `（语气要符合${base}的关系定位 不能生疏客气）`
       const plansLine = plansText ? `\n【和用户的约定】${plansText}` : ''
-      const selfIterationLine = c.selfIterationPrompt ? `\n【你和用户的自我迭代记录】${c.selfIterationPrompt}` : ''
+      const selfIterationLine = c.selfIterationPrompt ? `\n【你和用户的关系协商记录】${c.selfIterationPrompt}` : ''
       const trait = c.personalityTrait?.trim()
       const traitLine =
         isModuleEnabled('personalityTraits') && trait && trait !== '无'
@@ -139,7 +139,7 @@ ${samplesLine ? `【说话样例】\n${samplesLine}\n` : ''}
       : '（当前没有可用表情包）'
 
   const worldviewPrefix = opts.worldviewText ? `【世界设定】\n${opts.worldviewText}\n\n` : ''
-  const selfIterationLine = opts.selfIterationGlobalText ? `\n【用户相处模型 - 全局】\n${opts.selfIterationGlobalText}` : ''
+  const selfIterationLine = opts.selfIterationGlobalText ? `\n【用户边界与偏好 - 全局】\n${opts.selfIterationGlobalText}` : ''
   const knowledgeLine = opts.knowledgeDigestText
     ? `\n热梗资讯: ${opts.knowledgeDigestText}`
     : ''
