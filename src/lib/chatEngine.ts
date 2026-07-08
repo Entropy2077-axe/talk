@@ -13,7 +13,7 @@ import { processKnowledgeQueries } from './knowledgeBase'
 import { evaluateInitialWarmth, relationshipLine } from './relationship'
 import { displayName } from './contact'
 import { previewForMessage } from './messagePreview'
-import { validatePrivateTurn, optimizePrivateTurn } from './responseQuality'
+import { validatePrivateTurn } from './responseQuality'
 import { recentSocialEventsText } from './socialEvents'
 import { useChatUiStore } from '../store/useChatUiStore'
 import { enqueueSelfIterationTask } from './selfIteration'
@@ -32,6 +32,7 @@ import type { AiBubble, AppSettings, Contact, Message, MessageType, ScheduleOver
 interface ConversationRuntimeState {
   aiTyping: boolean
   error: string
+  typingLabel?: string
 }
 
 // Exported as a stable reference — selectors that fall back to this for a
@@ -39,7 +40,7 @@ interface ConversationRuntimeState {
 // literal on the fly (e.g. `s.states[id] ?? { aiTyping: false, error: '' }`),
 // since a new reference every call trips React's useSyncExternalStore
 // infinite-loop detection and crashes the page.
-export const DEFAULT_RUNTIME_STATE: ConversationRuntimeState = { aiTyping: false, error: '' }
+export const DEFAULT_RUNTIME_STATE: ConversationRuntimeState = { aiTyping: false, error: '', typingLabel: undefined }
 
 interface ChatEngineStore {
   states: Record<string, ConversationRuntimeState>
@@ -135,10 +136,10 @@ function parseAiTurnDebugPayload(opts: {
   knowledgeQueries: string[]
   mood?: string
   thought?: string
-  validator: { enabled: boolean; mode: AppSettings['validatorMode']; repaired: boolean; optimized: boolean; reason?: string; detectedInvalid?: boolean }
+  qualityCheck: { enabled: boolean; repaired: boolean; reason?: string; detectedInvalid?: boolean }
   injectedIntents: ReturnType<typeof activeIntents>
 }): unknown {
-  const { finalRaw, jsonRaw, rawText, bubbles, knowledgeQueries, mood, thought, validator, injectedIntents } = opts
+  const { finalRaw, jsonRaw, rawText, bubbles, knowledgeQueries, mood, thought, qualityCheck, injectedIntents } = opts
   const trimmed = finalRaw.trim()
   const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
   const text = fenceMatch ? fenceMatch[1].trim() : trimmed
@@ -161,7 +162,7 @@ function parseAiTurnDebugPayload(opts: {
     finalRaw,
     conversionParsed,
     parsedBubbles: bubbles,
-    validator,
+    qualityCheck,
     mood,
     thought,
     knowledgeQueries,
@@ -207,7 +208,7 @@ export async function sendMessage(
   const streamId = uuid()
   streamByConversation.set(conversationId, streamId)
   clearPending(conversationId)
-  useChatEngineStore.getState().patch(conversationId, { error: '' })
+  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: displayName(contact) })
 
   const msg: Message = {
     id: uuid(),
@@ -240,7 +241,7 @@ export async function triggerAiTurn(
   const streamId = uuid()
   streamByConversation.set(conversationId, streamId)
   clearPending(conversationId)
-  useChatEngineStore.getState().patch(conversationId, { error: '' })
+  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: displayName(contact) })
   await runAiTurn(conversationId, contact, settings, stickers, streamId)
 }
 
@@ -259,7 +260,7 @@ export async function regenerateAiTurn(
   const streamId = uuid()
   streamByConversation.set(conversationId, streamId)
   clearPending(conversationId)
-  useChatEngineStore.getState().patch(conversationId, { error: '' })
+  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: displayName(contact) })
 
   const turnMessages = await db.messages
     .where('conversationId')
@@ -284,7 +285,7 @@ async function runAiTurn(
   const engine = useChatEngineStore.getState()
   const now = Date.now()
   const activeMood = isModuleEnabled('mood') ? getActiveMood(contact, now) : undefined
-  engine.patch(conversationId, { aiTyping: true, error: '' })
+  engine.patch(conversationId, { aiTyping: true, error: '', typingLabel: displayName(contact) })
   console.log(`[chat] 开始生成回复 对方=${displayName(contact)} conversationId=${conversationId}`)
   try {
     const history = await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt')
@@ -382,17 +383,15 @@ async function runAiTurn(
     console.log(`[chat] 多功能模型转换JSON: ${jsonRaw.slice(0, 200)}`)
     let finalRaw = jsonRaw
     let { bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw)
-    const validatorDebug = {
-      enabled: isModuleEnabled('validator'),
-      mode: settings.validatorMode,
+    const qualityCheckDebug = {
+      enabled: true,
       repaired: false,
-      optimized: false,
       reason: undefined as string | undefined,
       detectedInvalid: false,
     }
 
-    // Validator module — logic check is mandatory for every validator mode.
-    if (validatorDebug.enabled && bubbles.length > 0) {
+    // Core quality gate: always check logical grounding and repair when needed.
+    if (bubbles.length > 0) {
       const checked = await validatePrivateTurn({
         settings,
         contact,
@@ -403,40 +402,21 @@ async function runAiTurn(
         signal: controller.signal,
       })
       if (streamByConversation.get(conversationId) !== streamId) return
-      validatorDebug.reason = checked.reason
+      qualityCheckDebug.reason = checked.reason
       if (checked.repaired) {
-        console.warn(`[chat] 校验器重写 对方=${displayName(contact)} 原因=${checked.reason ?? 'unknown'}`)
-        validatorDebug.repaired = true
+        console.warn(`[chat] 质量检查重写 对方=${displayName(contact)} 原因=${checked.reason ?? 'unknown'}`)
+        qualityCheckDebug.repaired = true
         finalRaw = checked.raw
         ;({ bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw))
       } else if (checked.detectedInvalid) {
-        validatorDebug.detectedInvalid = true
+        qualityCheckDebug.detectedInvalid = true
         console.warn(`[chat] 审查发现问题但未能修复 对方=${displayName(contact)} 原因=${checked.reason ?? 'unknown'}`)
-      }
-
-      if (settings.validatorMode === 'optimize' && bubbles.length > 0) {
-        // Mode 2: after mandatory logic check, re-feed to main model for wording improvement.
-        const optimized = await optimizePrivateTurn({
-          settings,
-          contact,
-          latestUserText: _triggeringUserText,
-          raw: finalRaw,
-          bubbles,
-          signal: controller.signal,
-        })
-        if (streamByConversation.get(conversationId) !== streamId) return
-        if (optimized) {
-          console.log(`[chat] 校验器优化 对方=${displayName(contact)}`)
-          validatorDebug.optimized = true
-          finalRaw = optimized
-          ;({ bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw))
-        }
       }
     }
     console.log(`[chat] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 mood=${turnMood || '无'} thought=${turnThought ? '有(' + turnThought.length + '字)' : '无'} 对方=${displayName(contact)}`)
     if (bubbles.length === 0) {
       console.warn(`[chat] 本轮没有正常回复 对方=${displayName(contact)} JSON内容: ${jsonRaw.slice(0, 200)}`)
-      engine.patch(conversationId, { error: '对方这次没有正常回复 可以再发一条试试', aiTyping: false })
+      engine.patch(conversationId, { error: '对方这次没有正常回复 可以再发一条试试', aiTyping: false, typingLabel: undefined })
       return
     }
     const aiTurnId = uuid()
@@ -452,7 +432,7 @@ async function runAiTurn(
         knowledgeQueries,
         mood: turnMood,
         thought: turnThought,
-        validator: validatorDebug,
+        qualityCheck: qualityCheckDebug,
         injectedIntents,
       }),
       knowledgeQueries,
@@ -477,7 +457,7 @@ async function runAiTurn(
     if (err instanceof DOMException && err.name === 'AbortError') return
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[chat] 生成回复出错 对方=${displayName(contact)}:`, message)
-    engine.patch(conversationId, { error: message, aiTyping: false })
+    engine.patch(conversationId, { error: message, aiTyping: false, typingLabel: undefined })
   }
 }
 
@@ -573,7 +553,7 @@ function revealBubbles(
       }
 
       if (i === bubbles.length - 1) {
-        useChatEngineStore.getState().patch(conversationId, { aiTyping: false })
+        useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined })
         if (injectedIntentIds.length > 0) {
           await markIntentsUsed(contact.id, injectedIntentIds)
         }

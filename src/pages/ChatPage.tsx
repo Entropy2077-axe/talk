@@ -81,7 +81,7 @@ export function ChatPage() {
   // The AI-turn state (typing indicator / error) lives in a module-level
   // store, not local state — it keeps running in the background even when
   // this page unmounts, so it must be read reactively from there instead.
-  const { aiTyping, error } = useChatEngineStore(
+  const { aiTyping, error, typingLabel } = useChatEngineStore(
     (s) => s.states[conversationId ?? ''] ?? DEFAULT_RUNTIME_STATE,
   )
 
@@ -351,6 +351,7 @@ export function ChatPage() {
   }
 
   const headerTitle = isGroupConv ? group!.name : displayName(contact!)
+  const visibleHeaderTitle = aiTyping && typingLabel ? `${typingLabel}正在输入中...` : headerTitle
   const headerInfoPath = isGroupConv ? `/group/${group!.id}` : `/contact/${contact!.id}`
   const chatBackgroundStyle =
     settings.chatBackground && settings.chatBackground.startsWith('data:')
@@ -362,7 +363,7 @@ export function ChatPage() {
   return (
     <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#ededed]">
       <TopBar
-        title={selectingMessages ? `已选择 ${selectedMessageIds.length} 条` : headerTitle}
+        title={selectingMessages ? `已选择 ${selectedMessageIds.length} 条` : visibleHeaderTitle}
         showBack={!selectingMessages}
         showSearch={!selectingMessages}
         onSearchClick={() => setSearching(true)}
@@ -453,16 +454,6 @@ export function ChatPage() {
           }
           return msgBubble
         })}
-        {aiTyping && (
-          <div className="flex items-center gap-2 px-3 py-1.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl" />
-            <div className="flex gap-1 rounded-2xl bg-white px-4 py-3">
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400" />
-            </div>
-          </div>
-        )}
       </div>
 
       {error && <p className="bg-red-50 px-4 py-1.5 text-xs text-red-500">{error}</p>}

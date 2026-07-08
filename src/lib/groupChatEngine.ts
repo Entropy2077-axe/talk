@@ -2,7 +2,8 @@ import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { chatCompletion, coalesceConsecutiveRoles, type ChatMessage } from './deepseek'
 import {
-  buildGroupSystemPrompt,
+  buildGroupJsonConversionPrompt,
+  buildGroupRawChatPrompt,
   groupTypingDelayMs,
   parseGroupAiResponse,
   pickSpeakers,
@@ -16,7 +17,7 @@ import { describeCurrentTime } from './time'
 import { displayName } from './contact'
 import { previewForMessage } from './messagePreview'
 import { buildUserProfileText, useChatEngineStore } from './chatEngine'
-import { validateGroupTurn } from './responseQuality'
+import { validateGroupDraft, validateGroupTurn } from './responseQuality'
 import { recentSocialEventsText, recordSocialEvent } from './socialEvents'
 import { useChatUiStore } from '../store/useChatUiStore'
 import type { AppSettings, Contact, Group, GroupAiBubble, Message, Sticker } from '../types'
@@ -55,8 +56,17 @@ function clearPending(conversationId: string) {
   abortByConversation.get(conversationId)?.abort()
 }
 
-function parseGroupTurnDebugPayload(raw: string, bubbles: GroupAiBubble[], knowledgeQueries: string[]): unknown {
-  const trimmed = raw.trim()
+function parseGroupTurnDebugPayload(
+  rawText: string,
+  draftFeedback: string | undefined,
+  jsonRaw: string,
+  finalRaw: string,
+  bubbles: GroupAiBubble[],
+  knowledgeQueries: string[],
+  turnSummary: string,
+  groupVibe: string,
+): unknown {
+  const trimmed = finalRaw.trim()
   const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
   const text = fenceMatch ? fenceMatch[1].trim() : trimmed
   try {
@@ -71,7 +81,74 @@ function parseGroupTurnDebugPayload(raw: string, bubbles: GroupAiBubble[], knowl
       }
     }
   }
-  return { raw, parsedBubbles: bubbles, knowledgeQueries }
+  return { rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, knowledgeQueries, turnSummary, groupVibe }
+}
+
+function parseCompressedGroupMemory(raw: string): string | null {
+  let text = raw.trim()
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fenceMatch) text = fenceMatch[1].trim()
+  try {
+    const parsed = JSON.parse(text)
+    return typeof parsed?.memory === 'string' && parsed.memory.trim() ? parsed.memory.trim() : null
+  } catch {
+    return null
+  }
+}
+
+async function updateGroupMemoryAndVibe(opts: {
+  group: Group
+  aiTurnId: string
+  settings: AppSettings
+  turnSummary: string
+  groupVibe: string
+}): Promise<void> {
+  const { group, aiTurnId, settings } = opts
+  const now = Date.now()
+  const timeLabel = new Date(now).toLocaleString()
+  const turnSummary = opts.turnSummary.trim()
+  const nextTurnCount = (group.memoryTurnCount ?? 0) + 1
+  const appendedMemory = turnSummary
+    ? [group.memory?.trim() ?? '', `[${timeLabel}] ${turnSummary}`].filter(Boolean).join('\n')
+    : (group.memory ?? '')
+  const patch: Partial<Group> = {
+    memory: appendedMemory,
+    vibe: opts.groupVibe.trim() || group.vibe || '',
+    memoryTurnCount: nextTurnCount,
+  }
+
+  if (nextTurnCount % 5 === 0 && appendedMemory.trim()) {
+    try {
+      const raw = await chatCompletion({
+        apiKey: settings.apiKey,
+        baseUrl: settings.baseUrl,
+        model: settings.utilityModel,
+        jsonMode: true,
+        messages: [
+          {
+            role: 'system',
+            content: `你是群聊记忆压缩器。把群"${group.name}"的群聊记忆按时间线压缩，保留重要事件、固定梗、关系变化、长期氛围，不要保留流水账。输出JSON: {"memory":"..."}`,
+          },
+          {
+            role: 'user',
+            content: appendedMemory.slice(-5000),
+          },
+        ],
+      })
+      const compressed = parseCompressedGroupMemory(raw)
+      if (compressed) patch.memory = compressed
+    } catch {
+      // best-effort; keep appended memory if compression fails
+    }
+  }
+
+  await db.groups.update(group.id, patch)
+  const turn = await db.aiTurns.get(aiTurnId)
+  if (turn?.parsed && typeof turn.parsed === 'object') {
+    await db.aiTurns.update(aiTurnId, {
+      parsed: { ...(turn.parsed as Record<string, unknown>), groupMemoryUpdate: patch },
+    })
+  }
 }
 
 function messageLabel(message: Message, contactById: Map<string, Contact>, userNickname: string): string {
@@ -148,7 +225,7 @@ export async function sendGroupMessage(
   const streamId = uuid()
   streamByConversation.set(conversationId, streamId)
   clearPending(conversationId)
-  useChatEngineStore.getState().patch(conversationId, { error: '' })
+  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: '群成员' })
 
   const msg: Message = {
     id: uuid(),
@@ -201,7 +278,7 @@ export async function regenerateGroupAiTurn(
   const streamId = uuid()
   streamByConversation.set(conversationId, streamId)
   clearPending(conversationId)
-  useChatEngineStore.getState().patch(conversationId, { error: '' })
+  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: '群成员' })
 
   const turnMessages = await db.messages
     .where('conversationId')
@@ -224,11 +301,11 @@ async function runGroupAiTurn(
   streamId: string,
 ): Promise<void> {
   const engine = useChatEngineStore.getState()
-  engine.patch(conversationId, { aiTyping: true, error: '' })
+  engine.patch(conversationId, { aiTyping: true, error: '', typingLabel: '群成员' })
   console.log(`[group] 开始生成回复 群=${group.name} conversationId=${conversationId}`)
   try {
     if (members.length === 0) {
-      engine.patch(conversationId, { error: '这个群里已经没有成员了', aiTyping: false })
+      engine.patch(conversationId, { error: '这个群里已经没有成员了', aiTyping: false, typingLabel: undefined })
       return
     }
 
@@ -240,18 +317,22 @@ async function runGroupAiTurn(
     const preferredSpeakerIds = new Set(latestUserMessage?.mentions ?? [])
     const replied = latestUserMessage?.replyToMessageId ? messageById.get(latestUserMessage.replyToMessageId) : undefined
     if (replied?.role === 'assistant' && replied.speakerContactId) preferredSpeakerIds.add(replied.speakerContactId)
-    const speakers = pickSpeakers(members, Array.from(preferredSpeakerIds))
+    const speakers = pickSpeakers(members, Array.from(preferredSpeakerIds), group.speakerLimit ?? 3)
     console.log(`[group] 本轮发言人: ${speakers.map((s) => s.name).join('、')}`)
     const knowledgeEntries = await db.knowledgeEntries.toArray()
     const targetContext = targetedContextText(latestUserMessage, contactById, messageById, settings.userNickname)
     const recentEventsText = await recentSocialEventsText(members.map((m) => m.id), 4)
 
-    const systemPrompt = buildGroupSystemPrompt({
+    const systemPrompt = buildGroupRawChatPrompt({
       stylePrompt: settings.globalSystemPrompt,
       groupName: group.name,
       allMembers: members,
       speakers,
       stickerNames: stickers.map((s) => s.name),
+      groupMemoryText: group.memory,
+      groupVibeText: group.vibe,
+      allowAiChatter: group.allowAiChatter ?? true,
+      energyLevel: group.energyLevel ?? 'normal',
       currentTimeText: describeCurrentTime(new Date()),
       userProfileText: buildUserProfileText(settings),
       targetedContextText: targetContext,
@@ -274,7 +355,7 @@ async function runGroupAiTurn(
 
     const controller = new AbortController()
     abortByConversation.set(conversationId, controller)
-    const raw = await chatCompletion({
+    let rawText = await chatCompletion({
       apiKey: settings.apiKey,
       baseUrl: settings.baseUrl,
       model: settings.model,
@@ -283,8 +364,64 @@ async function runGroupAiTurn(
     })
 
     if (streamByConversation.get(conversationId) !== streamId) return
-    let finalRaw = raw
-    let { bubbles, knowledgeQueries } = parseGroupAiResponse(finalRaw, speakers.length)
+    console.log(`[group] 主模型群聊草稿(${rawText.length}字): ${rawText.slice(0, 160)}...`)
+    let draftFeedback: string | undefined
+    const draftCheck = await validateGroupDraft({
+      settings,
+      groupName: group.name,
+      speakers,
+      rawText,
+      allowAiChatter: group.allowAiChatter ?? true,
+      energyLevel: group.energyLevel ?? 'normal',
+      targetedContext: targetContext,
+      signal: controller.signal,
+    })
+    if (streamByConversation.get(conversationId) !== streamId) return
+    if (!draftCheck.valid) {
+      draftFeedback = draftCheck.reason || '草稿不符合群聊特殊规则'
+      console.warn(`[group] 主模型草稿未通过校验 群=${group.name} 原因=${draftFeedback}`)
+      rawText = await chatCompletion({
+        apiKey: settings.apiKey,
+        baseUrl: settings.baseUrl,
+        model: settings.model,
+        messages: coalesceConsecutiveRoles([
+          ...chatMessages,
+          {
+            role: 'user',
+            content: `上一版群聊草稿没有通过校验，请严格按反馈重写一次。
+
+【校验反馈】
+${draftFeedback}
+
+【上一版草稿】
+${rawText}
+
+必须重新输出群聊纯文本草稿，不要解释，不要输出JSON。尤其注意：AI互聊规则、群聊热闹程度、每行必须有（想法）和[心情]。`,
+          },
+        ]),
+        signal: controller.signal,
+      })
+      if (streamByConversation.get(conversationId) !== streamId) return
+      console.log(`[group] 主模型重写草稿(${rawText.length}字): ${rawText.slice(0, 160)}...`)
+    }
+
+    const jsonRaw = await chatCompletion({
+      apiKey: settings.apiKey,
+      baseUrl: settings.baseUrl,
+      model: settings.utilityModel,
+      messages: [
+        {
+          role: 'system',
+          content: buildGroupJsonConversionPrompt(rawText, speakers, stickers.map((s) => s.name)),
+        },
+      ],
+      jsonMode: true,
+      signal: controller.signal,
+    })
+
+    if (streamByConversation.get(conversationId) !== streamId) return
+    let finalRaw = jsonRaw
+    let { bubbles, knowledgeQueries, turnSummary, groupVibe } = parseGroupAiResponse(finalRaw, speakers.length)
     if (bubbles.length > 0) {
       const checked = await validateGroupTurn({
         settings,
@@ -299,15 +436,15 @@ async function runGroupAiTurn(
       if (checked.repaired) {
         console.warn(`[group] 回复已被质量校验重写 群=${group.name} 原因=${checked.reason ?? 'unknown'}`)
         finalRaw = checked.raw
-        ;({ bubbles, knowledgeQueries } = parseGroupAiResponse(finalRaw, speakers.length))
+        ;({ bubbles, knowledgeQueries, turnSummary, groupVibe } = parseGroupAiResponse(finalRaw, speakers.length))
       } else if (checked.detectedInvalid) {
         console.warn(`[group] 审查发现问题但未能修复 群=${group.name} 原因=${checked.reason ?? 'unknown'}`)
       }
     }
     console.log(`[group] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 群=${group.name}`)
     if (bubbles.length === 0) {
-      console.warn(`[group] 本轮没有人回复 群=${group.name} 原始内容: ${raw.slice(0, 200)}`)
-      engine.patch(conversationId, { error: '群里这次没有人回复 可以再发一条试试', aiTyping: false })
+      console.warn(`[group] 本轮没有人回复 群=${group.name} 原始内容: ${rawText.slice(0, 200)}`)
+      engine.patch(conversationId, { error: '群里这次没有人回复 可以再发一条试试', aiTyping: false, typingLabel: undefined })
       return
     }
     const aiTurnId = uuid()
@@ -315,10 +452,11 @@ async function runGroupAiTurn(
       id: aiTurnId,
       conversationId,
       raw: finalRaw,
-      parsed: parseGroupTurnDebugPayload(finalRaw, bubbles, knowledgeQueries),
+      parsed: parseGroupTurnDebugPayload(rawText, draftFeedback, jsonRaw, finalRaw, bubbles, knowledgeQueries, turnSummary, groupVibe),
       knowledgeQueries,
       createdAt: Date.now(),
     })
+    void updateGroupMemoryAndVibe({ group, aiTurnId, settings, turnSummary, groupVibe })
     if (isModuleEnabled('knowledgeBase')) processKnowledgeQueries(knowledgeQueries, settings)
     revealGroupBubbles(conversationId, group, members, speakers, bubbles, streamId, settings, aiTurnId)
   } catch (err) {
@@ -326,7 +464,7 @@ async function runGroupAiTurn(
     if (err instanceof DOMException && err.name === 'AbortError') return
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[group] 生成回复出错 群=${group.name}:`, message)
-    engine.patch(conversationId, { error: message, aiTyping: false })
+    engine.patch(conversationId, { error: message, aiTyping: false, typingLabel: undefined })
   }
 }
 
@@ -348,6 +486,9 @@ function revealGroupBubbles(
       if (streamByConversation.get(conversationId) !== streamId) return
 
       const speaker = speakers[bubble.speakerIndex - 1]
+      useChatEngineStore.getState().patch(conversationId, {
+        typingLabel: speaker ? displayName(speaker) : '群成员',
+      })
       const content =
         bubble.type === 'text'
           ? stripSpeakerNamePrefix(
@@ -365,9 +506,15 @@ function revealGroupBubbles(
         speakerContactId: speaker?.id,
         debugAiTurnId: aiTurnId,
         debugParsedBubble: bubble,
+        thought: bubble.thought,
         createdAt: Date.now(),
       }
       await db.messages.add(msg)
+      if (speaker?.id && bubble.mood) {
+        await db.contacts.update(speaker.id, {
+          mood: { text: bubble.mood, expiresAt: Date.now() + settings.moodExpiryMs },
+        })
+      }
       await db.conversations.update(conversationId, { updatedAt: Date.now() })
 
       if (useChatUiStore.getState().activeConversationId !== conversationId) {
@@ -382,7 +529,7 @@ function revealGroupBubbles(
       }
 
       if (i === bubbles.length - 1) {
-        useChatEngineStore.getState().patch(conversationId, { aiTyping: false })
+        useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined })
         maybeUpdateGroupMemory(group.id, conversationId, members, settings)
       }
     }, cumulative)

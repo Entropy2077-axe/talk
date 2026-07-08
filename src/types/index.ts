@@ -207,12 +207,20 @@ export interface Group {
   avatar: string // emoji or data URL, like Contact
   avatarColor: string
   memberContactIds: string[]
+  memory?: string // group-level shared memory / lore visible to every member in group prompts
+  vibe?: string // group atmosphere, e.g. quiet study group, noisy friends, teasing tone
+  speakerLimit?: GroupSpeakerLimit // how many AI members may speak in one group turn
+  allowAiChatter?: boolean // true: AIs may optionally talk to each other; false: keep replies user-centered
+  energyLevel?: GroupEnergyLevel // controls how many bubbles each selected speaker tends to send
+  memoryTurnCount?: number // number of AI turns folded into group.memory; used to compress every few turns
   createdAt: number
   memoryMessageCursor?: number // how many of this group's messages have already been folded into members' memory (see memory.ts) — optional since it predates group memory
 }
 
 export type MessageRole = 'user' | 'assistant'
 export type MessageType = 'text' | 'sticker' | 'link' | 'gift' | 'scheduleChange'
+export type GroupSpeakerLimit = 2 | 3 | 4 | 5 | 'all'
+export type GroupEnergyLevel = 'cold' | 'normal' | 'lively'
 
 export interface LinkPayload {
   app: string // e.g. 'shop' | 'todo'
@@ -334,8 +342,6 @@ export interface AppSettings {
   customCurrencyEmoji?: string
   /** How long an AI mood lasts before expiring (ms). Default 30 min. */
   moodExpiryMs: number
-  /** Validation mode: 'quality' = check+rewrite via utility model, 'optimize' = always re-feed to main model. */
-  validatorMode: 'quality' | 'optimize'
   /** Shared output of the self-iteration learner: expression habits plus decontextualized user boundaries/preferences. */
   selfIterationGlobalPrompt: string
   selfIterationUpdatedAt?: number
@@ -444,17 +450,26 @@ export interface AiResponse {
 // link) to keep the multi-persona prompt tractable.
 export interface GroupAiBubbleText {
   speakerIndex: number // 1-based index into that turn's selected-speakers list
+  speakerName?: string // debug/conversion hint only; speakerIndex remains authoritative
   type: 'text'
   content: string
+  thought?: string
+  mood?: string
 }
 export interface GroupAiBubbleSticker {
   speakerIndex: number
+  speakerName?: string
   type: 'sticker'
   name: string
+  thought?: string
+  mood?: string
 }
 export type GroupAiBubble = GroupAiBubbleText | GroupAiBubbleSticker
 
 export interface GroupAiResponse {
   messages: GroupAiBubble[]
+  turnSummary?: string
+  groupVibe: string
+  memoryCandidates?: { contactName: string; content: string }[]
   knowledgeQueries?: string[]
 }

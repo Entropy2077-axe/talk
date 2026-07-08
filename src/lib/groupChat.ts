@@ -4,11 +4,10 @@ import { activeUpcomingPlansText } from './memory'
 import { formatSpeechSamplesForScene } from './prompt'
 import { describeCurrentSchedule } from './schedule'
 import { isModuleEnabled } from '../features'
-import type { Contact, GroupAiBubble, GroupAiResponse } from '../types'
+import type { Contact, GroupAiBubble, GroupAiResponse, GroupEnergyLevel, GroupSpeakerLimit } from '../types'
 
-/** Group chats above this size don't have every member answer every turn — only a random 3 do (see pickSpeakers). */
-const MAX_SPEAKERS_WHEN_LARGE = 3
-const LARGE_GROUP_THRESHOLD = 3
+/** Group chats can cap how many members answer per turn; see pickSpeakers. */
+const DEFAULT_GROUP_SPEAKER_LIMIT: GroupSpeakerLimit = 3
 
 /** Warmer contacts get picked to speak more often (also reused by proactiveChat.ts). */
 export function relationshipWeight(warmth: number): number {
@@ -38,16 +37,22 @@ export function weightedSampleWithoutReplacement(contacts: Contact[], k: number)
 
 /**
  * Who answers this round, decided entirely in code (per the user's spec),
- * not left to the model. A small group just always has everyone chime in;
- * once it's big enough that "everyone replies every time" would be noisy,
- * only 3 do, weighted toward whoever's closer to the user.
+ * not left to the model. Mentioned/replied-to members are preferred, then
+ * the remaining slots are filled by relationship-weighted sampling.
  */
-export function pickSpeakers(members: Contact[], preferredContactIds: string[] = []): Contact[] {
+export function pickSpeakers(
+  members: Contact[],
+  preferredContactIds: string[] = [],
+  speakerLimit: GroupSpeakerLimit = DEFAULT_GROUP_SPEAKER_LIMIT,
+): Contact[] {
   const preferredIds = new Set(preferredContactIds)
   const preferred = members.filter((m) => preferredIds.has(m.id))
-  if (members.length <= LARGE_GROUP_THRESHOLD) return preferred.length > 0 ? preferred : members
+  const limit = speakerLimit === 'all' ? members.length : Math.min(speakerLimit, members.length)
+  if (limit >= members.length) {
+    const preferredSet = new Set(preferred.map((m) => m.id))
+    return [...preferred, ...members.filter((m) => !preferredSet.has(m.id))]
+  }
 
-  const limit = Math.min(MAX_SPEAKERS_WHEN_LARGE, members.length)
   const picked = preferred.slice(0, limit)
   if (picked.length >= limit) return picked
 
@@ -188,6 +193,169 @@ ${speakerBlocks}
 ${stickersText}`
 }
 
+export function buildGroupRawChatPrompt(opts: {
+  stylePrompt: string
+  groupName: string
+  allMembers: Contact[]
+  speakers: Contact[]
+  stickerNames: string[]
+  groupMemoryText?: string
+  groupVibeText?: string
+  allowAiChatter?: boolean
+  energyLevel?: GroupEnergyLevel
+  currentTimeText: string
+  userProfileText: string
+  targetedContextText?: string
+  recentEventsText?: string
+  worldviewText?: string
+  knowledgeDigestText?: string
+  selfIterationGlobalText?: string
+  speakerMemoriesMap?: Map<string, string>
+}): string {
+  const rosterText = opts.allMembers.map((m) => `- ${m.name}`).join('\n')
+  const speakerNames = opts.speakers.map((s) => s.name).join('、')
+  const speakerBlocks = opts.speakers
+    .map((c, i) => {
+      const base = c.relationshipBase || '朋友'
+      const plansText = activeUpcomingPlansText(c, new Date())
+      const scheduleText = describeCurrentSchedule(c, new Date())
+      const samplesText = formatSpeechSamplesForScene(c.speechSamples, 'group', 2)
+      const recentMemoText = opts.speakerMemoriesMap?.get(c.id)
+      return `【发言人${i + 1}: ${c.name}】
+逻辑:
+- 你是${c.name}，现在在微信群"${opts.groupName}"里。
+- 你和用户的关系: ${base}${c.relationshipDynamic ? `（${c.relationshipDynamic}）` : ''}。
+- 当前状态: ${scheduleText || '没有特别安排'}。
+- 对用户的了解: ${c.memoryFacts || '还没有具体聊天记忆，但不是陌生人'}。
+- 相处习惯: ${c.memoryStyle || `语气要符合${base}关系，不要生疏客气`}。
+${plansText ? `- 和用户的约定: ${plansText}。\n` : ''}${recentMemoText ? `- 最近记忆碎片:\n${recentMemoText}\n` : ''}${c.selfIterationPrompt ? `- 关系协商记录:\n${c.selfIterationPrompt}\n` : ''}
+感觉:
+- 人设必须严格遵守: ${c.systemPrompt || '自由发挥成一个普通朋友'}。
+${c.mbti ? `- MBTI: ${c.mbti}。` : ''}
+${c.personalityTrait && c.personalityTrait !== '无' ? `- 性格特质: ${c.personalityTrait}。` : ''}
+${samplesText ? `- 说话样例:\n${samplesText}` : ''}`
+    })
+    .join('\n\n')
+
+  const stickersText = opts.stickerNames.length > 0 ? opts.stickerNames.map((n) => `- ${n}`).join('\n') : '（当前没有可用表情包）'
+  const targetedContext = opts.targetedContextText
+    ? `\n【本轮定向上下文】\n${opts.targetedContextText}\n如果用户@某人，那个人必须优先回应；如果用户回复某条消息，先回应被回复内容再自然延展。`
+    : ''
+  const recentEvents = opts.recentEventsText ? `\n【最近发生的事】\n${opts.recentEventsText}` : ''
+  const worldview = opts.worldviewText ? `\n【世界设定】\n${opts.worldviewText}` : ''
+  const knowledge = opts.knowledgeDigestText ? `\n【可参考资讯】\n${opts.knowledgeDigestText}` : ''
+  const selfIteration = opts.selfIterationGlobalText ? `\n【用户边界与偏好 - 全局】\n${opts.selfIterationGlobalText}` : ''
+  const groupMemory = opts.groupMemoryText?.trim() ? `\n【群聊记忆】\n${opts.groupMemoryText.trim()}` : ''
+  const groupVibe = opts.groupVibeText?.trim() ? `\n【群聊氛围】\n${opts.groupVibeText.trim()}` : ''
+  const chatterRule = opts.allowAiChatter === false
+    ? '- 本群设置为“围绕用户”：AI只能回应用户本轮消息、用户@/回复对象或用户相关话题，不要发展AI之间的旁支闲聊。\n'
+    : '- 本群允许AI互相聊起来：AI之间必须有明显互动，至少出现一次接话、回应、吐槽、附和、反驳或点名互动；可以短暂发展群内剧情，但不要完全无视用户。\n'
+  const energyRule =
+    opts.energyLevel === 'cold'
+      ? '- 群聊热闹程度=冷淡：每个发言人通常只发1句话，整体克制。\n'
+      : opts.energyLevel === 'lively'
+        ? '- 群聊热闹程度=热闹：每个发言人尽量发4句话以上，可以多次插入发言，但仍要自然，不要灌水。\n'
+        : '- 群聊热闹程度=普通：每个发言人通常发2到3句话，节奏自然。\n'
+
+  return `【场景】
+这是一个微信群，群名是"${opts.groupName}"。用户也是群成员之一，不是私聊里的"对方"。
+群成员:
+${rosterText}
+
+本轮只能由这些人发言: ${speakerNames}。
+你要模拟一段真实群聊，而不是轮流答题。
+
+【感觉 - 最低优先级】
+只在逻辑成立后优化文采、节奏和聊天感。感觉要求不能覆盖身份、记忆、@/回复、输出格式。
+${opts.stylePrompt}
+- 像微信群里的自然打字：短句、插话、接梗、轻微跑题都可以。
+- 不要每句都解释完整，不要每条都追问，不要所有人都同一种语气。
+- 角色说话风格必须来自各自人设。
+
+${worldview}
+【当前上下文】
+时间: ${opts.currentTimeText}
+用户资料: ${opts.userProfileText}${groupMemory}${groupVibe}${knowledge}${targetedContext}${recentEvents}${selfIteration}
+
+${speakerBlocks}
+
+【逻辑 - 第一优先级】
+- 先判断身份、关系、记忆、时间、上下文和@/回复对象，再决定每个人该不该说、该说什么。
+- 每个角色只能说自己知道或自己能感受到的事，不能替别人提私人记忆/约定。
+- 被@的人必须优先回应；被回复的人或被回复消息的说话者必须优先处理。
+${chatterRule}
+- 每个发言人可以随时插入多次发言，不需要按发言人顺序轮流说。允许“1说一句、2插一句、1再接、3再说”。
+${energyRule}
+- 不要把私聊口吻带进群聊，不要称用户为"对方"。
+- 不要编造课堂、线下见面、过去承诺等没有依据的具体事实。
+
+【输出格式】
+不要输出JSON。只输出群聊纯文本草稿，每一行必须严格是:
+<人名>（想法）[心情]“消息内容”
+
+示例:
+<林夏>（他刚才明显是在逗我，我想顺着怼一句）[好笑]“你这话说得也太像临时抱佛脚了吧。”
+<周屿>（我不想太热闹，但这个点我可以补一句）[平静]“不过真要赶的话，先把最容易错的地方过一遍。”
+
+规则:
+- 人名必须来自本轮发言人: ${speakerNames}。
+- 每一行都必须有（想法）和[心情]，不能省略。
+- 想法是角色内心动机，短一点，不能出现在消息内容里。
+- 心情5字以内，不能空。
+- 消息内容只写群里真正发出的文字，不要带人名冒号、括号、方括号。
+- 如果要发表情，消息内容写成[sticker:表情名]，表情名必须来自下面列表。
+- 不懂的网络热梗/番剧/游戏名词，可以自然表现为不懂；后续转换器会提取knowledgeQueries。
+
+【表情包】
+${stickersText}
+
+【最终强制检查 - 最高优先级】
+输出前逐条自查，任何一条不满足都必须重写草稿:
+1. 每一行都有 <人名>（想法）[心情]“消息内容”。
+2. 每一行都有非空想法和非空心情。
+3. ${opts.allowAiChatter === false ? 'AI互聊关闭：所有发言都围绕用户或用户相关话题，不发展AI之间的旁支闲聊。' : 'AI互聊开启：AI之间必须有明显互动，至少一次接话、回应、吐槽、附和、反驳或点名。'}
+4. ${
+    opts.energyLevel === 'cold'
+      ? '冷淡：每个发言人基本只发1句话。'
+      : opts.energyLevel === 'lively'
+        ? '热闹：每个发言人尽量发4句话以上，并允许同一人多次插入。'
+        : '普通：每个发言人基本发2到3句话。'
+  }
+5. 发言顺序不必按发言人编号轮流，可以 1 -> 2 -> 1 -> 3 这样自然插话。
+6. 只输出群聊纯文本草稿，不输出JSON。`
+}
+
+export function buildGroupJsonConversionPrompt(rawText: string, speakers: Contact[], stickerNames: string[]): string {
+  const speakerLines = speakers.map((speaker, i) => `${i + 1}. ${speaker.name}`).join('\n')
+  const stickersText = stickerNames.length > 0 ? stickerNames.join('、') : '（无）'
+  return `把下面的群聊纯文本草稿机械转换成JSON。不要润色、不要改写、不要新增消息。
+
+【发言人索引】
+${speakerLines}
+
+【可用表情包】
+${stickersText}
+
+【草稿】
+${rawText}
+
+【抽取规则】
+- 每一行格式通常是 <人名>（想法）[心情]“消息内容”。
+- speakerIndex 必须按上面的发言人索引填写；speakerName 保留原人名用于调试。
+- content 只放双引号里的消息内容，去掉外层引号，不能残留<人名>、（想法）、[心情]。
+- thought 取圆括号里的想法，原样保留。
+- mood 取方括号里的心情，原样保留。
+- 每条消息都必须有非空 thought 和 mood；草稿缺失时根据该行语境补一个短的。
+- 如果消息内容是 [sticker:名字]，输出 {"speakerIndex":n,"speakerName":"...","type":"sticker","name":"名字","thought":"...","mood":"..."}。
+- sticker 名字必须来自可用表情包；不在列表里就改成普通text内容。
+- 如果草稿里自然提到不懂的新词/热梗/作品名，可在knowledgeQueries里放最多2个查询；没有就给空数组。
+- turnSummary 用一句话概括这一轮群聊发生了什么。
+- groupVibe 必填，用20到60字概括本轮之后最新的群聊氛围，会直接替换旧群聊氛围。
+
+只输出JSON，格式:
+{"messages":[{"speakerIndex":1,"speakerName":"...","type":"text","content":"...","thought":"...","mood":"..."}],"turnSummary":"...","groupVibe":"...","knowledgeQueries":[]}`
+}
+
 function parseSpeakerIndex(v: unknown): number | null {
   const n = typeof v === 'number' ? v : Number(v)
   return Number.isFinite(n) && n >= 1 ? Math.floor(n) : null
@@ -203,11 +371,13 @@ function parseSpeakerIndex(v: unknown): number | null {
 export interface ParsedGroupTurn {
   bubbles: GroupAiBubble[]
   knowledgeQueries: string[]
+  turnSummary: string
+  groupVibe: string
 }
 
 export function parseGroupAiResponse(raw: string, speakerCount: number): ParsedGroupTurn {
   const trimmed = raw.trim()
-  if (!trimmed) return { bubbles: [], knowledgeQueries: [] }
+  if (!trimmed) return { bubbles: [], knowledgeQueries: [], turnSummary: '', groupVibe: '' }
 
   const jsonResult = tryParseGroupJson(trimmed, speakerCount)
   if (jsonResult && jsonResult.bubbles.length > 0) return jsonResult
@@ -217,7 +387,7 @@ export function parseGroupAiResponse(raw: string, speakerCount: number): ParsedG
     .map((line) => line.trim())
     .filter(Boolean)
     .map((content, i) => ({ speakerIndex: (i % speakerCount) + 1, type: 'text' as const, content }))
-  return { bubbles: fallbackBubbles, knowledgeQueries: [] }
+  return { bubbles: fallbackBubbles, knowledgeQueries: [], turnSummary: fallbackBubbles.map((b) => b.content).join(' ').slice(0, 160), groupVibe: '群聊氛围暂未更新。' }
 }
 
 function tryParseGroupJson(trimmedRaw: string, speakerCount: number): ParsedGroupTurn | null {
@@ -245,13 +415,21 @@ function tryParseGroupJson(trimmedRaw: string, speakerCount: number): ParsedGrou
     if (!m || typeof m !== 'object') continue
     const speakerIndex = parseSpeakerIndex((m as { speakerIndex?: unknown }).speakerIndex)
     if (speakerIndex === null || speakerIndex > speakerCount) continue
+    const speakerName = typeof (m as { speakerName?: unknown }).speakerName === 'string' ? (m as { speakerName: string }).speakerName.trim() : undefined
+    const thought = typeof (m as { thought?: unknown }).thought === 'string' ? (m as { thought: string }).thought.trim() : undefined
+    const mood = typeof (m as { mood?: unknown }).mood === 'string' ? (m as { mood: string }).mood.trim() : undefined
     if (m.type === 'text' && typeof m.content === 'string' && m.content.trim()) {
-      bubbles.push({ speakerIndex, type: 'text', content: m.content.trim() })
+      bubbles.push({ speakerIndex, speakerName, type: 'text', content: m.content.trim(), thought, mood })
     } else if (m.type === 'sticker' && typeof m.name === 'string' && m.name.trim()) {
-      bubbles.push({ speakerIndex, type: 'sticker', name: m.name.trim() })
+      bubbles.push({ speakerIndex, speakerName, type: 'sticker', name: m.name.trim(), thought, mood })
     }
   }
-  return { bubbles, knowledgeQueries: parseKnowledgeQueriesField(parsed.knowledgeQueries) }
+  return {
+    bubbles,
+    knowledgeQueries: parseKnowledgeQueriesField(parsed.knowledgeQueries),
+    turnSummary: typeof parsed.turnSummary === 'string' ? parsed.turnSummary.trim() : '',
+    groupVibe: typeof parsed.groupVibe === 'string' ? parsed.groupVibe.trim() : '',
+  }
 }
 
 /** Called when a contact is deleted — group membership shouldn't keep dangling references to a contact that no longer exists. */

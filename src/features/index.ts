@@ -8,7 +8,6 @@ import { personalityTraitsModule } from './personalityTraits'
 import { proactiveChatModule } from './proactiveChat'
 import { moodModule } from './mood'
 import { mindReadingModule } from './mindReading'
-import { validatorModule } from './validator'
 import { intentModule } from './intent'
 import { selfIterationModule } from './selfIteration'
 import type { FeatureModule, ParentModule } from './types'
@@ -26,7 +25,7 @@ export const PARENT_MODULES: ParentModule[] = [
     id: 'chat-assist',
     name: '聊天辅助',
     icon: '🛠️',
-    description: '校验器和AI自主行为等辅助能力',
+    description: 'AI自主行为等辅助能力',
   },
   {
     id: 'more-interaction',
@@ -51,7 +50,6 @@ export const ALL_MODULES: FeatureModule[] = [
   moodModule,
   mindReadingModule,
   intentModule,
-  validatorModule,
   selfIterationModule,
 ]
 

@@ -165,7 +165,7 @@ export function SkyEyePage() {
                                 bubbles: parsed.parsedBubbles,
                                 mood: parsed.mood,
                                 thought: parsed.thought,
-                                validator: parsed.validator,
+                                qualityCheck: parsed.qualityCheck ?? parsed.validator,
                               },
                               null,
                               2,
