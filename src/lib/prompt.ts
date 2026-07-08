@@ -147,6 +147,7 @@ export function buildSystemPromptSections(opts: {
   worldviewText?: string
   knowledgeDigestText?: string
   speechSamplesText?: string
+  recentMemoriesText?: string
 }): PromptSection[] {
   const stickersText =
     opts.stickerNames.length > 0
@@ -179,7 +180,10 @@ export function buildSystemPromptSections(opts: {
   // --- Section 4: Memory ---
   const factsFallback = `（还没有具体的共同经历 但你们已经是${opts.relationshipBase}关系 不是陌生人）`
   const styleFallback = `（还没有形成具体的相处习惯 但语气要直接符合${opts.relationshipBase}的关系定位 不能表现得生疏）`
-  const memorySection = `【你对TA的了解】\n${opts.memoryFacts || factsFallback}\n\n【相处状态】\n${opts.memoryStyle || styleFallback}`
+  const recentMemoriesBlock = opts.recentMemoriesText
+    ? `\n\n【最近的记忆碎片】\n${opts.recentMemoriesText}`
+    : ''
+  const memorySection = `【你对TA的了解】\n${opts.memoryFacts || factsFallback}\n\n【相处状态】\n${opts.memoryStyle || styleFallback}${recentMemoriesBlock}`
 
   // --- Section 5: Mood (separate so the model focuses on it) ---
   const moodSection = opts.activeMood
@@ -256,6 +260,7 @@ export interface PersonaGenerationResult {
   avatarKeyword: string
   personalityTrait: string
   speechSamples?: string[]
+  mbti: string
 }
 
 export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCategory: AvatarCategory): string {
@@ -286,6 +291,7 @@ export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCate
 {
   "name": "这个人的名字或者网名",
   "persona": "第三人称描述这个人的性格、说话习惯、大概的背景和生活状态、和用户的关系细节 写成一段自然语言 200到400字之间 要具体真实 不要写成产品说明书",
+  "mbti": "这个人的MBTI类型 根据你设计的人设推断最符合的四字母 比如INFP/ESTJ/INTJ等 必须是一个有效的MBTI类型",
   "schedule": [
     { "dayOfWeek": 1, "startHour": 9, "endHour": 18, "phoneAccess": "unavailable", "location": "公司", "activity": "上班" },
     { "dayOfWeek": 1, "startHour": 23, "endHour": 7, "phoneAccess": "unavailable", "location": "家里", "activity": "睡觉" }
@@ -295,6 +301,7 @@ export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCate
 要求:
 - name要符合年龄段和性别 可以是真实姓名也可以是网名/昵称 不要用"AI""助手""小美"这种明显是虚构工具人的名字 除非用户明确要求
 - persona里要体现性格倾向和关系定位 但要写得像在描述一个真实存在的普通人 而不是罗列标签
+- mbti必须和persona里描述的性格一致 是这个人设最自然对应的MBTI类型
 - schedule每天写1到2个主要安排即可(比如上班、上课、运动、社交等) 不必覆盖所有小时 只需把最典型的写出来 太多反而干扰 dayOfWeek是0-6(0是周日) startHour/endHour是24小时制的整数(跨零点直接写startHour:23 endHour:7 系统会处理) phoneAccess只能是"available"或"unavailable" 大部分时间是available 只有上班上课睡觉才unavailable 一共7到14条即可
 - 只输出JSON 不要有markdown代码块标记`
 }
@@ -313,6 +320,9 @@ export function parsePersonaGeneration(raw: string): PersonaGenerationResult | n
             .map((sample: string) => sample.trim().slice(0, 80))
             .slice(0, 8)
         : []
+      const mbtiRaw = typeof parsed.mbti === 'string' ? parsed.mbti.trim().toUpperCase() : ''
+      // Validate: must be exactly 4 letters from the MBTI dimensions.
+      const mbti = /^[IE][SN][TF][JP]$/.test(mbtiRaw) ? mbtiRaw : ''
       return {
         avatarKeyword: typeof parsed.avatarKeyword === 'string' ? parsed.avatarKeyword.trim() : '',
         name: parsed.name.trim(),
@@ -320,6 +330,7 @@ export function parsePersonaGeneration(raw: string): PersonaGenerationResult | n
         schedule: validateScheduleBlocks(parsed.schedule),
         personalityTrait: PERSONALITY_TRAIT_OPTIONS.some((opt) => opt.value === trait) ? trait : '无',
         speechSamples,
+        mbti,
       }
     }
   } catch {
@@ -387,7 +398,13 @@ export function buildRawChatPrompt(opts: {
   personalityTrait?: string
   worldviewText?: string
   recentContext: string
+  latestUserText?: string
+  activeIntentText?: string
+  selfIterationGlobalText?: string
+  selfIterationContactText?: string
   stickerNames: string[]
+  mbti?: string
+  recentMemoriesText?: string
 }): string {
   const worldviewLine = opts.worldviewText ? `这个世界: ${opts.worldviewText}。` : ''
   const traitLine = opts.personalityTrait && opts.personalityTrait !== '无'
@@ -400,9 +417,28 @@ export function buildRawChatPrompt(opts: {
   const rel = opts.relationshipBase || '朋友'
   const stylePrompt = opts.stylePrompt.replace(/朋友/g, rel)
 
-  return `你是${opts.name}。${worldviewLine}
+  const mbtiLine = opts.mbti ? ` MBTI: ${opts.mbti}（你的性格底层框架 一切反应和决定都要符合这个类型）` : ''
+  const selfIterationText = [
+    opts.selfIterationGlobalText ? `【用户相处模型 - 全局】\n${opts.selfIterationGlobalText}` : '',
+    opts.selfIterationContactText ? `【你和用户的自我迭代记录】\n${opts.selfIterationContactText}` : '',
+  ].filter(Boolean).join('\n\n')
+  const latestUserLine = opts.latestUserText ? `\n\n【本轮最新消息】\n${opts.latestUserText}` : ''
+  const pragmaticRules = `\n\nConsistency and pragmatic-humor rules:
+- Reply to the latest user message first, especially when the user is questioning, correcting, or pushing back.
+- Keep your own identity separate from third parties mentioned in chat.
+- Do not invent concrete scenes such as class, teacher, classroom, offline meeting, or past promises unless persona, memory, or recent chat clearly supports them.
+- If you got the context wrong, admit it naturally and correct course.
+- Watch for pragmatic humor: if you asked for a specific answer and the user gives an over-broad, tautological, deliberately literal, or absurd answer, treat it as likely a joke. Example: you ask what they want to eat, they say "I want to eat food/rice"; catch the joke or tease lightly before continuing.`
+  const memoriesLine = opts.recentMemoriesText ? `\n\n【最近的记忆碎片】\n${opts.recentMemoriesText}` : ''
+  return `你是${opts.name}。${mbtiLine}${worldviewLine}
 ${stylePrompt}${traitLine}
-${opts.recentContext}${stickerHint}
+${opts.recentContext}${memoriesLine}${latestUserLine}${pragmaticRules}${selfIterationText ? `\n\n${selfIterationText}` : ''}${opts.activeIntentText ? `\n\n${opts.activeIntentText}` : ''}${stickerHint}
+
+一致性要求:
+- 先回应【本轮最新消息】本身，尤其是用户在质疑、纠正、反问你的时候，不要跳回旧话题继续演。
+- 严格区分“你自己的身份”和“对话里提到的第三方”。用户问“你是老师吗/你不是老师吧”这类问题时，必须按你的人设直接澄清。
+- 不要凭空编造上课、老师、课堂、现实见面、过去约定等具体场景；只有人设、记忆、最近聊天明确出现过才可以提。
+- 如果刚才说错、看错或接岔了，可以自然承认并修正，不要硬圆。
 
 回复要求:
 - 用换行把长回复拆成短句 每句占一行

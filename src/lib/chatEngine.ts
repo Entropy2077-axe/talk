@@ -5,7 +5,8 @@ import { chatCompletion, coalesceConsecutiveRoles, type ChatMessage } from './de
 import { extractJsonObject, parseAiResponse, typingDelayMs } from './aiProtocol'
 import { formatSpeechSamplesForScene, buildRawChatPrompt, buildJsonConversionPrompt } from './prompt'
 import { isModuleEnabled } from '../features'
-import { CONTEXT_WINDOW_SIZE, activeUpcomingPlansText, maybeUpdateMemory } from './memory'
+import { CONTEXT_WINDOW_SIZE, activeUpcomingPlansText, maybeUpdateMemory, recentMemoriesText } from './memory'
+import { activeIntentPrompt, activeIntents, markIntentsUsed } from './intent'
 import { describeCurrentTime, ageFromBirthday } from './time'
 import { describeCurrentSchedule, describeUpcomingScheduleText, pruneExpiredOverrides } from './schedule'
 import { processKnowledgeQueries } from './knowledgeBase'
@@ -15,6 +16,7 @@ import { previewForMessage } from './messagePreview'
 import { validatePrivateTurn, optimizePrivateTurn } from './responseQuality'
 import { recentSocialEventsText } from './socialEvents'
 import { useChatUiStore } from '../store/useChatUiStore'
+import { enqueueSelfIterationTask } from './selfIteration'
 import type { AiBubble, AppSettings, Contact, Message, MessageType, ScheduleOverride, Sticker } from '../types'
 
 /**
@@ -125,23 +127,58 @@ export function formatStructuredHistoryEvent(
   }
 }
 
-function parseAiTurnDebugPayload(raw: string, bubbles: AiBubble[], knowledgeQueries: string[], mood?: string): unknown {
-  const trimmed = raw.trim()
+function parseAiTurnDebugPayload(opts: {
+  rawText: string
+  jsonRaw: string
+  finalRaw: string
+  bubbles: AiBubble[]
+  knowledgeQueries: string[]
+  mood?: string
+  thought?: string
+  validator: { enabled: boolean; mode: AppSettings['validatorMode']; repaired: boolean; optimized: boolean; reason?: string }
+  injectedIntents: ReturnType<typeof activeIntents>
+}): unknown {
+  const { finalRaw, jsonRaw, rawText, bubbles, knowledgeQueries, mood, thought, validator, injectedIntents } = opts
+  const trimmed = finalRaw.trim()
   const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
   const text = fenceMatch ? fenceMatch[1].trim() : trimmed
+  let conversionParsed: unknown = null
   try {
-    return JSON.parse(text)
+    conversionParsed = JSON.parse(text)
   } catch {
     const extracted = extractJsonObject(text)
     if (extracted) {
       try {
-        return JSON.parse(extracted)
+        conversionParsed = JSON.parse(extracted)
       } catch {
         // fall through
       }
     }
   }
-  return { raw, parsedBubbles: bubbles, knowledgeQueries, mood }
+  return {
+    rawText,
+    jsonRaw,
+    finalRaw,
+    conversionParsed,
+    parsedBubbles: bubbles,
+    validator,
+    mood,
+    thought,
+    knowledgeQueries,
+    injectedIntents,
+    memoryUpdate: null,
+  }
+}
+
+function formatRecentConversationForReview(messages: Message[], contact: Contact): string {
+  return messages
+    .slice(-10)
+    .map((m) => {
+      const speaker = m.role === 'user' ? 'User' : displayName(contact)
+      if (m.type !== 'text') return `${speaker}: [${m.type}: ${m.content}]`
+      return `${speaker}: ${m.content}`
+    })
+    .join('\n')
 }
 
 export function buildUserProfileText(settings: AppSettings): string {
@@ -268,16 +305,22 @@ async function runAiTurn(
     if (pendingEvents.length > 0) await db.contacts.update(contact.id, { pendingEvents: [] })
     const socialEventsText = await recentSocialEventsText([contact.id], 4)
     const recentEventsText = [pendingEvents.join('；'), socialEventsText].filter(Boolean).join('\n')
+    const injectedIntents = isModuleEnabled('intent') ? activeIntents(contact, now) : []
+    const injectedIntentText = activeIntentPrompt(injectedIntents)
 
     // ---- Step 1: build context sections (no JSON protocol) ----
     const scheduleText = describeUpcomingScheduleText(contact, new Date())
+    const recentMemories = await recentMemoriesText(contact.id)
     const contextSections = buildRawChatPrompt({
       name: contact.name,
       persona: contact.systemPrompt,
       stylePrompt: settings.globalSystemPrompt,
+      selfIterationGlobalText: isModuleEnabled('selfIteration') ? settings.selfIterationGlobalPrompt : undefined,
+      selfIterationContactText: isModuleEnabled('selfIteration') ? contact.selfIterationPrompt : undefined,
       relationshipBase: isModuleEnabled('relationship') ? (contact.relationshipBase || '朋友') : '朋友',
       personalityTrait: isModuleEnabled('personalityTraits') ? contact.personalityTrait : undefined,
       worldviewText: isModuleEnabled('worldview') ? (settings.worldview || undefined) : undefined,
+      latestUserText: _triggeringUserText,
       recentContext: [
         `【你和对方的关系】${relationshipLine(
           isModuleEnabled('relationship') ? (contact.relationshipBase || '朋友') : '朋友',
@@ -291,7 +334,10 @@ async function runAiTurn(
           ? `【说话样例】\n${formatSpeechSamplesForScene(contact.speechSamples, 'private', 3)}`
           : '',
       ].filter(Boolean).join('\n\n'),
+      activeIntentText: injectedIntentText,
       stickerNames: stickers.map((s) => s.name),
+      mbti: contact.mbti || undefined,
+      recentMemoriesText: recentMemories || undefined,
     })
 
     const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
@@ -338,15 +384,23 @@ async function runAiTurn(
     console.log(`[chat] 多功能模型转换JSON: ${jsonRaw.slice(0, 200)}`)
     let finalRaw = jsonRaw
     let { bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw)
+    const validatorDebug = {
+      enabled: isModuleEnabled('validator'),
+      mode: settings.validatorMode,
+      repaired: false,
+      optimized: false,
+      reason: undefined as string | undefined,
+    }
 
     // Validator module — two modes, both skipped when the module is off.
-    if (isModuleEnabled('validator') && bubbles.length > 0) {
+    if (validatorDebug.enabled && bubbles.length > 0) {
       if (settings.validatorMode === 'quality') {
         // Mode 1: quality check via utility model, rewrite on failure.
         const checked = await validatePrivateTurn({
           settings,
           contact,
           latestUserText: _triggeringUserText,
+          recentConversationText: formatRecentConversationForReview(recentHistory, contact),
           raw: finalRaw,
           bubbles,
           signal: controller.signal,
@@ -354,6 +408,8 @@ async function runAiTurn(
         if (streamByConversation.get(conversationId) !== streamId) return
         if (checked.repaired) {
           console.warn(`[chat] 校验器重写 对方=${displayName(contact)} 原因=${checked.reason ?? 'unknown'}`)
+          validatorDebug.repaired = true
+          validatorDebug.reason = checked.reason
           finalRaw = checked.raw
           ;({ bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw))
         }
@@ -370,6 +426,7 @@ async function runAiTurn(
         if (streamByConversation.get(conversationId) !== streamId) return
         if (optimized) {
           console.log(`[chat] 校验器优化 对方=${displayName(contact)}`)
+          validatorDebug.optimized = true
           finalRaw = optimized
           ;({ bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw))
         }
@@ -386,12 +443,34 @@ async function runAiTurn(
       id: aiTurnId,
       conversationId,
       raw: finalRaw,
-      parsed: parseAiTurnDebugPayload(finalRaw, bubbles, knowledgeQueries, turnMood),
+      parsed: parseAiTurnDebugPayload({
+        rawText,
+        jsonRaw,
+        finalRaw,
+        bubbles,
+        knowledgeQueries,
+        mood: turnMood,
+        thought: turnThought,
+        validator: validatorDebug,
+        injectedIntents,
+      }),
       knowledgeQueries,
       createdAt: Date.now(),
     })
     if (isModuleEnabled('knowledgeBase')) processKnowledgeQueries(knowledgeQueries, settings)
-    revealBubbles(conversationId, contact, settings, bubbles, streamId, aiTurnId, _triggeringUserText, turnMood, turnThought, finalRaw)
+    revealBubbles(
+      conversationId,
+      contact,
+      settings,
+      bubbles,
+      streamId,
+      aiTurnId,
+      _triggeringUserText,
+      turnMood,
+      turnThought,
+      finalRaw,
+      injectedIntents.map((intent) => intent.id),
+    )
   } catch (err) {
     if (streamByConversation.get(conversationId) !== streamId) return
     if (err instanceof DOMException && err.name === 'AbortError') return
@@ -412,6 +491,7 @@ function revealBubbles(
   turnMood?: string,
   turnThought?: string,
   finalRaw?: string,
+  injectedIntentIds: string[] = [],
 ): void {
   const timers: ReturnType<typeof setTimeout>[] = []
   let cumulative = 0
@@ -493,10 +573,32 @@ function revealBubbles(
 
       if (i === bubbles.length - 1) {
         useChatEngineStore.getState().patch(conversationId, { aiTyping: false })
-        maybeUpdateMemory(contact.id, conversationId, settings)
+        if (injectedIntentIds.length > 0) {
+          await markIntentsUsed(contact.id, injectedIntentIds)
+        }
+        const memoryUpdate = await maybeUpdateMemory(contact.id, conversationId, settings)
+        if (memoryUpdate) {
+          const turn = await db.aiTurns.get(aiTurnId)
+          const parsed =
+            turn?.parsed && typeof turn.parsed === 'object'
+              ? { ...(turn.parsed as Record<string, unknown>), memoryUpdate }
+              : { memoryUpdate }
+          await db.aiTurns.update(aiTurnId, { parsed })
+        }
         if (turnMood) {
           await db.contacts.update(contact.id, {
             mood: { text: turnMood, expiresAt: Date.now() + settings.moodExpiryMs },
+          })
+        }
+        if (_triggeringUserText && isModuleEnabled('selfIteration')) {
+          enqueueSelfIterationTask({
+            conversationId,
+            contactId: contact.id,
+            contactName: contact.name,
+            latestUserText: _triggeringUserText,
+            latestAssistantText: bubbles
+              .map((b) => (b.type === 'text' ? b.content : `[${b.type}] ${'name' in b ? b.name : 'label' in b ? b.label : b.summary}`))
+              .join('\n'),
           })
         }
       }

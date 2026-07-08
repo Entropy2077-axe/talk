@@ -79,6 +79,7 @@ export async function validatePrivateTurn(opts: {
   settings: AppSettings
   contact: Contact
   latestUserText: string
+  recentConversationText?: string
   raw: string
   bubbles: AiBubble[]
   signal?: AbortSignal
@@ -88,10 +89,22 @@ export async function validatePrivateTurn(opts: {
 Check: (1) reply fits persona, (2) answers user, (3) no invented facts, (4) mood field is present and non-empty, (5) thought field is present and non-empty.
 If valid, return valid=true.
 If invalid, rewrite as fixedRaw. Must include mood and thought: {"messages":[{"type":"text","content":"..."}],"mood":"15字情绪","thought":"30字内心想法 和嘴上说的不一样"}. Keep it short.`
+  const strictContinuityPrompt = `Extra invalid cases:
+- The user is questioning/correcting the assistant, but the reply ignores that and continues an old bit.
+- The reply confuses the persona's own identity with a third party mentioned in chat, such as acting as if "teacher" is the persona when the persona is not a teacher.
+- The reply invents concrete scenes like class, teacher, classroom, offline meetings, prior promises, or past events that are not supported by persona/memory/latest message.
+- The reply tries to forcibly rationalize a previous mistake instead of naturally clarifying it.
+- Logical incoherence: wrong reference resolution, wrong cause/effect, contradictory timeline, contradicting the user's correction, answering a different question, or treating a joke/metaphor as literal without evidence.
+- If the user asks "why/what/are you X/did X happen", the reply must directly resolve that logical question before adding emotion or banter.
+- Pragmatic/humor failure: if context asks for a specific answer and the user gives an over-broad, tautological, deliberately literal, or absurd answer, treat it as likely humor unless the user sounds distressed. Example: assistant asks "what do you want to eat?", user says "I want to eat rice/food" instead of a dish; a good reply catches the joke or teases lightly, not a literal nutrition/meal-planning response.
+- If the user is joking, the reply should acknowledge the joke first, then optionally continue the topic.
+When rewriting, answer the latest user message first, keep it short, and admit a mistake naturally if needed.`
   const userPrompt = `Persona name: ${name}
 Persona: ${truncate(opts.contact.systemPrompt || '', 700)}
 Relationship: ${opts.contact.relationshipBase || '朋友'} ${truncate(opts.contact.relationshipDynamic || '', 160)}
 Memory/style: ${truncate(opts.contact.memoryStyle || opts.contact.memoryFacts || '', 260)}
+Recent conversation:
+${truncate(opts.recentConversationText || '(none)', 1200)}
 Latest user message: ${truncate(opts.latestUserText || '(background event)', 500)}
 Assistant rendered reply:
 ${truncate(privateBubblesText(opts.bubbles), 900)}
@@ -100,7 +113,7 @@ ${truncate(opts.raw, 1200)}`
 
   return validateAndMaybeRepair({
     settings: opts.settings,
-    systemPrompt,
+    systemPrompt: `${systemPrompt}\n${strictContinuityPrompt}`,
     userPrompt,
     raw: opts.raw,
     signal: opts.signal,

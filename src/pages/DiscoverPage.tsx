@@ -18,6 +18,7 @@ export function DiscoverPage() {
   const [searching, setSearching] = useState(false)
   const navigate = useNavigate()
   const enabledModules = useSettingsStore((s) => s.enabledModules)
+  const adminModeEnabled = useSettingsStore((s) => s.adminModeEnabled)
   const momentsLastReadAt = useSettingsStore((s) => s.momentsLastReadAt)
   const moments = useLiveQuery(() => db.moments.toArray(), []) ?? []
   const socialEvents = useLiveQuery(() => db.socialEvents.toArray(), []) ?? []
@@ -38,9 +39,14 @@ export function DiscoverPage() {
     return entries
   }, [enabledModules])
 
+  const adminEntry = adminModeEnabled
+    ? [{ to: '/sky-eye', icon: '🔭', label: '天眼' }]
+    : []
+
   const entries = [
     ...BASE_ENTRIES,
     ...moduleEntries,
+    ...adminEntry,
   ]
 
   return (

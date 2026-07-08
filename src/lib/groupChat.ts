@@ -99,6 +99,9 @@ export function buildGroupSystemPrompt(opts: {
   recentEventsText?: string
   worldviewText?: string
   knowledgeDigestText?: string
+  selfIterationGlobalText?: string
+  /** contactId → formatted recent memories text (from contactMemories table) */
+  speakerMemoriesMap?: Map<string, string>
 }): string {
   const rosterText = opts.allMembers.map((m) => `- ${m.name}`).join('\n')
 
@@ -111,19 +114,22 @@ export function buildGroupSystemPrompt(opts: {
       const factsFallback = `（还没有具体的聊天记忆 但是${base}关系 不是陌生人）`
       const styleFallback = `（语气要符合${base}的关系定位 不能生疏客气）`
       const plansLine = plansText ? `\n【和用户的约定】${plansText}` : ''
+      const selfIterationLine = c.selfIterationPrompt ? `\n【你和用户的自我迭代记录】${c.selfIterationPrompt}` : ''
       const trait = c.personalityTrait?.trim()
       const traitLine =
         isModuleEnabled('personalityTraits') && trait && trait !== '无'
           ? `\n【性格特质】${trait}（影响情感反应模式，不是说话风格——说话风格已在人设里描述）`
           : ''
       const samplesLine = formatSpeechSamplesForScene(c.speechSamples, 'group', 2)
+      const recentMemoText = opts.speakerMemoriesMap?.get(c.id)
+      const recentMemoBlock = recentMemoText ? `\n【最近的记忆碎片】\n${recentMemoText}` : ''
       return `发言人${i + 1}: ${c.name}
 与用户的关系: ${base}${dynamic}
-【人设 - 必须严格遵守】${c.systemPrompt || '自由发挥'}${traitLine}
+【人设 - 必须严格遵守】${c.systemPrompt || '自由发挥'}${c.mbti ? `\n【MBTI】${c.mbti}（性格底层框架 一切反应和决定都应符合这个类型）` : ''}${traitLine}
 ${samplesLine ? `【说话样例】\n${samplesLine}\n` : ''}
 【当前状态】${scheduleText || '没有特别安排'}
 【对用户的了解】${c.memoryFacts || factsFallback}
-【和用户相处的习惯】${c.memoryStyle || styleFallback}${plansLine}`
+【和用户相处的习惯】${c.memoryStyle || styleFallback}${plansLine}${recentMemoBlock}${selfIterationLine}`
     })
     .join('\n\n')
 
@@ -133,6 +139,7 @@ ${samplesLine ? `【说话样例】\n${samplesLine}\n` : ''}
       : '（当前没有可用表情包）'
 
   const worldviewPrefix = opts.worldviewText ? `【世界设定】\n${opts.worldviewText}\n\n` : ''
+  const selfIterationLine = opts.selfIterationGlobalText ? `\n【用户相处模型 - 全局】\n${opts.selfIterationGlobalText}` : ''
   const knowledgeLine = opts.knowledgeDigestText
     ? `\n热梗资讯: ${opts.knowledgeDigestText}`
     : ''
@@ -162,7 +169,7 @@ ${speakerBlocks}
 
 【当前】
 时间: ${opts.currentTimeText}
-用户（群成员之一）: ${opts.userProfileText}${knowledgeLine}${targetedContextLine}${recentEventsLine}
+用户（群成员之一）: ${opts.userProfileText}${knowledgeLine}${targetedContextLine}${recentEventsLine}${selfIterationLine}
 
 【输出格式】
 整个输出必须是JSON:

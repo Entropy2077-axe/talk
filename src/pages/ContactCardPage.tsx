@@ -19,6 +19,7 @@ import { warmthLabel, relationshipLine } from '../lib/relationship'
 import { buildUserProfileText } from '../lib/chatEngine'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { PERSONALITY_TRAIT_OPTIONS } from '../types'
+import { activeIntentPrompt, activeIntents, clearIntentQueue } from '../lib/intent'
 
 function LatestAiTurnJson({ contactId }: { contactId: string }) {
   const latestTurn = useLiveQuery(async () => {
@@ -52,7 +53,7 @@ export function ContactCardPage() {
   const [pickingPersonalityTrait, setPickingPersonalityTrait] = useState(false)
   const relEnabled = useModuleEnabled('relationship')
   const personalityEnabled = useModuleEnabled('personalityTraits')
-  const adminEnabled = useModuleEnabled('adminMode')
+  const adminEnabled = useSettingsStore((s) => s.adminModeEnabled)
   const moodEnabled = useModuleEnabled('mood')
 
   const contact = useLiveQuery(() => (contactId ? db.contacts.get(contactId) : undefined), [contactId])
@@ -98,6 +99,11 @@ export function ContactCardPage() {
   }
 
   const activePlans = activeUpcomingPlans(contact.upcomingPlans ?? [], new Date())
+  const visibleActiveIntents = activeIntents(contact, Date.now(), 10)
+  const usedIntents = (contact.intentQueue ?? [])
+    .filter((intent) => intent.status === 'used')
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, 5)
   const hasMemory = contact.memoryFacts || contact.memoryStyle || activePlans.length > 0
   const schedule = contact.schedule ?? []
   const activeOverrides = pruneExpiredOverrides(contact.scheduleOverrides ?? [], new Date())
@@ -110,14 +116,18 @@ export function ContactCardPage() {
   // contact instead of going through the "read once then clear" flow.
   const now = new Date()
   const pendingEvents = contact.pendingEvents ?? []
+  const previewActiveIntents = isModuleEnabled('intent') ? activeIntents(contact, now.getTime()) : []
   // ---- admin-mode prompt preview (two-step pipeline) ----
   const mainModelPrompt = adminEnabled
     ? buildRawChatPrompt({
         name: contact.name,
         persona: contact.systemPrompt,
         stylePrompt: settings.globalSystemPrompt,
+        selfIterationGlobalText: isModuleEnabled('selfIteration') ? settings.selfIterationGlobalPrompt : undefined,
+        selfIterationContactText: isModuleEnabled('selfIteration') ? contact.selfIterationPrompt : undefined,
         personalityTrait: personalityEnabled ? contact.personalityTrait : undefined,
         worldviewText: isModuleEnabled('worldview') ? (settings.worldview || undefined) : undefined,
+        latestUserText: '【预览】这里会放入用户本轮最新消息',
         recentContext: [
           `【你和对方的关系】${relationshipLine(
             relEnabled ? (contact.relationshipBase || '朋友') : '朋友',
@@ -131,7 +141,9 @@ export function ContactCardPage() {
             ? `【说话样例】\n${formatSpeechSamplesForScene(contact.speechSamples, 'private', 3)}`
             : '',
         ].filter(Boolean).join('\n\n'),
+        activeIntentText: activeIntentPrompt(previewActiveIntents),
         stickerNames: stickers.map((s) => s.name),
+        mbti: contact.mbti || undefined,
       })
     : ''
   const conversionPrompt = adminEnabled
@@ -308,6 +320,57 @@ export function ContactCardPage() {
           </div>
         )}
       </section>
+
+      {adminEnabled && (
+        <section className="mt-3 bg-white px-4 py-4">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-xs font-medium text-gray-400">AI 内部意图</h3>
+            {(contact.intentQueue ?? []).length > 0 && (
+              <button onClick={() => clearIntentQueue(contactId!)} className="text-xs text-gray-400 underline">
+                清空内部意图
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-3 text-sm text-gray-600">
+            <div>
+              <p className="mb-1 text-xs text-gray-400">Active</p>
+              {visibleActiveIntents.length === 0 ? (
+                <p className="text-gray-400">暂无</p>
+              ) : (
+                <ul className="space-y-1">
+                  {visibleActiveIntents.map((intent) => (
+                    <li key={intent.id} className="rounded-lg bg-gray-50 px-2.5 py-2">
+                      <p>{intent.text}</p>
+                      <p className="mt-0.5 text-[11px] text-gray-400">
+                        {intent.kind} / {intent.confidence} / {new Date(intent.createdAt).toLocaleString()}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div>
+              <p className="mb-1 text-xs text-gray-400">Used 最近 5 条</p>
+              {usedIntents.length === 0 ? (
+                <p className="text-gray-400">暂无</p>
+              ) : (
+                <ul className="space-y-1">
+                  {usedIntents.map((intent) => (
+                    <li key={intent.id} className="rounded-lg bg-gray-50 px-2.5 py-2">
+                      <p>{intent.text}</p>
+                      <p className="mt-0.5 text-[11px] text-gray-400">
+                        {intent.kind} / {intent.confidence} / {new Date(intent.createdAt).toLocaleString()}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
 
       {adminEnabled && (
         <LatestAiTurnJson contactId={contactId!} />

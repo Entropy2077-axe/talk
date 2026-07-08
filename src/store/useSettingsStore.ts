@@ -44,9 +44,24 @@ export const useSettingsStore = create<SettingsState>()(
       customCurrencyEmoji: '💎',
       moodExpiryMs: 30 * 60 * 1000,
       validatorMode: 'quality',
-      enabledModules: ['shop', 'warehouse', 'worldview', 'knowledgeBase', 'relationship', 'personalityTraits', 'mood', 'validator'],
+      selfIterationGlobalPrompt: '',
+      adminModeEnabled: false,
+      enabledModules: ['shop', 'warehouse', 'worldview', 'knowledgeBase', 'relationship', 'personalityTraits', 'mood', 'intent', 'validator'],
       setSettings: (patch) => set(patch),
     }),
-    { name: 'talk-settings' },
+    {
+      name: 'talk-settings',
+      version: 1,
+      migrate: (persisted, version) => {
+        const next = persisted as Partial<SettingsState>
+        if (version < 1 && Array.isArray(next.enabledModules) && !next.enabledModules.includes('intent')) {
+          next.enabledModules = [...next.enabledModules, 'intent']
+        }
+        if (typeof next.selfIterationGlobalPrompt !== 'string') {
+          next.selfIterationGlobalPrompt = ''
+        }
+        return next
+      },
+    },
   ),
 )

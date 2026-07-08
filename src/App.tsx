@@ -20,6 +20,7 @@ import { SettingsPage } from './pages/SettingsPage'
 import { StickersPage } from './pages/StickersPage'
 import { ProfileEditPage } from './pages/ProfileEditPage'
 import { ModulesPage } from './pages/ModulesPage'
+import { SkyEyePage } from './pages/SkyEyePage'
 import { ALL_MODULES, useModuleEnabled } from './features'
 import { NotificationBanner } from './components/NotificationBanner'
 // Runs once at module load, regardless of admin mode — so there's already
@@ -78,6 +79,7 @@ function App() {
   useAutonomousBehaviorTimer()
   useAndroidBackButton()
   const themeMode = useSettingsStore((s) => s.themeMode ?? 'light')
+  const adminModeEnabled = useSettingsStore((s) => s.adminModeEnabled)
   const enabledModules = useSettingsStore((s) => s.enabledModules)
 
   // Build deduplicated route list from enabled modules.
@@ -122,6 +124,9 @@ function App() {
         {moduleRoutes.map((r) => (
           <Route key={r.path} path={r.path} element={<r.Component />} />
         ))}
+        {adminModeEnabled && (
+          <Route path="/sky-eye" element={<SkyEyePage />} />
+        )}
       </Routes>
     </div>
   )

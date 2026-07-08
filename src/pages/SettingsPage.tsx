@@ -26,6 +26,7 @@ export function SettingsPage() {
     chatBackground,
     currencyIconMode,
     customCurrencyEmoji,
+    adminModeEnabled,
     setSettings,
   } = useSettingsStore()
   const [confirmingWipe, setConfirmingWipe] = useState(false)
@@ -178,6 +179,11 @@ export function SettingsPage() {
     } finally {
       setPexelsTesting(false)
     }
+  }
+
+  function restoreDefaultPrompt() {
+    setPromptDraft(DEFAULT_STYLE_PROMPT)
+    setSettings({ globalSystemPrompt: DEFAULT_STYLE_PROMPT })
   }
 
   return (
@@ -464,7 +470,7 @@ export function SettingsPage() {
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-xs font-medium text-gray-400">说话风格提示词（对所有AI生效）</h2>
           <button
-            onClick={() => setPromptDraft(DEFAULT_STYLE_PROMPT)}
+            onClick={restoreDefaultPrompt}
             className="text-xs text-gray-400 underline"
           >
             恢复默认
@@ -511,6 +517,27 @@ export function SettingsPage() {
           备份包含联系人、人设、聊天记录、朋友圈、表情包、仓库、知识库、世界观收藏和当前设置。设置里如果保存过 API Key，备份文件里也会带上，请不要发给别人。
         </p>
         {backupStatus && <p className="mt-2 text-xs text-gray-500">{backupStatus}</p>}
+      </section>
+
+      <section className="mt-3 bg-white px-4 py-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-medium text-gray-900">管理员模式</h2>
+            <p className="text-[11px] text-gray-400">开启后在发现页显示天眼调试入口，联系人名片可查看系统提示词</p>
+          </div>
+          <button
+            onClick={() => setSettings({ adminModeEnabled: !adminModeEnabled })}
+            className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors ${
+              adminModeEnabled ? 'bg-[#07c160]' : 'bg-gray-200'
+            }`}
+          >
+            <span
+              className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+                adminModeEnabled ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
       </section>
 
       <section className="mt-3 bg-white px-4 py-3">

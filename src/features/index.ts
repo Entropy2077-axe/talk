@@ -9,23 +9,30 @@ import { proactiveChatModule } from './proactiveChat'
 import { moodModule } from './mood'
 import { mindReadingModule } from './mindReading'
 import { validatorModule } from './validator'
-import { adminModeModule } from './adminMode'
+import { intentModule } from './intent'
+import { selfIterationModule } from './selfIteration'
 import type { FeatureModule, ParentModule } from './types'
 
 // ---- parent modules (accordion groups in the UI) ----
 
 export const PARENT_MODULES: ParentModule[] = [
   {
-    id: 'more-interaction',
-    name: '更多互动',
-    icon: '🎮',
-    description: '商城购物与仓库赠送',
-  },
-  {
     id: 'character-soul',
     name: '角色灵魂',
-    icon: '🌟',
-    description: '世界观、知识、好感、人格与心情 — 让AI更有深度',
+    icon: '✨',
+    description: '世界观、知识库、好感度、特色人格、心情系统、读心与AI内部意图',
+  },
+  {
+    id: 'chat-assist',
+    name: '聊天辅助',
+    icon: '🛠️',
+    description: '校验器和AI自主行为等辅助能力',
+  },
+  {
+    id: 'more-interaction',
+    name: '更多互动',
+    icon: '🎁',
+    description: '商城购物与仓库赠送',
   },
 ]
 
@@ -43,8 +50,9 @@ export const ALL_MODULES: FeatureModule[] = [
   proactiveChatModule,
   moodModule,
   mindReadingModule,
+  intentModule,
   validatorModule,
-  adminModeModule,
+  selfIterationModule,
 ]
 
 /** Modules that don't belong to any parent — shown as standalone toggles. */
@@ -117,7 +125,7 @@ export function getEnabledDiscoverEntries(): { to: string; icon: string; label: 
 
 // ---- defaults ----
 
-/** Every module is on by default except proactiveChat and adminMode. */
+/** Every module is on by default except costlier/experimental background modules. */
 export const DEFAULT_ENABLED_MODULES: string[] = ALL_MODULES
-  .filter((m) => m.id !== 'proactiveChat' && m.id !== 'adminMode' && m.id !== 'mindReading')
+  .filter((m) => m.id !== 'proactiveChat' && m.id !== 'mindReading' && m.id !== 'selfIteration')
   .map((m) => m.id)

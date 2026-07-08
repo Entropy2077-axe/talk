@@ -10,22 +10,6 @@ async function clearDatabase(page: Page) {
   })
 }
 
-async function seedTodoRows(page: Page, count: number) {
-  await page.evaluate(async (rowCount) => {
-    const { db } = await import('/src/db/db.ts')
-    for (const table of db.tables) await table.clear()
-    await db.todos.bulkAdd(
-      Array.from({ length: rowCount }, (_, index) => ({
-        id: `todo-${index}`,
-        title: `Long todo ${index + 1}`,
-        done: false,
-        createdAt: Date.now() + index,
-        source: 'user' as const,
-      })),
-    )
-  }, count)
-}
-
 async function seedBackupFixture(page: Page) {
   await page.evaluate(async () => {
     const { db } = await import('/src/db/db.ts')
@@ -129,10 +113,23 @@ async function seedSearchAndGroupFixture(page: Page) {
       conversationId: 'conversation-a',
       raw: '{"messages":[{"type":"text","content":"first bubble"},{"type":"text","content":"second bubble"}],"knowledgeQueries":["nebula"]}',
       parsed: {
-        messages: [
+        rawText: 'first bubble\nsecond bubble',
+        conversionParsed: {
+          messages: [
+            { type: 'text', content: 'first bubble' },
+            { type: 'text', content: 'second bubble' },
+          ],
+          knowledgeQueries: ['nebula'],
+        },
+        parsedBubbles: [
           { type: 'text', content: 'first bubble' },
           { type: 'text', content: 'second bubble' },
         ],
+        mood: 'calm',
+        thought: 'debug thought',
+        validator: { enabled: true, mode: 'quality', repaired: false, optimized: false },
+        injectedIntents: [{ text: 'ask about tomorrow', kind: 'follow_up', confidence: 90 }],
+        memoryUpdate: { addedIntents: [{ text: 'ask about tomorrow', kind: 'follow_up', confidence: 90 }] },
         knowledgeQueries: ['nebula'],
       },
       knowledgeQueries: ['nebula'],
@@ -203,18 +200,14 @@ test('settings page restores contacts and settings from a backup file', async ({
   expect(restored.apiKey).toBe('sk-regression-secret')
 })
 
-test('long todo list keeps bottom navigation pinned to the viewport bottom', async ({ page }) => {
-  await page.goto('/#/todos')
-  await seedTodoRows(page, 45)
+test('discover page does not expose removed todo entry', async ({ page }) => {
+  await page.goto('/#/discover')
+  await clearDatabase(page)
   await page.reload()
 
-  const nav = page.locator('nav')
-  await expect(nav).toBeVisible()
-  const box = await nav.boundingBox()
-  const viewport = page.viewportSize()
-  expect(box).toBeTruthy()
-  expect(viewport).toBeTruthy()
-  expect(Math.abs(box!.y + box!.height - viewport!.height)).toBeLessThanOrEqual(1)
+  await expect(page.locator('nav')).toBeVisible()
+  await expect(page.getByText('待办')).toHaveCount(0)
+  await expect(page.locator('body')).not.toContainText('Todo')
 })
 
 
@@ -265,17 +258,19 @@ test('settings page backup json does not contain setSettings function field', as
 })
 
 test('sky-eye settings dump shows all three api keys as redacted not raw values', async ({ page }) => {
-  await page.goto('/#/sky-eye')
+  await page.goto('/#/settings')
   await clearDatabase(page)
   await page.evaluate(async () => {
     const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
     useSettingsStore.getState().setSettings({
+      adminModeEnabled: true,
       apiKey: 'sk-visible-bug',
       tavilyApiKey: 'tvly-visible-bug',
       pexelsApiKey: 'pexels-visible-bug',
     })
   })
   await page.reload()
+  await page.goto('/#/sky-eye')
 
   const body = page.locator('body')
   // Raw values must never appear
@@ -309,6 +304,20 @@ test('search overlay finds full chat history and group chats', async ({ page }) 
 
   await page.getByPlaceholder('搜索联系人、群聊、聊天记录').fill('Search Squad')
   await expect(page.getByRole('button', { name: '👥 Search Squad' })).toBeVisible()
+})
+
+test('chat page can generate a selected-message screenshot preview', async ({ page }) => {
+  await page.goto('/#/chat/conversation-a')
+  await seedSearchAndGroupFixture(page)
+  await page.reload()
+
+  await page.getByRole('button', { name: '选择' }).click()
+  await page.getByText('the hidden keyword is nebula').click()
+  await page.getByRole('button', { name: '生成截图 (1)' }).click()
+
+  await expect(page.getByAltText('聊天记录截图预览')).toBeVisible()
+  await expect(page.getByRole('button', { name: '保存图片' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '分享' })).toBeVisible()
 })
 
 test('group info page can add and remove members after creation', async ({ page }) => {
@@ -361,15 +370,16 @@ test('appearance settings enable dark mode and custom chat background', async ({
   expect(chatBackground).toBe('rgb(18, 52, 86)')
 })
 
-test('admin mode can expand assistant message debug json', async ({ page }) => {
-  await page.goto('/#/chat/conversation-a')
+test('admin mode can expand recent ai turn debug payload in sky-eye', async ({ page }) => {
+  await page.goto('/#/settings')
   await seedSearchAndGroupFixture(page)
   await page.reload()
+  await page.goto('/#/sky-eye')
 
-  await page.getByRole('button', { name: '展开 JSON' }).click()
-  await expect(page.getByText('"raw"')).toBeVisible()
-  await expect(page.getByText('"knowledgeQueries"')).toBeVisible()
-  await expect(page.getByText('second bubble')).toBeVisible()
+  await page.getByRole('button', { name: /展开/ }).first().click()
+  await expect(page.getByText('主模型原始回复')).toBeVisible()
+  await expect(page.getByText('second bubble').first()).toBeVisible()
+  await expect(page.getByText('ask about tomorrow').first()).toBeVisible()
 })
 
 test('settings page offers preset background colors and image crop before saving', async ({ page }, testInfo) => {

@@ -30,14 +30,20 @@ export interface Contact {
   pendingEvents?: string[] // short notes about notable things to naturally mention next chat (e.g. "对方刚给你的朋友圈点了赞"), cleared once used
   // ---- upcoming plans/appointments (extracted during memory updates, see memory.ts) ----
   upcomingPlans?: PlanItem[]
+  intentQueue?: IntentItem[]
   // ---- autonomous behavior (see lib/proactiveChat.ts) ----
   lastProactiveMessageAt?: number // last time this contact proactively opened a chat, used for the per-contact cooldown
   // ---- schedule (see lib/schedule.ts) ----
   schedule?: ScheduleBlock[] // fixed weekly pattern, generated alongside the persona at creation time — optional since contacts created before this feature won't have one
   scheduleOverrides?: ScheduleOverride[] // one-off exceptions negotiated in chat (see the scheduleChange bubble type), pruned once their date passes
+  // ---- MBTI (assigned by the persona-generation AI, not user-picked) ----
+  mbti?: string // e.g. "INFP" — a stable personality anchor injected into every chat prompt
   // ---- auto-generated photo avatar (see lib/avatarCategory.ts + lib/photoSearch.ts) ----
   avatarPhotographer?: string // Pexels photographer credit, unset for anime avatars (waifu.pics) or manually-picked emoji/uploads
   avatarPhotographerUrl?: string
+  /** Contact-specific output of the self-iteration learner: next-user-turn expectation, relationship rules, and surprise history. */
+  selfIterationPrompt?: string
+  selfIterationUpdatedAt?: number
 }
 
 /** A recurring weekly time block — generated once at contact creation alongside the persona, not user-editable directly. */
@@ -70,6 +76,20 @@ export interface PlanItem {
   text: string // short natural-language description, e.g. "周三晚上一起去吃烧烤"
   date?: string // "YYYY-MM-DD" if the model could resolve a concrete date from context, empty/undefined otherwise
   createdAt: number
+  confidence?: number
+}
+
+export type IntentKind = 'follow_up' | 'care' | 'avoid' | 'relationship' | 'topic'
+export type IntentStatus = 'active' | 'used' | 'dismissed'
+
+export interface IntentItem {
+  id: string
+  text: string
+  kind: IntentKind
+  createdAt: number
+  expiresAt?: number
+  status: IntentStatus
+  confidence: number
 }
 
 /** A directed relationship link between two AI contacts (set up when adding a contact), used to decide who reacts to whose moments. */
@@ -306,7 +326,7 @@ export interface AppSettings {
   // ---- knowledge base (see lib/knowledgeBase.ts) ----
   knowledgeQueryLog?: { date: string; count: number } // rolling daily counter backing the cap on reactive keyword-triggered knowledge lookups, keyed by local date
   // ---- admin/dev tooling (see lib/consoleCapture.ts + SkyEyePage) ----
-  // Master switch moved to enabledModules['adminMode'] — see src/features/adminMode.ts
+  adminModeEnabled: boolean
   // ---- appearance ----
   themeMode?: 'light' | 'dark'
   chatBackground?: string // empty = default; otherwise a CSS color or data URL used behind chat messages
@@ -316,6 +336,9 @@ export interface AppSettings {
   moodExpiryMs: number
   /** Validation mode: 'quality' = check+rewrite via utility model, 'optimize' = always re-feed to main model. */
   validatorMode: 'quality' | 'optimize'
+  /** Shared output of the self-iteration learner: expression habits, conversation style, and user expectation model. */
+  selfIterationGlobalPrompt: string
+  selfIterationUpdatedAt?: number
   /** Feature-module toggles — see src/features/. Every module id listed here is active. */
   enabledModules: string[]
 }
@@ -335,6 +358,47 @@ export interface SavedWorldview {
   name: string
   content: string
   createdAt: number
+}
+
+// ---- Structured memory (see lib/memory.ts) ----
+
+/** Category bucket for a single memory item — maps roughly to what the item is *about*. */
+export type MemoryCategory =
+  | '关系动态'   // Relationship dynamics
+  | '话题历史'   // Topic history
+  | '基础信息'   // Basic info
+  | '偏好习惯'   // Preferences / habits
+  | '人格特质'   // Personality traits
+  | '重要事件'   // Important events
+  | '四季日常'   // Daily life / seasonal
+
+/** Granular kind tag for a single memory item — more specific than category. */
+export type MemoryKind =
+  | 'general'
+  | 'user_fact'
+  | 'user_preference'
+  | 'relationship_event'
+  | 'character_promise'
+  | 'open_thread'
+  | 'world_state'
+
+/** One structured fact / observation extracted from a conversation and stored in its own row. */
+export interface ContactMemory {
+  id: string
+  contactId: string
+  category: MemoryCategory
+  kind: MemoryKind
+  content: string
+  tags: string[]
+  importance: number        // 0-1
+  emotionalWeight: number   // 0-1
+  confidence: number        // 0-1
+  sourceConversationId?: string
+  sourceMessageIds: string[]
+  createdAt: number
+  updatedAt: number
+  lastUsedAt?: number
+  usageCount: number
 }
 
 // ---- AI JSON output protocol ----

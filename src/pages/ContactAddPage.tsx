@@ -186,6 +186,7 @@ export function ContactAddPage() {
         personalityTrait: personalityTrait || '无',
         schedule: parsed.schedule,
         scheduleOverrides: [],
+        mbti: parsed.mbti || undefined,
       })
       await db.conversations.add({
         id: uuid(),

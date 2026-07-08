@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie'
 import type {
   AiTurnDebug,
   Contact,
+  ContactMemory,
   ContactRelationLink,
   Conversation,
   Group,
@@ -33,6 +34,7 @@ export class TalkDB extends Dexie {
   savedWorldviews!: Table<SavedWorldview, string>
   aiTurns!: Table<AiTurnDebug, string>
   socialEvents!: Table<SocialEvent, string>
+  contactMemories!: Table<ContactMemory, string>
 
   constructor() {
     super('talk-db')
@@ -106,6 +108,10 @@ export class TalkDB extends Dexie {
     })
     this.version(12).stores({
       socialEvents: 'id, type, actorId, targetId, createdAt, *relatedContactIds',
+    })
+    // Structured per-item memory table (see lib/memory.ts).
+    this.version(13).stores({
+      contactMemories: 'id, contactId, kind, category, createdAt',
     })
   }
 }

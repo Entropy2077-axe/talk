@@ -15,8 +15,11 @@ interface MessageBubbleProps {
   highlighted?: boolean
   mentionNames?: string[]
   replyPreview?: string
+  selecting?: boolean
+  selected?: boolean
   onReply?: () => void
   onLongPress?: () => void
+  onSelect?: () => void
   onLinkClick?: (label: string) => void
 }
 
@@ -31,8 +34,11 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
     highlighted,
     mentionNames = [],
     replyPreview,
+    selecting,
+    selected,
     onReply,
     onLongPress,
+    onSelect,
     onLinkClick,
   },
   ref,
@@ -40,7 +46,24 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
   const isUser = message.role === 'user'
   const longPress = useLongPress(() => onLongPress?.())
   return (
-    <div ref={ref} {...longPress} className={`px-3 py-1.5 ${highlighted ? 'bg-yellow-50' : ''}`}>
+    <div
+      ref={ref}
+      {...(selecting ? {} : longPress)}
+      onClick={selecting ? onSelect : undefined}
+      className={`relative px-3 py-1.5 ${selecting ? 'cursor-pointer pl-12' : ''} ${
+        selected ? 'bg-gray-200' : highlighted ? 'bg-yellow-50' : ''
+      }`}
+    >
+      {selecting && (
+        <span
+          className={`absolute left-4 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border text-[12px] ${
+            selected ? 'border-[#1296db] bg-[#1296db] text-white' : 'border-gray-300 bg-white text-transparent'
+          }`}
+          aria-hidden="true"
+        >
+          ✓
+        </span>
+      )}
       {!isUser && <p className="mb-1 text-[11px] text-gray-400">{contactName}</p>}
       <div className={`flex items-start gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
         {isUser ? (

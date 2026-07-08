@@ -9,7 +9,7 @@ import {
   stripSpeakerNamePrefix,
 } from './groupChat'
 import { extractJsonObject } from './aiProtocol'
-import { CONTEXT_WINDOW_SIZE, maybeUpdateGroupMemory } from './memory'
+import { CONTEXT_WINDOW_SIZE, maybeUpdateGroupMemory, recentMemoriesText } from './memory'
 import { knowledgeDigestText, processKnowledgeQueries } from './knowledgeBase'
 import { isModuleEnabled } from '../features'
 import { describeCurrentTime } from './time'
@@ -20,6 +20,19 @@ import { validateGroupTurn } from './responseQuality'
 import { recentSocialEventsText, recordSocialEvent } from './socialEvents'
 import { useChatUiStore } from '../store/useChatUiStore'
 import type { AppSettings, Contact, Group, GroupAiBubble, Message, Sticker } from '../types'
+
+/** Load recent structured memories for each speaker in parallel. */
+async function loadSpeakerMemories(speakers: Contact[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  const results = await Promise.all(speakers.map(async (s) => {
+    const text = await recentMemoriesText(s.id)
+    return { id: s.id, text }
+  }))
+  for (const { id, text } of results) {
+    if (text) map.set(id, text)
+  }
+  return map
+}
 
 /**
  * Same background-engine shape as chatEngine.ts (module-level bookkeeping,
@@ -245,6 +258,8 @@ async function runGroupAiTurn(
       recentEventsText: recentEventsText || undefined,
       worldviewText: isModuleEnabled('worldview') ? (settings.worldview || undefined) : undefined,
       knowledgeDigestText: isModuleEnabled('knowledgeBase') ? (knowledgeDigestText(knowledgeEntries) || undefined) : undefined,
+      selfIterationGlobalText: isModuleEnabled('selfIteration') ? settings.selfIterationGlobalPrompt : undefined,
+      speakerMemoriesMap: await loadSpeakerMemories(speakers),
     })
 
     const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
