@@ -15,7 +15,7 @@ export function parseAiResponse(raw: string): ParsedAiTurn {
   }
 
   const jsonResult = tryParseJson(trimmedRaw)
-  if (jsonResult && jsonResult.bubbles.length > 0) {
+  if (jsonResult) {
     return {
       bubbles: jsonResult.bubbles,
       knowledgeQueries: jsonResult.knowledgeQueries,
@@ -65,8 +65,9 @@ function tryParseJson(trimmedRaw: string): ParsedAiTurn | null {
   const bubbles: AiBubble[] = []
   for (const m of parsed.messages) {
     if (!m || typeof m !== 'object') continue
-    if (m.type === 'text' && typeof m.content === 'string' && m.content.trim()) {
-      bubbles.push({ type: 'text', content: m.content.trim() })
+    if (m.type === 'text') {
+      const content = parseTextBubbleContent(m as unknown as Record<string, unknown>)
+      if (content) bubbles.push({ type: 'text', content })
     } else if (m.type === 'sticker' && typeof m.name === 'string' && m.name.trim()) {
       bubbles.push({ type: 'sticker', name: m.name.trim() })
     } else if (m.type === 'link' && typeof m.app === 'string' && typeof m.label === 'string') {
@@ -79,6 +80,11 @@ function tryParseJson(trimmedRaw: string): ParsedAiTurn | null {
   const mood = typeof parsed.mood === 'string' && parsed.mood.trim() ? parsed.mood.trim().slice(0, 20) : undefined
   const thought = typeof parsed.thought === 'string' && parsed.thought.trim() ? parsed.thought.trim().slice(0, 100) : undefined
   return { bubbles, knowledgeQueries: parseKnowledgeQueriesField(parsed.knowledgeQueries), mood, thought }
+}
+
+function parseTextBubbleContent(m: Record<string, unknown>): string {
+  const content = typeof m.content === 'string' ? m.content : typeof m.text === 'string' ? m.text : ''
+  return content.trim()
 }
 
 function parseScheduleChangeBubble(m: Record<string, unknown>): AiBubble | null {

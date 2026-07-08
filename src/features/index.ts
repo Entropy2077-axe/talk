@@ -82,8 +82,7 @@ export function getEnabledLinkApps(
 }
 
 /**
- * Get the set of unique routes from enabled modules, deduplicating by path
- * (worldview and knowledgeBase both register /world-settings, for example).
+ * Get the set of unique routes from enabled modules, deduplicating by path.
  */
 export function getEnabledRoutes(): { path: string; component: React.ComponentType }[] {
   const enabled = useSettingsStore.getState().enabledModules

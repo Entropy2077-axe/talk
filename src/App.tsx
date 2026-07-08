@@ -80,8 +80,7 @@ function App() {
   const themeMode = useSettingsStore((s) => s.themeMode ?? 'light')
   const enabledModules = useSettingsStore((s) => s.enabledModules)
 
-  // Build deduplicated route list from enabled modules (worldview &
-  // knowledgeBase both register /world-settings, for example).
+  // Build deduplicated route list from enabled modules.
   const moduleRoutes = useMemo(() => {
     const seen = new Set<string>()
     const routes: { path: string; Component: React.ComponentType }[] = []

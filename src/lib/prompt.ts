@@ -424,5 +424,5 @@ ${rawText}
 - 如果原文有[sticker:名字]则输出sticker类型
 - thought直接取原文中第一条括号内容，去掉括号，原样输出，不加不减不改
 - mood根据语气判断，15字以内
-- 只输出{"messages":[...],"mood":"...","thought":"..."}`
+- 只输出{"messages":[{"type":"text","content":"..."}],"mood":"...","thought":"..."}`
 }
