@@ -5,6 +5,7 @@ import { formatSpeechSamplesForScene } from './prompt'
 import { describeCurrentSchedule } from './schedule'
 import { isModuleEnabled } from '../features'
 import type { Contact, GroupAiBubble, GroupAiResponse, GroupEnergyLevel, GroupSpeakerLimit } from '../types'
+import { dynamicRelationScore } from './contactRelations'
 
 /** Group chats can cap how many members answer per turn; see pickSpeakers. */
 const DEFAULT_GROUP_SPEAKER_LIMIT: GroupSpeakerLimit = 3
@@ -250,14 +251,14 @@ ${samplesText ? `- 说话样例:\n${samplesText}` : ''}`
   const chatterRule = opts.allowAiChatter === false
     ? '- 本群设置为“围绕用户”：AI只能回应用户本轮消息、用户@/回复对象或用户相关话题，不要发展AI之间的旁支闲聊。\n'
     : opts.speakers.length >= 2
-      ? '- 本群允许AI互相聊起来：AI之间必须有明显互动，至少出现一次接话、回应、吐槽、附和、反驳或点名互动；可以短暂发展群内剧情，但不要完全无视用户。\n'
+      ? '- 本群允许AI互相聊起来：当其他成员的话提供自然接点时，可以接话、回应、吐槽、附和、反驳或点名互动；不要为了证明是群聊而强行互聊。\n'
       : '- 本轮只有一位AI发言人：不要求AI之间互聊，只需要自然回应用户或当前群聊上下文。\n'
   const energyRule =
     opts.energyLevel === 'cold'
       ? '- 群聊热闹程度=冷淡：每个发言人通常只发1句话，整体克制。\n'
       : opts.energyLevel === 'lively'
-        ? '- 群聊热闹程度=热闹：每个发言人尽量发4句话以上，可以多次插入发言，但仍要自然，不要灌水。\n'
-        : '- 群聊热闹程度=普通：每个发言人通常发2到3句话，节奏自然。\n'
+        ? '- 群聊热闹程度=热闹：整轮总共6到12条消息，允许同一人多次插入；不要为了凑条数灌水。\n'
+        : '- 群聊热闹程度=普通：整轮总共3到7条消息，节奏自然。\n'
   const formatContract = `硬格式契约:
 - 最终只输出群聊草稿行，不输出分析、计划、标题、编号、JSON、Markdown。
 - 第一行第一个字符必须是 <，最后一行必须也是一条完整草稿。
@@ -268,14 +269,14 @@ ${samplesText ? `- 说话样例:\n${samplesText}` : ''}`
   const interactionContract = `发言编排契约:
 - 先在心里决定“谁说几句、谁接谁的话”，但不要把计划输出。
 - 本轮发言人只能来自: ${speakerNames}。
-- 被@或被回复的人先处理；其他人不要机械排队答题。
+  - 被@或被回复的人先处理；其他人不要机械排队答题，也不必每个被选中的人都说话。
 - ${opts.allowAiChatter === false ? 'AI互聊关闭：所有发言都围绕用户、用户@/回复对象或用户相关话题。' : opts.speakers.length >= 2 ? 'AI互聊开启：至少安排一次AI之间的接话/回应/吐槽/附和/反驳/点名，不能只是每个人各自回答用户。' : '本轮只有一位AI发言人：不要求AI之间互动。'}
 - ${
     opts.energyLevel === 'cold'
-      ? '冷淡：每个发言人基本1句。'
+      ? '冷淡：整轮总共1到3句。'
       : opts.energyLevel === 'lively'
-        ? '热闹：每个发言人尽量4句以上，可穿插多次。'
-        : '普通：每个发言人基本2到3句。'
+        ? '热闹：整轮总共6到12句，可穿插多次。'
+        : '普通：整轮总共3到7句。'
   }
 - 可以同一人多次插入，不需要按发言人顺序轮流。`
   const topicContract = `话题推进契约:
@@ -318,7 +319,7 @@ ${speakerBlocks}
 - 每个角色只能说自己知道或自己能感受到的事，不能替别人提私人记忆/约定。
 - 被@的人必须优先回应；被回复的人或被回复消息的说话者必须优先处理。
 ${chatterRule}
-- 每个发言人可以随时插入多次发言，不需要按发言人顺序轮流说。允许“1说一句、2插一句、1再接、3再说”。
+  - 每个发言人可以随时插入多次发言，也可以本轮沉默，不需要按发言人顺序轮流说。允许“1说一句、2插一句、1再接、3再说”。
 ${energyRule}
 - 不要把私聊口吻带进群聊，不要称用户为"对方"。
 - 不要编造课堂、线下见面、过去承诺等没有依据的具体事实。
@@ -350,16 +351,67 @@ ${stickersText}
 1. ${formatContract.replace(/\n/g, '\n   ')}
 2. ${interactionContract.replace(/\n/g, '\n   ')}
 3. ${topicContract.replace(/\n/g, '\n   ')}
-4. ${opts.allowAiChatter === false ? 'AI互聊关闭：所有发言都围绕用户或用户相关话题，不发展AI之间的旁支闲聊。' : opts.speakers.length >= 2 ? 'AI互聊开启：AI之间必须有明显互动，至少一次接话、回应、吐槽、附和、反驳或点名。' : '本轮只有一位AI发言人，不要求AI之间互动。'}
+4. ${opts.allowAiChatter === false ? 'AI互聊关闭：所有发言都围绕用户或用户相关话题，不发展AI之间的旁支闲聊。' : opts.speakers.length >= 2 ? 'AI互聊开启：有自然接点时可以互相接话，不要强行制造互动。' : '本轮只有一位AI发言人，不要求AI之间互动。'}
 5. ${
     opts.energyLevel === 'cold'
-      ? '冷淡：每个发言人基本只发1句话。'
+      ? '冷淡：整轮总共1到3句。'
       : opts.energyLevel === 'lively'
-        ? '热闹：每个发言人尽量发4句话以上，并允许同一人多次插入。'
-        : '普通：每个发言人基本发2到3句话。'
+        ? '热闹：整轮总共6到12句，并允许同一人多次插入。'
+        : '普通：整轮总共3到7句。'
   }
 6. 发言顺序不必按发言人编号轮流，可以 1 -> 2 -> 1 -> 3 这样自然插话。
 7. 只输出群聊纯文本草稿，不输出JSON。`
+}
+
+/**
+ * Group turns should be driven by who has a reason to engage with each other,
+ * not only by who likes the user most. Mentions/replies still win outright;
+ * remaining slots favour a mix of user relevance and live member-to-member
+ * ties so established pairs can naturally carry a thread or a tense pair can
+ * occasionally create believable friction.
+ */
+export async function pickSociallyConnectedSpeakers(
+  members: Contact[],
+  preferredContactIds: string[] = [],
+  speakerLimit: GroupSpeakerLimit = DEFAULT_GROUP_SPEAKER_LIMIT,
+): Promise<Contact[]> {
+  const limit = speakerLimit === 'all' ? members.length : Math.min(speakerLimit, members.length)
+  const preferredSet = new Set(preferredContactIds)
+  const picked = members.filter((member) => preferredSet.has(member.id)).slice(0, limit)
+  if (picked.length >= limit || members.length <= 1) return picked.length >= limit ? picked : [...picked, ...members.filter((m) => !preferredSet.has(m.id))]
+
+  const ids = new Set(members.map((member) => member.id))
+  const links = (await db.contactRelations.toArray()).filter((link) => ids.has(link.fromContactId) && ids.has(link.toContactId))
+  const relationScore = (fromId: string, toId: string) => {
+    const link = links.find((candidate) =>
+      (candidate.fromContactId === fromId && candidate.toContactId === toId)
+      || (candidate.fromContactId === toId && candidate.toContactId === fromId),
+    )
+    return link ? dynamicRelationScore(link) : 0
+  }
+  const choose = (pool: Contact[]) => {
+    const weighted = pool.map((contact) => {
+      const userWeight = relationshipWeight(contact.warmth ?? 0)
+      const social = picked.length === 0 ? 0 : picked.reduce((sum, other) => sum + relationScore(contact.id, other.id) + relationScore(other.id, contact.id), 0) / (picked.length * 2)
+      // Keep every member viable: social affinity enhances relevance but never
+      // converts low warmth into a permanent mute button.
+      return { c: contact, w: Math.max(1, userWeight * (1 + Math.max(-0.45, Math.min(0.8, social / 160)))) }
+    })
+    const total = weighted.reduce((sum, entry) => sum + entry.w, 0)
+    let roll = Math.random() * total
+    for (const entry of weighted) {
+      roll -= entry.w
+      if (roll <= 0) return entry.c
+    }
+    return weighted[weighted.length - 1]?.c
+  }
+
+  while (picked.length < limit) {
+    const candidate = choose(members.filter((member) => !picked.some((current) => current.id === member.id)))
+    if (!candidate) break
+    picked.push(candidate)
+  }
+  return picked
 }
 
 export function buildGroupJsonConversionPrompt(rawText: string, speakers: Contact[], stickerNames: string[]): string {

@@ -118,6 +118,20 @@ export class TalkDB extends Dexie {
     this.version(14).stores({
       contactMemories: 'id, contactId, scope, groupId, kind, category, createdAt, *relatedContactIds',
     })
+    // Dynamic relationship fields and social-event expiry are optional fields,
+    // so no data migration is needed; this version records the schema step.
+    this.version(15).stores({
+      contactRelations: 'id, fromContactId, toContactId, lastInteractionAt',
+      socialEvents: 'id, type, actorId, targetId, createdAt, expiresAt, *relatedContactIds',
+    }).upgrade(async (tx) => {
+      const events = await tx.table('socialEvents').toArray()
+      for (const event of events) {
+        if (event.expiresAt) continue
+        const importance = typeof event.importance === 'number' ? event.importance : 1
+        const days = importance >= 3 ? 14 : importance === 2 ? 7 : 3
+        await tx.table('socialEvents').update(event.id, { expiresAt: event.createdAt + days * 24 * 60 * 60 * 1000 })
+      }
+    })
   }
 }
 

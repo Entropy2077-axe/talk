@@ -171,8 +171,6 @@ export function MomentsPage() {
         summary: `用户赞了${displayName(contact)}的朋友圈`,
         importance: 1,
       })
-      const events = contact.pendingEvents ?? []
-      await db.contacts.update(posterContactId!, { pendingEvents: [...events, '你发的朋友圈刚被对方点赞了'] })
     }
   }
 

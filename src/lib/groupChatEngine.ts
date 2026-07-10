@@ -6,7 +6,7 @@ import {
   buildGroupRawChatPrompt,
   groupTypingDelayMs,
   parseGroupAiResponse,
-  pickSpeakers,
+  pickSociallyConnectedSpeakers,
   stripSpeakerNamePrefix,
 } from './groupChat'
 import { extractJsonObject } from './aiProtocol'
@@ -59,6 +59,7 @@ function clearPending(conversationId: string) {
 }
 
 function parseGroupTurnDebugPayload(
+  mainPrompt: string,
   rawText: string,
   draftFeedback: string | undefined,
   jsonRaw: string,
@@ -74,19 +75,26 @@ function parseGroupTurnDebugPayload(
   const text = fenceMatch ? fenceMatch[1].trim() : trimmed
   try {
     const parsed = JSON.parse(text)
-    return parsed && typeof parsed === 'object' ? { ...(parsed as Record<string, unknown>), rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, storyOutline } : parsed
+    return parsed && typeof parsed === 'object' ? { ...(parsed as Record<string, unknown>), mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, storyOutline } : parsed
   } catch {
     const extracted = extractJsonObject(text)
     if (extracted) {
       try {
         const parsed = JSON.parse(extracted)
-        return parsed && typeof parsed === 'object' ? { ...(parsed as Record<string, unknown>), rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, storyOutline } : parsed
+        return parsed && typeof parsed === 'object' ? { ...(parsed as Record<string, unknown>), mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, storyOutline } : parsed
       } catch {
         // fall through
       }
     }
   }
-  return { rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, knowledgeQueries, turnSummary, groupVibe, storyOutline }
+  return { mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, knowledgeQueries, turnSummary, groupVibe, storyOutline }
+}
+
+/** Admin-only safe stop for a group generation and its queued bubbles. */
+export function stopGroupAiTurn(conversationId: string): void {
+  streamByConversation.set(conversationId, uuid())
+  clearPending(conversationId)
+  useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined, error: '已由管理员停止本轮群聊生成' })
 }
 
 function parseCompressedGroupMemory(raw: string): string | null {
@@ -322,7 +330,7 @@ async function runGroupAiTurn(
     const preferredSpeakerIds = new Set(latestUserMessage?.mentions ?? [])
     const replied = latestUserMessage?.replyToMessageId ? messageById.get(latestUserMessage.replyToMessageId) : undefined
     if (replied?.role === 'assistant' && replied.speakerContactId) preferredSpeakerIds.add(replied.speakerContactId)
-    const speakers = pickSpeakers(members, Array.from(preferredSpeakerIds), group.speakerLimit ?? 3)
+    const speakers = await pickSociallyConnectedSpeakers(members, Array.from(preferredSpeakerIds), group.speakerLimit ?? 3)
     console.log(`[group] 本轮发言人: ${speakers.map((s) => s.name).join('、')}`)
     const knowledgeEntries = await db.knowledgeEntries.toArray()
     const targetContext = targetedContextText(latestUserMessage, contactById, messageById, settings.userNickname)
@@ -509,7 +517,7 @@ ${rawText}
       id: aiTurnId,
       conversationId,
       raw: finalRaw,
-      parsed: parseGroupTurnDebugPayload(rawText, draftFeedback, jsonRaw, finalRaw, bubbles, knowledgeQueries, turnSummary, groupVibe, storyOutline),
+      parsed: parseGroupTurnDebugPayload(systemPrompt, rawText, draftFeedback, jsonRaw, finalRaw, bubbles, knowledgeQueries, turnSummary, groupVibe, storyOutline),
       knowledgeQueries,
       createdAt: Date.now(),
     })

@@ -9,6 +9,7 @@ const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const envPath = join(root, '.env')
 const androidDir = join(root, 'android')
 const apkPath = join(androidDir, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk')
+const androidBuildGradlePath = join(androidDir, 'app', 'build.gradle')
 const defaultJavaHome = 'C:\\Projects\\AndroidStudio\\jbr'
 
 const args = new Set(process.argv.slice(2))
@@ -102,6 +103,25 @@ function emptyReleaseEnv(originalContent) {
   return `${[...knownKeys].sort().map((key) => `${key}=`).join('\n')}\n`
 }
 
+function syncAndroidVersionFromPackage() {
+  if (!existsSync(androidBuildGradlePath)) throw new Error(`Missing Android build file: ${androidBuildGradlePath}`)
+  const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  const version = String(packageJson.version ?? '').trim()
+  const parts = version.split('.').map((part) => Number.parseInt(part, 10))
+  if (!/^\d+\.\d+\.\d+$/.test(version) || parts.some((part) => !Number.isInteger(part))) {
+    throw new Error(`package.json version must be numeric semver, received: ${version || '(empty)'}`)
+  }
+  const versionCode = parts[0] * 10000 + parts[1] * 100 + parts[2]
+  let gradle = readFileSync(androidBuildGradlePath, 'utf8')
+  if (!/versionCode\s+\d+/.test(gradle) || !/versionName\s+"[^"]+"/.test(gradle)) {
+    throw new Error('Could not find versionCode/versionName in android/app/build.gradle')
+  }
+  gradle = gradle.replace(/versionCode\s+\d+/, `versionCode ${versionCode}`)
+  gradle = gradle.replace(/versionName\s+"[^"]+"/, `versionName "${version}"`)
+  writeFileSync(androidBuildGradlePath, gradle, 'utf8')
+  log(`Synced Android versionName=${version}, versionCode=${versionCode}.`)
+}
+
 function readAndroidSdkDir() {
   const localProperties = join(androidDir, 'local.properties')
   if (!existsSync(localProperties)) return undefined
@@ -169,6 +189,7 @@ function main() {
     writeFileSync(envPath, emptyReleaseEnv(originalEnv), 'utf8')
     log('Temporarily replaced .env with empty release values.')
 
+    syncAndroidVersionFromPackage()
     run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts/sync-android-icon.ps1'])
     run(command('npm'), ['run', 'build'])
     run(command('npx'), ['cap', 'sync', 'android'])

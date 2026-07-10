@@ -132,6 +132,12 @@ export interface ContactRelationLink {
   toContactId: string
   label: ContactRelationLabel
   createdAt: number
+  /** Stable user-authored label is kept above; these values evolve from shared social experiences. */
+  affinity?: number // -100..100, shared dynamic tone for this existing undirected link
+  familiarity?: number // 0..100, grows through shared/public interactions
+  tension?: number // 0..100, grows through conflict and decays through positive interactions
+  dynamicSummary?: string
+  lastInteractionAt?: number
 }
 
 export interface Moment {
@@ -188,6 +194,8 @@ export interface SocialEvent {
   messageId?: string
   importance: number
   createdAt: number
+  /** Events are short-term context, not permanent prompt ballast. */
+  expiresAt?: number
 }
 
 export interface Conversation {

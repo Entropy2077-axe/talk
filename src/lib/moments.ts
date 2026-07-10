@@ -1,19 +1,20 @@
 import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { chatCompletion } from './deepseek'
-import { canReactToMoments } from './contactRelations'
+import { momentReactionProbability } from './contactRelations'
 import { describeCurrentSchedule, isPhoneAvailable } from './schedule'
 import { searchPexelsPhoto } from './photoSearch'
 import { recordSocialEvent } from './socialEvents'
 import { formatSpeechSamplesForScene } from './prompt'
 import { isModuleEnabled } from '../features'
+import { recentMemoriesText, socialMemoriesText } from './memory'
+import { recentSocialEventsText } from './socialEvents'
 import type { AppSettings, Contact } from '../types'
 
 const ELIGIBLE_WINDOW_MS = 10 * 60 * 1000
 /** Of the friends who *do* react (relationship allows it and the dice roll passed), this fraction also leave a comment instead of just liking. */
 const COMMENT_SHARE = 0.55
 /** Even a friend/good relationship has a chance of just scrolling past without reacting at all. */
-const REACT_PROBABILITY = 0.6
 /** Not every moment gets a photo — matches real WeChat moments where plenty of posts are text-only. Decided in code before the model even writes the content, same "code decides, model fills in" split as everywhere else. */
 const MOMENT_PHOTO_PROBABILITY = 0.6
 
@@ -82,6 +83,7 @@ interface ReactorPlan {
   contact: Contact
   willComment: boolean
   relationLabel: string
+  relationContext: string
 }
 
 /** For one posting contact, decides (via the relationship graph + dice rolls, not the LLM) which of their linked friends react, and whether each reaction includes a comment. */
@@ -93,21 +95,21 @@ async function planReactors(poster: Contact, contactsById: Map<string, Contact>)
     .equals(poster.id)
     .toArray()
 
-  const candidates: { contact: Contact; relationLabel: string }[] = []
+  const candidates: { contact: Contact; relationLabel: string; link: { label: import('../types').ContactRelationLabel; affinity?: number; familiarity?: number; tension?: number; dynamicSummary?: string } }[] = []
   for (const link of links) {
-    if (!canReactToMoments(link.label)) continue
     const otherId = link.fromContactId === poster.id ? link.toContactId : link.fromContactId
     const other = contactsById.get(otherId)
-    if (other) candidates.push({ contact: other, relationLabel: link.label || '普通朋友' })
+    if (other) candidates.push({ contact: other, relationLabel: link.label || '普通朋友', link })
   }
 
   const plans: ReactorPlan[] = []
   for (const candidate of candidates) {
-    if (Math.random() > REACT_PROBABILITY) continue // relationship was fine, still scrolled past
+    if (Math.random() > momentReactionProbability(candidate.link)) continue
     plans.push({
       contact: candidate.contact,
-      willComment: Math.random() < COMMENT_SHARE,
+      willComment: Math.random() < Math.min(0.82, COMMENT_SHARE + Math.max(-0.25, (candidate.link.affinity ?? 0) / 280) - Math.max(0, candidate.link.tension ?? 0) / 350),
       relationLabel: candidate.relationLabel || '普通朋友',
+      relationContext: candidate.link.dynamicSummary || '暂无额外动态',
     })
   }
   return plans
@@ -117,6 +119,7 @@ function buildMomentsPrompt(
   entries: { poster: Contact; commenters: ReactorPlan[]; willHavePhoto: boolean }[],
   worldviewText: string,
   stickerNames: string[],
+  contexts: Map<string, string>,
 ): string {
   const now = new Date()
   const sections = entries
@@ -127,7 +130,7 @@ function buildMomentsPrompt(
               .filter((c) => c.willComment)
               .map(
                 (c, j) =>
-                  `  评论者${j + 1}: ${c.contact.name}\n  人设: ${c.contact.systemPrompt}\n  性格特质: ${c.contact.personalityTrait?.trim() || '无'}\n  说话样例: ${formatSpeechSamplesForScene(c.contact.speechSamples, 'moment', 1) || '无'}\n  与发布者的关系: ${c.relationLabel || '普通朋友'}`,
+                  `  评论者${j + 1}: ${c.contact.name}\n  人设: ${c.contact.systemPrompt}\n  性格特质: ${c.contact.personalityTrait?.trim() || '无'}\n  说话样例: ${formatSpeechSamplesForScene(c.contact.speechSamples, 'moment', 1) || '无'}\n  与发布者的关系: ${c.relationLabel || '普通朋友'}；${c.relationContext}\n  最近可用素材: ${contexts.get(c.contact.id) || '无'}`,
               )
               .join('\n')
           : '  （这条没有人评论）'
@@ -136,7 +139,7 @@ function buildMomentsPrompt(
       const photoLine = e.willHavePhoto
         ? `这条动态会配一张照片 你还需要为它写一个"imageKeyword"(简短英文搜图短语 贴合你写的这条朋友圈内容 用来找一张对应的照片)\n`
         : ''
-      return `人物${i + 1}: ${e.poster.name}\n人设: ${e.poster.systemPrompt}\n性格特质: ${e.poster.personalityTrait?.trim() || '无'}\n说话样例: ${formatSpeechSamplesForScene(e.poster.speechSamples, 'moment', 2) || '无'}\n${statusLine}${photoLine}这条朋友圈下会评论的人(按顺序):\n${commenterLines}`
+      return `人物${i + 1}: ${e.poster.name}\n人设: ${e.poster.systemPrompt}\n性格特质: ${e.poster.personalityTrait?.trim() || '无'}\n说话样例: ${formatSpeechSamplesForScene(e.poster.speechSamples, 'moment', 2) || '无'}\n当前心情: ${e.poster.mood?.text || '平静'}\n最近可用素材: ${contexts.get(e.poster.id) || '无'}\n${statusLine}${photoLine}这条朋友圈下会评论的人(按顺序):\n${commenterLines}`
     })
     .join('\n\n')
 
@@ -145,6 +148,7 @@ function buildMomentsPrompt(
   return `${worldviewSection}【场景】
 你是一个朋友圈内容生成器。下面有几个人准备发朋友圈，请你扮演他们每个人写出符合各自人设的内容。
 这不是私聊——朋友圈是公开广播，不能写成"我跟你说""咱们"这种对着特定人的语气。
+先判断每个人此刻为什么会想发，再写正文。最近素材只是可选来源，最多自然使用两项；不要逐条复述，更不能公开私聊秘密、用户隐私或未经同意的关系细节。素材不足时就发普通日常，不要硬造大事。避免与近期内容重复同一情绪、句式或主题。
 
 你是一个朋友圈内容生成器 只输出JSON 不要有任何其他文字
 
@@ -228,12 +232,22 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
   }
 
   const stickerNames = (await db.stickers.toArray()).map((s) => s.name)
+  const involved = Array.from(new Set(entries.flatMap((entry) => [entry.poster, ...entry.commenters.map((commenter) => commenter.contact)])))
+  const contextRows = await Promise.all(involved.map(async (contact) => {
+    const [privateMemories, socialMemories, events] = await Promise.all([
+      recentMemoriesText(contact.id, 4),
+      socialMemoriesText(contact.id, 4),
+      recentSocialEventsText([contact.id], 3),
+    ])
+    return [contact.id, [privateMemories, socialMemories, events].filter(Boolean).join('\n').slice(0, 1100)] as const
+  }))
+  const contexts = new Map(contextRows)
   const raw = await chatCompletion({
     apiKey: settings.apiKey,
     baseUrl: settings.baseUrl,
     model: settings.model,
     messages: [
-      { role: 'system', content: buildMomentsPrompt(entries, isModuleEnabled('worldview') ? settings.worldview : '', stickerNames) },
+      { role: 'system', content: buildMomentsPrompt(entries, isModuleEnabled('worldview') ? settings.worldview : '', stickerNames, contexts) },
       { role: 'user', content: '请生成' },
     ],
     jsonMode: true,
@@ -345,13 +359,13 @@ function planUserMomentReactors(contacts: Contact[]): UserMomentReactorPlan[] {
   return plans
 }
 
-function buildUserMomentCommentPrompt(content: string, commenters: Contact[], worldviewText: string, stickerNames: string[]): string {
+function buildUserMomentCommentPrompt(content: string, commenters: Contact[], worldviewText: string, stickerNames: string[], contexts: Map<string, string>): string {
   const now = new Date()
   const commenterLines = commenters
     .map((c, i) => {
       const scheduleLine = describeCurrentSchedule(c, now)
       const samples = formatSpeechSamplesForScene(c.speechSamples, 'moment', 1)
-      return `评论者${i + 1}: ${c.name} 人设: ${c.systemPrompt}${samples ? ` 说话样例: ${samples}` : ''}${scheduleLine ? ` ${scheduleLine}` : ''}`
+      return `评论者${i + 1}: ${c.name} 人设: ${c.systemPrompt}${samples ? ` 说话样例: ${samples}` : ''}${scheduleLine ? ` ${scheduleLine}` : ''}\n和用户的关系: ${c.relationshipBase || '朋友'} ${c.relationshipDynamic || ''} 好感度:${c.warmth ?? 0} 当前心情:${c.mood?.text || '平静'}\n最近素材: ${contexts.get(c.id) || '无'}`
     })
     .join('\n')
   const worldviewSection = worldviewText ? `【这个世界的设定】\n${worldviewText}\n\n` : ''
@@ -409,6 +423,12 @@ export async function postUserMoment(content: string, settings: AppSettings): Pr
   if (commenterPlans.length > 0) {
     try {
       const stickerNames = (await db.stickers.toArray()).map((s) => s.name)
+      const contextRows = await Promise.all(commenterPlans.map(async ({ contact }) => {
+        const [memories, social, events] = await Promise.all([
+          recentMemoriesText(contact.id, 4), socialMemoriesText(contact.id, 4), recentSocialEventsText([contact.id], 2),
+        ])
+        return [contact.id, [memories, social, events].filter(Boolean).join('\n').slice(0, 900)] as const
+      }))
       const raw = await chatCompletion({
         apiKey: settings.apiKey,
         baseUrl: settings.baseUrl,
@@ -421,6 +441,7 @@ export async function postUserMoment(content: string, settings: AppSettings): Pr
               commenterPlans.map((p) => p.contact),
               isModuleEnabled('worldview') ? settings.worldview : '',
               stickerNames,
+              new Map(contextRows),
             ),
           },
           { role: 'user', content: '请生成' },
@@ -485,6 +506,7 @@ function buildMomentReplyPrompt(
   threadLines: string[],
   worldviewText: string,
   stickerNames: string[],
+  context: string,
 ): string {
   const worldviewSection = worldviewText ? `【这个世界的设定】\n${worldviewText}\n\n` : ''
   const scheduleLine = describeCurrentSchedule(poster, new Date())
@@ -493,6 +515,8 @@ function buildMomentReplyPrompt(
   const samples = formatSpeechSamplesForScene(poster.speechSamples, 'moment', 2)
   return `${worldviewSection}你是${poster.name} 人设: ${poster.systemPrompt}${samples ? `\n说话样例:\n${samples}` : ''}
 ${scheduleSection}
+你和用户的关系: ${poster.relationshipBase || '朋友'} ${poster.relationshipDynamic || ''} 好感度:${poster.warmth ?? 0} 当前心情:${poster.mood?.text || '平静'}
+最近可用素材: ${context || '无'}
 你发的这条朋友圈: "${momentContent}"
 
 这条朋友圈下面的评论串(按时间顺序):
@@ -523,10 +547,13 @@ export async function generateMomentReply(
     const moment = await db.moments.get(momentId)
     if (!moment) return
 
-    const [allContacts, existingComments, stickers] = await Promise.all([
+    const [allContacts, existingComments, stickers, privateMemories, socialMemories, events] = await Promise.all([
       db.contacts.toArray(),
       db.momentComments.where('momentId').equals(momentId).sortBy('createdAt'),
       db.stickers.toArray(),
+      recentMemoriesText(poster.id, 4),
+      socialMemoriesText(poster.id, 4),
+      recentSocialEventsText([poster.id], 3),
     ])
     const contactById = new Map(allContacts.map((c) => [c.id, c]))
     const labelFor = (authorContactId: string) =>
@@ -542,7 +569,7 @@ export async function generateMomentReply(
       messages: [
         {
           role: 'system',
-          content: buildMomentReplyPrompt(poster, moment.content, threadLines, isModuleEnabled('worldview') ? settings.worldview : '', stickerNames),
+          content: buildMomentReplyPrompt(poster, moment.content, threadLines, isModuleEnabled('worldview') ? settings.worldview : '', stickerNames, [privateMemories, socialMemories, events].filter(Boolean).join('\n').slice(0, 1100)),
         },
         { role: 'user', content: '请回复' },
       ],

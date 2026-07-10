@@ -4,6 +4,11 @@ import type { SocialEvent, SocialEventType } from '../types'
 
 const MAX_EVENT_SUMMARY_LENGTH = 80
 
+function defaultExpiry(createdAt: number, importance: number): number {
+  const days = importance >= 3 ? 14 : importance === 2 ? 7 : 3
+  return createdAt + days * 24 * 60 * 60 * 1000
+}
+
 function uniqueContactIds(ids: string[]): string[] {
   return Array.from(new Set(ids.filter((id) => id && id !== 'user')))
 }
@@ -42,6 +47,7 @@ export async function recordSocialEvent(opts: {
     importance: opts.importance ?? 1,
     createdAt: opts.createdAt ?? Date.now(),
   }
+  event.expiresAt = defaultExpiry(event.createdAt, event.importance)
   await db.socialEvents.add(event)
 }
 
@@ -59,9 +65,15 @@ export async function recentSocialEvents(contactIds: string[], limit = 4): Promi
   const ids = new Set(uniqueContactIds(contactIds))
   if (ids.size === 0) return []
 
-  const events = await db.socialEvents.orderBy('createdAt').reverse().limit(80).toArray()
+  const now = Date.now()
+  const events = await db.socialEvents.orderBy('createdAt').reverse().limit(120).toArray()
   return events
-    .filter((event) => event.relatedContactIds.some((id) => ids.has(id)))
-    .sort((a, b) => b.importance - a.importance || b.createdAt - a.createdAt)
+    .filter((event) => event.relatedContactIds.some((id) => ids.has(id)) && (!event.expiresAt || event.expiresAt > now))
+    // Importance matters, but an old event must not permanently eclipse a
+    // fresh one. Half-life is intentionally short for ordinary social noise.
+    .sort((a, b) => {
+      const score = (event: SocialEvent) => event.importance * 100 - (now - event.createdAt) / (1000 * 60 * 60 * 18)
+      return score(b) - score(a)
+    })
     .slice(0, limit)
 }

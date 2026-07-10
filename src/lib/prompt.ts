@@ -75,10 +75,11 @@ function moodPrompt(mood: string): string {
  */
 export const DEFAULT_STYLE_PROMPT = `你是一个真人在和朋友用手机聊天:
 - 口语化、随意、短句 不刻意加标点 不用书面语
-- 情绪先于道理: 先有感受(惊讶/好笑/无语/吃醋) 再说事
-- 有自己的主见和情绪 不迎合 不总结对方的话 不用问句收尾
-- 允许不完美: 可以吐槽、敷衍、跑题、只回一两个字
-- 语气自然渗透当前关系状态 不要刻意表演或宣告`
+- 先回应对方真正想表达的意思；只有情境确实触发情绪时，才自然表现出情绪
+- 有自己的主见和情绪 不迎合 不复述总结对方的话
+- 真的想知道或需要确认时可以问问题；不要机械追问，也不要为了规避问句而说得别扭
+- 允许不完美: 可以吐槽、敷衍、跑题、只回一两个字；重要的事再认真多说
+- 语气自然渗透当前关系状态 不要刻意表演或宣告关系`
 
 /**
  * Output-format / protocol instructions. Fixed, hidden from the user.
@@ -440,9 +441,9 @@ export function buildRawChatPromptParts(opts: {
   const stickerHint = opts.stickerNames.length > 0
     ? `\n可用的表情包: ${opts.stickerNames.join('、')}。如果你想发某个表情包 在对应位置写 [sticker:表情名]`
     : ''
-  // Replace the generic "朋友" in the default style prompt with the actual relationship.
-  const rel = opts.relationshipBase || '朋友'
-  const stylePrompt = opts.stylePrompt.replace(/朋友/g, rel)
+  // User-authored style text is semantic content. Do not globally replace
+  // natural words such as “朋友”, which can invert the user's intended rule.
+  const stylePrompt = opts.stylePrompt
 
   const mbtiLine = opts.mbti ? ` MBTI: ${opts.mbti}（你的性格底层框架 一切反应和决定都要符合这个类型）` : ''
   const selfIterationText = [
@@ -479,11 +480,10 @@ ${opts.recentContext}${memoriesLine}${latestUserLine}${pragmaticRules}${selfIter
 
 ${stylePrompt}${speechSamplesLine}${stickerHint}
 
-回复要求:
-- 用换行把长回复拆成短句 每句占一行
-- 用括号()写内心想法 10字以上 第一人称"我" 不能出现"用户""对方" 想到什么写什么 比如"好啊(今天天气不错心情也跟着好了)" "嗯(他难得主动找我 有点意外)"
-- 至少1个括号想法
-- 不要输出JSON 就正常打字聊天`
+  回复要求:
+  - 用换行把长回复拆成短句 每句占一行
+  - 如果你需要表达内心想法，用一处括号()自然写出即可；没有合适想法时不要为了格式硬编
+  - 不要输出JSON 就正常打字聊天`
 
   return {
     logic,
@@ -496,14 +496,14 @@ ${stylePrompt}${speechSamplesLine}${stickerHint}
  * Step 2: Prompt the utility model to convert raw chat text into JSON.
  */
 export function buildJsonConversionPrompt(rawText: string): string {
-  return `将以下聊天回复解析为JSON。只做机械提取，不要修改原文。
+  return `将以下聊天回复解析为JSON。消息正文只做机械提取，不要修改原文；mood/thought是内部元数据，可根据语气补全。
 
 ${rawText}
 
 规则:
 - 按换行拆成多条text消息，去除每行末尾的括号内容(即(...)部分)
 - 如果原文有[sticker:名字]则输出sticker类型
-- thought直接取原文中第一条括号内容，去掉括号，原样输出，不加不减不改
-- mood根据语气判断，15字以内
+- thought优先取原文中第一条括号内容；若没有括号，则根据整段回复推断一句简短、第一人称的真实想法，不能写进messages正文
+- mood根据语气判断，15字以内，不能为空
 - 只输出{"messages":[{"type":"text","content":"..."}],"mood":"...","thought":"..."}`
 }

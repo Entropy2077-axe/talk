@@ -6,6 +6,7 @@ import { displayName } from './contact'
 import { describeCurrentTime, toDateKey } from './time'
 import { isModuleEnabled } from '../features'
 import { parseIntentsField, type ParsedIntent } from './intent'
+import { applyInterpersonalMemorySignals } from './contactRelations'
 import type { AppSettings, Contact, ContactMemory, ContactMemoryScope, ContactRelationLabel, IntentItem, MemoryCategory, MemoryKind, Message, PlanItem } from '../types'
 
 /** How many *new* messages accumulate before we bother refreshing memory. Keeps the extra API call rare. */
@@ -704,7 +705,11 @@ export async function contactRelationMemoryText(contactId: string): Promise<stri
         const otherId = link.fromContactId === contactId ? link.toContactId : link.fromContactId
         const other = contactById.get(otherId)
         if (!other) return ''
-        return `- ${displayName(other)} 是你的${link.label}`
+        const dynamic = link.dynamicSummary ? `；${link.dynamicSummary}` : ''
+        const metrics = link.affinity !== undefined || link.familiarity !== undefined || link.tension !== undefined
+          ? `（亲近${link.affinity ?? 0} 熟悉${link.familiarity ?? 0} 紧张${link.tension ?? 0}）`
+          : ''
+        return `- ${displayName(other)} 是你的${link.label}${metrics}${dynamic}`
       })
       .filter(Boolean)
     return lines.length > 0 ? `【已知朋友关系】\n${lines.join('\n')}` : ''
@@ -892,7 +897,18 @@ export async function maybeUpdateGroupMemory(
           .map((m) => m.speakerContactId),
       ),
     )
+    // Everyone in a group can retain shared/public events. Only members the
+    // user directly engaged should have their private relationship summary
+    // rewritten from this group batch.
     const directParticipantIds = new Set(speakerIds)
+    for (const message of newMessages) {
+      if (message.role !== 'user') continue
+      for (const id of message.mentions ?? []) directParticipantIds.add(id)
+      if (message.replyToMessageId) {
+        const replied = allMessages.find((candidate) => candidate.id === message.replyToMessageId)
+        if (replied?.speakerContactId) directParticipantIds.add(replied.speakerContactId)
+      }
+    }
     const targets = members
 
     if (targets.length === 0) {
@@ -933,20 +949,23 @@ export async function maybeUpdateGroupMemory(
       const contact = targets[i]
       const update = updates[i]
 
-      // Write structured memory items for this speaker (deduped).
-      const privateStats = await mergeMemoryItems(contact.id, update.memoryItems, conversationId, now, { scope: 'private' })
+      // Shared group facts are retained by all members as group memories;
+      // only direct user↔member exchanges become private relationship facts.
+      const privateItems = directParticipantIds.has(contact.id) ? update.memoryItems : []
+      const privateStats = await mergeMemoryItems(contact.id, privateItems, conversationId, now, { scope: 'private' })
       const groupStats = await mergeMemoryItems(contact.id, update.groupMemoryItems, conversationId, now, { scope: 'group', groupId })
       const interpersonalItems = directParticipantIds.has(contact.id)
         ? attachRelatedContactIds(update.interpersonalMemoryItems, memberByName)
         : []
       const interpersonalStats = await mergeMemoryItems(contact.id, interpersonalItems, conversationId, now, { scope: 'interpersonal', groupId })
+      if (interpersonalItems.length > 0) await applyInterpersonalMemorySignals(contact.id, interpersonalItems)
       const changed = privateStats.added + privateStats.updated + groupStats.added + groupStats.updated + interpersonalStats.added + interpersonalStats.updated
       if (changed > 0) {
         console.log(`[memory] 群聊结构化记忆 ${contact.name}: 私聊+${privateStats.added}/更${privateStats.updated} 群聊+${groupStats.added}/更${groupStats.updated} 人际+${interpersonalStats.added}/更${interpersonalStats.updated}`)
       }
 
       // character_promise items → also feed into upcomingPlans.
-      const promisePlans: ParsedPlan[] = update.memoryItems
+      const promisePlans: ParsedPlan[] = privateItems
         .filter((item) => item.kind === 'character_promise')
         .map((item) => ({
           text: item.content,
@@ -954,12 +973,13 @@ export async function maybeUpdateGroupMemory(
           confidence: Math.round(item.confidence * 100),
         }))
 
-      await db.contacts.update(contact.id, {
-        memoryFacts: update.facts,
-        memoryStyle: update.style,
+      const sharedPatch = {
         memoryUpdatedAt: now,
         upcomingPlans: mergePlans(contact.upcomingPlans ?? [], [...update.plans, ...promisePlans], now),
-      })
+      }
+      await db.contacts.update(contact.id, directParticipantIds.has(contact.id)
+        ? { ...sharedPatch, memoryFacts: update.facts, memoryStyle: update.style }
+        : sharedPatch)
     }
     await db.groups.update(groupId, { memoryMessageCursor: allMessages.length })
   } catch {

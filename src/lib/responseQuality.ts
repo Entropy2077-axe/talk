@@ -192,13 +192,13 @@ export async function validateGroupDraft(opts: {
   const speakerText = opts.speakers.map((speaker, i) => `${i + 1}. ${displayName(speaker)}`).join('\n')
   const energyRule =
     opts.energyLevel === 'cold'
-      ? '冷淡: 每个发言人应基本只发1句话。'
+      ? '冷淡: 整轮应有1到3句话。'
       : opts.energyLevel === 'lively'
-        ? '热闹: 每个发言人应尽量发4句话以上，可以多次穿插发言。'
-        : '普通: 每个发言人应基本发2到3句话。'
+        ? '热闹: 整轮应有6到12句话，可以多次穿插发言。'
+        : '普通: 整轮应有3到7句话。'
   const chatterRule = opts.allowAiChatter
     ? opts.speakers.length >= 2
-      ? 'AI互聊已开启: 草稿中必须有明显AI之间互动，例如接话、回应、吐槽、附和、反驳、点名其中至少一种。'
+      ? 'AI互聊已开启: 有自然接点时可以出现AI之间互动；不能为了满足规则而强行点名或接话。'
       : '本轮只有一位AI发言人: 不要求AI之间互动。'
     : 'AI互聊已关闭: 草稿必须围绕用户、用户@/回复对象或用户相关话题，不要发展AI之间的旁支闲聊。'
 

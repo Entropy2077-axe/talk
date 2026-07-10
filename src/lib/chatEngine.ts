@@ -129,6 +129,8 @@ export function formatStructuredHistoryEvent(
 }
 
 function parseAiTurnDebugPayload(opts: {
+  mainPrompt: string
+  conversionPrompt: string
   rawText: string
   jsonRaw: string
   finalRaw: string
@@ -139,7 +141,7 @@ function parseAiTurnDebugPayload(opts: {
   qualityCheck: { enabled: boolean; repaired: boolean; reason?: string; detectedInvalid?: boolean }
   injectedIntents: ReturnType<typeof activeIntents>
 }): unknown {
-  const { finalRaw, jsonRaw, rawText, bubbles, knowledgeQueries, mood, thought, qualityCheck, injectedIntents } = opts
+  const { mainPrompt, conversionPrompt, finalRaw, jsonRaw, rawText, bubbles, knowledgeQueries, mood, thought, qualityCheck, injectedIntents } = opts
   const trimmed = finalRaw.trim()
   const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
   const text = fenceMatch ? fenceMatch[1].trim() : trimmed
@@ -157,6 +159,8 @@ function parseAiTurnDebugPayload(opts: {
     }
   }
   return {
+    mainPrompt,
+    conversionPrompt,
     rawText,
     jsonRaw,
     finalRaw,
@@ -169,6 +173,13 @@ function parseAiTurnDebugPayload(opts: {
     injectedIntents,
     memoryUpdate: null,
   }
+}
+
+/** Admin-only safe stop: cancels network work and unrevealed bubbles for one conversation. */
+export function stopAiTurn(conversationId: string): void {
+  streamByConversation.set(conversationId, uuid())
+  clearPending(conversationId)
+  useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined, error: '已由管理员停止本轮生成' })
 }
 
 function formatRecentConversationForReview(messages: Message[], contact: Contact): string {
@@ -429,6 +440,8 @@ async function runAiTurn(
       conversationId,
       raw: finalRaw,
       parsed: parseAiTurnDebugPayload({
+        mainPrompt: [contextSections, socialMemories].filter(Boolean).join('\n\n'),
+        conversionPrompt,
         rawText,
         jsonRaw,
         finalRaw,

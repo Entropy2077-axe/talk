@@ -523,7 +523,7 @@ export function SettingsPage() {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-sm font-medium text-gray-900">管理员模式</h2>
-            <p className="text-[11px] text-gray-400">开启后在发现页显示天眼调试入口，联系人名片可查看系统提示词</p>
+            <p className="text-[11px] text-gray-400">开启后可使用天眼查看运行进程、真实提示词、AI 回合、记忆/事件链，并执行安全调试操作</p>
           </div>
           <button
             onClick={() => setSettings({ adminModeEnabled: !adminModeEnabled })}
