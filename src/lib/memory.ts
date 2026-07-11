@@ -1,12 +1,12 @@
 import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { chatCompletion } from './deepseek'
-import { clampWarmthDelta, applyWarmthDelta, maxWarmthForTrait, warmthStage, shouldUpdateBase, containsBreakupLanguage, WARMTH_BREAKUP_PENALTY, traitWarmthModifier } from './relationship'
+import { clampWarmthDelta, applyWarmthDelta, maxWarmthForTrait, minWarmthForTrait, warmthStage, shouldUpdateBase, containsBreakupLanguage, WARMTH_BREAKUP_PENALTY, traitWarmthModifier } from './relationship'
 import { displayName } from './contact'
 import { describeCurrentTime, toDateKey } from './time'
 import { isModuleEnabled } from '../features'
 import { parseIntentsField, type ParsedIntent } from './intent'
-import { applyInterpersonalMemorySignals } from './contactRelations'
+import { applyInterpersonalMemorySignals, uniqueRelationPairs } from './contactRelations'
 import type { AppSettings, Contact, ContactMemory, ContactMemoryScope, ContactRelationLabel, IntentItem, MemoryCategory, MemoryKind, Message, PlanItem } from '../types'
 
 /** How many *new* messages accumulate before we bother refreshing memory. Keeps the extra API call rare. */
@@ -527,7 +527,7 @@ export async function maybeUpdateMemory(
     }
 
     const newWarmth = relEnabled
-      ? applyWarmthDelta(oldWarmth, warmthDelta, personalityEnabled ? maxWarmthForTrait(contact.personalityTrait) : 100)
+      ? applyWarmthDelta(oldWarmth, warmthDelta, personalityEnabled ? maxWarmthForTrait(contact.personalityTrait) : 100, personalityEnabled ? minWarmthForTrait(contact.personalityTrait) : -100)
       : oldWarmth
     let base = contact.relationshipBase
     let relationshipBaseChanged = false
@@ -700,7 +700,7 @@ export async function contactRelationMemoryText(contactId: string): Promise<stri
     const otherIds = Array.from(new Set(links.map((link) => (link.fromContactId === contactId ? link.toContactId : link.fromContactId))))
     const contacts = await db.contacts.bulkGet(otherIds)
     const contactById = new Map(contacts.filter((c): c is Contact => !!c).map((c) => [c.id, c]))
-    const lines = links
+    const lines = uniqueRelationPairs(links)
       .map((link) => {
         const otherId = link.fromContactId === contactId ? link.toContactId : link.fromContactId
         const other = contactById.get(otherId)
@@ -712,7 +712,7 @@ export async function contactRelationMemoryText(contactId: string): Promise<stri
         return `- ${displayName(other)} 是你的${link.label}${metrics}${dynamic}`
       })
       .filter(Boolean)
-    return lines.length > 0 ? `【已知朋友关系】\n${lines.join('\n')}` : ''
+    return lines.length > 0 ? `【不可擅自改变的 AI 关系】\n${lines.join('\n')}` : ''
   } catch {
     return ''
   }
@@ -737,8 +737,8 @@ export async function rememberInitialContactRelation(opts: {
     relatedContactIds: [other.id],
     category: '关系动态',
     kind: 'relationship_event',
-    content: `${displayName(other)}是你的${opts.label}，这是创建角色时设定的朋友关系。`,
-    tags: ['朋友关系', opts.label, displayName(other)],
+    content: `${displayName(other)}是你的${opts.label}，这是创建角色时设定的 AI 关系事实，不可随意改称朋友。`,
+    tags: ['AI关系', opts.label, displayName(other)],
     importance: 0.85,
     emotionalWeight: 0.35,
     confidence: 1,

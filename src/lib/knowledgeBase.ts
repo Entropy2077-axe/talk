@@ -147,10 +147,14 @@ async function searchAndStore(topics: { query: string }[], settings: AppSettings
  * 3-query/15-day periodic refresh this replaced entirely.
  */
 export async function processKnowledgeQueries(queries: string[], settings: AppSettings): Promise<void> {
+  await resolveKnowledgeQueries(queries, settings)
+}
+
+export interface KnowledgeResolution { text: string; keywords: string[]; searched: boolean }
+/** Resolve query keywords from cache first, search missing ones, persist them, and return model-ready evidence. */
+export async function resolveKnowledgeQueries(queries: string[], settings: AppSettings): Promise<KnowledgeResolution> {
   try {
-    if (queries.length === 0) return
-    if (!settings.tavilyApiKey || !settings.apiKey) return
-    if (!canQueryKnowledgeToday()) return
+    if (queries.length === 0) return { text: '', keywords: [], searched: false }
 
     const existing = await db.knowledgeEntries.toArray()
     const seen = new Set<string>()
@@ -162,22 +166,24 @@ export async function processKnowledgeQueries(queries: string[], settings: AppSe
       if (hasKnowledgeForQuery(q, existing)) continue
       newTopics.push(q)
     }
-    if (newTopics.length === 0) return
-
-    const entries = await searchAndStore(
-      newTopics.map((q) => ({ query: q })),
-      settings,
-    )
-    if (entries.length === 0) return
-
-    const now = Date.now()
-    for (const e of entries) {
-      await db.knowledgeEntries.add({ id: uuid(), sourceQuery: e.sourceQuery, topic: e.topic, content: e.content, fetchedAt: now })
+    let searched = false
+    if (newTopics.length > 0 && settings.tavilyApiKey && settings.apiKey && canQueryKnowledgeToday()) {
+      const entries = await searchAndStore(newTopics.map((q) => ({ query: q })), settings)
+      if (entries.length > 0) {
+        const now = Date.now()
+        for (const e of entries) await db.knowledgeEntries.add({ id: uuid(), sourceQuery: e.sourceQuery, topic: e.topic, content: e.content, fetchedAt: now })
+        await pruneOldKnowledgeEntries(now)
+        recordKnowledgeQueriesSent(newTopics.length)
+        searched = true
+      }
     }
-    await pruneOldKnowledgeEntries(now)
-    recordKnowledgeQueriesSent(newTopics.length)
+
+    const all = await db.knowledgeEntries.toArray()
+    const matched = all.filter(e => queries.some(q => hasKnowledgeForQuery(q, [e])))
+    const text = matched.slice(-6).map(e => `关键词「${e.sourceQuery}」\n${e.topic}: ${e.content}`).join('\n\n')
+    return { text, keywords: queries, searched }
   } catch {
-    // best-effort only, same as the memory/moments background jobs
+    return { text: '', keywords: queries, searched: false }
   }
 }
 

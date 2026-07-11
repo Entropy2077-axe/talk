@@ -21,6 +21,7 @@ interface MessageBubbleProps {
   onLongPress?: () => void
   onSelect?: () => void
   onLinkClick?: (label: string) => void
+  onFinanceClick?: (message: Message) => void
 }
 
 export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(function MessageBubble(
@@ -39,7 +40,7 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
     onReply,
     onLongPress,
     onSelect,
-    onLinkClick,
+    onLinkClick, onFinanceClick,
   },
   ref,
 ) {
@@ -131,6 +132,14 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
                 {message.scheduleChange.startHour}:00-{message.scheduleChange.endHour}:00 · {message.scheduleChange.location}
               </p>
             </div>
+          )}
+          {message.type === 'image' && message.image && <div className="max-w-[240px] overflow-hidden rounded-xl bg-white"><img src={message.image.url} alt={message.image.caption||'聊天图片'} className="max-h-72 w-full object-cover"/>{message.image.caption&&<p className="px-3 py-2 text-xs text-gray-600">{message.image.caption}</p>}{message.image.photographer&&<p className="px-3 pb-2 text-[10px] text-gray-300">Photo: {message.image.photographer}</p>}</div>}
+          {['transfer','redPacket','loanRequest','loanResult','repayment'].includes(message.type) && message.finance && (
+            <button onClick={()=>onFinanceClick?.(message)} className="w-56 rounded-xl border border-orange-200 bg-gradient-to-br from-orange-400 to-red-500 p-3 text-left text-white">
+              <p className="text-sm font-medium">{message.type==='transfer'?'💸 转账':message.type==='redPacket'?'🧧 红包':message.type==='loanRequest'?'🤝 借款申请':message.type==='repayment'?'✅ 已还款':'📋 借款结果'}</p>
+              <p className="mt-2 text-xl font-bold">{message.type==='redPacket'&&message.finance.status==='pending'?'点击领取':message.finance.amount}</p>
+              <p className="mt-1 text-xs text-white/80">{message.finance.note || message.finance.status}</p>
+            </button>
           )}
 
           <div className={`mt-0.5 flex items-center gap-2 px-1 ${isUser ? 'flex-row-reverse' : ''}`}>

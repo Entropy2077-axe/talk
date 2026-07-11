@@ -16,6 +16,11 @@ export function maxWarmthForTrait(trait?: string): number {
   return WARMTH_MAX
 }
 
+/** Some forgiving personalities retain a floor without becoming immune to conflict. */
+export function minWarmthForTrait(trait?: string): number {
+  return trait === '小天使' ? -20 : WARMTH_MIN
+}
+
 /** Extra warmth penalty applied when breakup language is detected in the assessment. */
 export const WARMTH_BREAKUP_PENALTY = -30
 
@@ -23,6 +28,11 @@ export const WARMTH_BREAKUP_PENALTY = -30
 export function initialWarmthForBase(base: string, trait?: string): number {
   if (trait === '病娇') return 100
   if (trait === '妈妈') return 75
+  const traitInitial: Record<string, number> = {
+    猫系: 20, 犬系: 40, 爱哭包: 30, 撒娇怪: 35, 小天使: 40,
+    爹系: 45, 三无: 10, 机器人: 0, 社恐: 5, 吃货: 30, 大小姐: 35,
+  }
+  if (trait && traitInitial[trait] !== undefined) return traitInitial[trait]
   switch (base) {
     case '恋人':
       return 60
@@ -112,14 +122,52 @@ export function traitWarmthModifier(trait: string | undefined, delta: number, wa
       if (delta < 0) return 0
       return delta
 
+    case '猫系':
+      if (warmth < 40 && delta > 0) return Math.round(delta * 0.6)
+      if (warmth > 60 && delta > 0) return Math.round(delta * 1.3)
+      if (warmth > 60 && delta < 0) return Math.round(delta * 1.4)
+      return delta
+
+    case '犬系':
+      return Math.round(delta * (delta > 0 ? 1.4 : 1.25))
+
+    case '爱哭包':
+      return Math.round(delta * (delta > 0 ? 1.3 : 1.7))
+
+    case '撒娇怪':
+      return Math.round(delta * (delta > 0 ? 1.5 : 1.3))
+
+    case '小天使':
+      return Math.round(delta * (delta > 0 ? 1.1 : 0.4))
+
+    case '爹系':
+      return Math.round(delta * (delta > 0 ? 1.15 : 0.5))
+
+    case '三无':
+      if (delta < 0) return Math.round(delta * 0.7)
+      return Math.round(delta * (warmth < 60 ? 0.5 : 1.2))
+
+    case '机器人':
+      return Math.round(delta * (delta > 0 ? 0.7 : 0.5))
+
+    case '社恐':
+      if (warmth < 40 && delta > 0) return Math.round(delta * 0.65)
+      return Math.round(delta * (delta > 0 ? 1.4 : 1.35))
+
+    case '吃货':
+      return Math.round(delta * (delta > 0 ? 1.2 : 0.9))
+
+    case '大小姐':
+      return Math.round(delta * (delta > 0 ? 1.15 : 1.3))
+
     default:
       return delta
   }
 }
 
 /** Apply delta and clamp to the valid range. Some traits (e.g. 病娇) have a higher or no upper bound. */
-export function applyWarmthDelta(current: number, delta: number, maxWarmth = WARMTH_MAX): number {
-  return Math.max(WARMTH_MIN, Math.min(maxWarmth, Math.round(current + delta)))
+export function applyWarmthDelta(current: number, delta: number, maxWarmth = WARMTH_MAX, minWarmth = WARMTH_MIN): number {
+  return Math.max(minWarmth, Math.min(maxWarmth, Math.round(current + delta)))
 }
 
 // ---- stage tiers (display only) ----
@@ -155,6 +203,12 @@ export function warmthStage(warmth: number): WarmthStage {
 
 export function warmthLabel(warmth: number): string {
   return warmthStage(warmth).label
+}
+
+export function personalityIntimacyStage(warmth: number): string {
+  if (warmth <= 20) return '保留边界'
+  if (warmth <= 60) return '逐渐熟悉'
+  return '私密解锁'
 }
 
 export function warmthPrompt(warmth: number): string {

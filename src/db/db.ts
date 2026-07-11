@@ -15,7 +15,7 @@ import type {
   SavedWorldview,
   SocialEvent,
   Sticker,
-  Todo,
+  WalletAccount, WalletTransaction, Loan, JobListing, InterviewSession,
 } from '../types'
 
 export class TalkDB extends Dexie {
@@ -23,7 +23,6 @@ export class TalkDB extends Dexie {
   conversations!: Table<Conversation, string>
   messages!: Table<Message, string>
   stickers!: Table<Sticker, string>
-  todos!: Table<Todo, string>
   inventory!: Table<InventoryItem, string>
   moments!: Table<Moment, string>
   momentComments!: Table<MomentComment, string>
@@ -35,6 +34,11 @@ export class TalkDB extends Dexie {
   aiTurns!: Table<AiTurnDebug, string>
   socialEvents!: Table<SocialEvent, string>
   contactMemories!: Table<ContactMemory, string>
+  walletAccounts!: Table<WalletAccount, string>
+  walletTransactions!: Table<WalletTransaction, string>
+  loans!: Table<Loan, string>
+  jobListings!: Table<JobListing, string>
+  interviews!: Table<InterviewSession, string>
 
   constructor() {
     super('talk-db')
@@ -132,6 +136,42 @@ export class TalkDB extends Dexie {
         await tx.table('socialEvents').update(event.id, { expiresAt: event.createdAt + days * 24 * 60 * 60 * 1000 })
       }
     })
+    // AI-to-AI relations are a symmetric social contract. Normalize legacy
+    // one-way rows so every prompt can safely read either contact's view.
+    this.version(16).stores({
+      contactRelations: 'id, pairId, fromContactId, toContactId, lastInteractionAt',
+    }).upgrade(async (tx) => {
+      const table = tx.table('contactRelations')
+      const rows = await table.toArray() as Array<Record<string, unknown>>
+      const handled = new Set<string>()
+      for (const row of rows) {
+        const from = row.fromContactId as string
+        const to = row.toContactId as string
+        if (!from || !to) continue
+        const key = [from, to].sort().join(':')
+        if (handled.has(key)) continue
+        handled.add(key)
+        const pair = rows.filter((candidate) =>
+          (candidate.fromContactId === from && candidate.toContactId === to) || (candidate.fromContactId === to && candidate.toContactId === from),
+        )
+        const pairId = (pair.find((item) => typeof item.pairId === 'string')?.pairId as string | undefined) || crypto.randomUUID()
+        const rank = (label: unknown) => ['恋人', '家人', '暧昧对象', '好朋友', '损友', '前辈/同事', '点头之交', '普通朋友'].indexOf(String(label))
+        const primary = [...pair].sort((a, b) => rank(b.label) - rank(a.label))[0]
+        for (const item of pair) await table.update(item.id as string, { pairId, label: primary.label })
+        if (!pair.some((item) => item.fromContactId === to && item.toContactId === from)) {
+          await table.add({ ...primary, id: crypto.randomUUID(), pairId, fromContactId: to, toContactId: from })
+        }
+      }
+    })
+    this.version(17).stores({
+      walletAccounts: '&ownerId, updatedAt',
+      walletTransactions: 'id, &idempotencyKey, kind, fromOwnerId, toOwnerId, createdAt',
+      loans: 'id, lenderId, borrowerId, status, createdAt',
+      jobListings: 'id, status, createdAt',
+      interviews: 'id, jobId, status, updatedAt',
+    })
+    // 待办功能整体移除，显式删除旧表。
+    this.version(18).stores({ todos: null })
   }
 }
 

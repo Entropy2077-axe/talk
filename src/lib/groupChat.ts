@@ -1,7 +1,7 @@
 import { db } from '../db/db'
 import { extractJsonObject, parseKnowledgeQueriesField } from './aiProtocol'
 import { activeUpcomingPlansText } from './memory'
-import { formatSpeechSamplesForScene } from './prompt'
+import { formatPersonaProfile, formatSpeechSamplesForScene, personalityTraitLine } from './prompt'
 import { describeCurrentSchedule } from './schedule'
 import { isModuleEnabled } from '../features'
 import type { Contact, GroupAiBubble, GroupAiResponse, GroupEnergyLevel, GroupSpeakerLimit } from '../types'
@@ -124,14 +124,14 @@ export function buildGroupSystemPrompt(opts: {
       const trait = c.personalityTrait?.trim()
       const traitLine =
         isModuleEnabled('personalityTraits') && trait && trait !== '无'
-          ? `\n【性格特质】${trait}（影响情感反应模式，不是说话风格——说话风格已在人设里描述）`
+          ? personalityTraitLine(trait, c.warmth ?? 0)
           : ''
       const samplesLine = formatSpeechSamplesForScene(c.speechSamples, 'group', 2)
       const recentMemoText = opts.speakerMemoriesMap?.get(c.id)
       const recentMemoBlock = recentMemoText ? `\n【最近的记忆碎片】\n${recentMemoText}` : ''
       return `发言人${i + 1}: ${c.name}
 与用户的关系: ${base}${dynamic}
-【人设 - 必须严格遵守】${c.systemPrompt || '自由发挥'}${c.mbti ? `\n【MBTI】${c.mbti}（性格底层框架 一切反应和决定都应符合这个类型）` : ''}${traitLine}
+【人设 - 必须严格遵守】${c.systemPrompt || '自由发挥'}${isModuleEnabled('career') && c.occupation ? `\n【职业】${c.occupation}，月薪${c.monthlySalary ?? 0}` : ''}${c.mbti ? `\n【MBTI】${c.mbti}（性格底层框架 一切反应和决定都应符合这个类型）` : ''}${traitLine}
 ${samplesLine ? `【说话样例】\n${samplesLine}\n` : ''}
 【当前状态】${scheduleText || '没有特别安排'}
 【对用户的了解】${c.memoryFacts || factsFallback}
@@ -212,6 +212,7 @@ export function buildGroupRawChatPrompt(opts: {
   knowledgeDigestText?: string
   selfIterationGlobalText?: string
   speakerMemoriesMap?: Map<string, string>
+  aiRelationshipText?: string
 }): string {
   const rosterText = opts.allMembers.map((m) => `- ${m.name}`).join('\n')
   const speakerNames = opts.speakers.map((s) => s.name).join('、')
@@ -231,9 +232,8 @@ export function buildGroupRawChatPrompt(opts: {
 - 相处习惯: ${c.memoryStyle || `语气要符合${base}关系，不要生疏客气`}。
 ${plansText ? `- 和用户的约定: ${plansText}。\n` : ''}${recentMemoText ? `- 最近记忆碎片:\n${recentMemoText}\n` : ''}${c.selfIterationPrompt ? `- 关系协商记录:\n${c.selfIterationPrompt}\n` : ''}
 感觉:
-- 人设必须严格遵守: ${c.systemPrompt || '自由发挥成一个普通朋友'}。
-${c.mbti ? `- MBTI: ${c.mbti}。` : ''}
-${c.personalityTrait && c.personalityTrait !== '无' ? `- 性格特质: ${c.personalityTrait}。` : ''}
+- 人设必须严格遵守: ${c.systemPrompt || '自由发挥成一个普通朋友'}。${isModuleEnabled('career') && c.occupation ? `职业：${c.occupation}，月薪${c.monthlySalary ?? 0}。` : ''}${c.personaConstraints ? `\n- 用户补充说明（不可违背）: ${c.personaConstraints}` : ''}${c.personaProfile ? `\n- 人设硬约束:\n${formatPersonaProfile(c.personaProfile)}` : ''}
+${c.mbti ? `- MBTI: ${c.mbti}。` : ''}${personalityTraitLine(c.personalityTrait, c.warmth ?? 0)}
 ${samplesText ? `- 说话样例:\n${samplesText}` : ''}`
     })
     .join('\n\n')
@@ -243,6 +243,7 @@ ${samplesText ? `- 说话样例:\n${samplesText}` : ''}`
     ? `\n【本轮定向上下文】\n${opts.targetedContextText}\n如果用户@某人，那个人必须优先回应；如果用户回复某条消息，先回应被回复内容再自然延展。`
     : ''
   const recentEvents = opts.recentEventsText ? `\n【最近发生的事】\n${opts.recentEventsText}` : ''
+  const aiRelationships = opts.aiRelationshipText ? `\n${opts.aiRelationshipText}` : ''
   const worldview = opts.worldviewText ? `\n【世界设定】\n${opts.worldviewText}` : ''
   const knowledge = opts.knowledgeDigestText ? `\n【可参考资讯】\n${opts.knowledgeDigestText}` : ''
   const selfIteration = opts.selfIterationGlobalText ? `\n【用户边界与偏好 - 全局】\n${opts.selfIterationGlobalText}` : ''
@@ -310,7 +311,7 @@ ${opts.stylePrompt}
 ${worldview}
 【当前上下文】
 时间: ${opts.currentTimeText}
-用户资料: ${opts.userProfileText}${groupMemory}${groupVibe}${knowledge}${targetedContext}${recentEvents}${selfIteration}
+用户资料: ${opts.userProfileText}${groupMemory}${groupVibe}${knowledge}${targetedContext}${recentEvents}${aiRelationships}${selfIteration}
 
 ${speakerBlocks}
 
@@ -341,7 +342,9 @@ ${energyRule}
 - 心情5字以内，不能空。
 - 消息内容只写群里真正发出的文字，不要带人名冒号、括号、方括号。
 - 如果要发表情，消息内容写成[sticker:表情名]，表情名必须来自下面列表。
+- 如果真的适合发送真实图片，消息内容写成[image:英文Pexels搜索词:配文]；搜索词要具体且适合搜图。
 - 不懂的网络热梗/番剧/游戏名词，可以自然表现为不懂；后续转换器会提取knowledgeQueries。
+- 确实遇到陌生词时先自然追问，并在消息末尾写[knowledge:关键词]；不要假装懂，也不要对普通词滥用。
 
 【表情包】
 ${stickersText}
@@ -436,13 +439,15 @@ ${rawText}
 - mood 取方括号里的心情，原样保留。
 - 每条消息都必须有非空 thought 和 mood；草稿缺失时根据该行语境补一个短的。
 - 如果消息内容是 [sticker:名字]，输出 {"speakerIndex":n,"speakerName":"...","type":"sticker","name":"名字","thought":"...","mood":"..."}。
+- 如果消息内容是 [image:英文Pexels搜索词:配文]，输出image类型及query/caption字段；标记不能留在text正文。
 - sticker 名字必须来自可用表情包；不在列表里就改成普通text内容。
 - 如果草稿里自然提到不懂的新词/热梗/作品名，可在knowledgeQueries里放最多2个查询；没有就给空数组。
+- 必须把[knowledge:关键词]从消息正文删除并写入顶层knowledgeQueries；不能把标记展示给用户。
 - turnSummary 用一句话概括这一轮群聊发生了什么。
 - groupVibe 必填，用20到60字概括本轮之后最新的群聊氛围，会直接替换旧群聊氛围。
 
 只输出JSON，格式:
-{"messages":[{"speakerIndex":1,"speakerName":"...","type":"text","content":"...","thought":"...","mood":"..."}],"turnSummary":"...","groupVibe":"...","knowledgeQueries":[]}`
+{"messages":[{"speakerIndex":1,"speakerName":"...","type":"text","content":"...","thought":"...","mood":"..."},{"speakerIndex":1,"speakerName":"...","type":"image","query":"city night neon","caption":"刚看到的","thought":"...","mood":"..."}],"turnSummary":"...","groupVibe":"...","knowledgeQueries":[]}`
 }
 
 function parseSpeakerIndex(v: unknown): number | null {
@@ -511,6 +516,8 @@ function tryParseGroupJson(trimmedRaw: string, speakerCount: number): ParsedGrou
       bubbles.push({ speakerIndex, speakerName, type: 'text', content: m.content.trim(), thought, mood })
     } else if (m.type === 'sticker' && typeof m.name === 'string' && m.name.trim()) {
       bubbles.push({ speakerIndex, speakerName, type: 'sticker', name: m.name.trim(), thought, mood })
+    } else if (m.type === 'image' && typeof (m as unknown as {query?:unknown}).query === 'string') {
+      const im=m as unknown as {query:string;caption?:unknown}; bubbles.push({speakerIndex,speakerName,type:'image',query:im.query.trim().slice(0,100),caption:typeof im.caption==='string'?im.caption.slice(0,100):undefined,thought,mood})
     }
   }
   return {

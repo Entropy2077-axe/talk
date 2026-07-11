@@ -27,6 +27,9 @@ export const useSettingsStore = create<SettingsState>()(
       userBirthday: '',
       userBio: '',
       walletBalance: INITIAL_WALLET_BALANCE,
+      userOccupation: '',
+      userMonthlySalary: 0,
+      jobBabyMode: false,
       momentsCoverPhoto: '',
       momentsLastReadAt: 0,
       proactiveDailyCap: 3,
@@ -45,12 +48,12 @@ export const useSettingsStore = create<SettingsState>()(
       moodExpiryMs: 30 * 60 * 1000,
       selfIterationGlobalPrompt: '',
       adminModeEnabled: false,
-      enabledModules: ['shop', 'warehouse', 'worldview', 'knowledgeBase', 'relationship', 'personalityTraits', 'mood', 'intent', 'storyOutline'],
+      enabledModules: ['shop', 'warehouse', 'worldview', 'knowledgeBase', 'relationship', 'personalityTraits', 'mood', 'intent', 'storyOutline', 'career'],
       setSettings: (patch) => set(patch),
     }),
     {
       name: 'talk-settings',
-      version: 3,
+      version: 5,
       migrate: (persisted, version) => {
         const next = persisted as Partial<SettingsState>
         if (version < 1 && Array.isArray(next.enabledModules) && !next.enabledModules.includes('intent')) {
@@ -62,6 +65,10 @@ export const useSettingsStore = create<SettingsState>()(
         if (version < 3 && Array.isArray(next.enabledModules) && !next.enabledModules.includes('storyOutline')) {
           next.enabledModules = [...next.enabledModules, 'storyOutline']
         }
+        if (version < 4 && Array.isArray(next.enabledModules) && !next.enabledModules.includes('career')) next.enabledModules = [...next.enabledModules, 'career']
+        if (typeof next.userOccupation !== 'string') next.userOccupation = ''
+        if (typeof next.userMonthlySalary !== 'number') next.userMonthlySalary = 0
+        if (typeof next.jobBabyMode !== 'boolean') next.jobBabyMode = false
         if (typeof next.selfIterationGlobalPrompt !== 'string') {
           next.selfIterationGlobalPrompt = ''
         }

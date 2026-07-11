@@ -23,6 +23,7 @@ import { ModulesPage } from './pages/ModulesPage'
 import { SkyEyePage } from './pages/SkyEyePage'
 import { ALL_MODULES, useModuleEnabled } from './features'
 import { NotificationBanner } from './components/NotificationBanner'
+import { ensureWallets, settleSalaries } from './lib/finance'
 // Runs once at module load, regardless of admin mode — so there's already
 // log history by the time someone opens "天眼".
 installConsoleCapture()
@@ -81,6 +82,7 @@ function App() {
   const themeMode = useSettingsStore((s) => s.themeMode ?? 'light')
   const adminModeEnabled = useSettingsStore((s) => s.adminModeEnabled)
   const enabledModules = useSettingsStore((s) => s.enabledModules)
+  useEffect(() => { void ensureWallets().then(() => settleSalaries()) }, [enabledModules])
 
   // Build deduplicated route list from enabled modules.
   const moduleRoutes = useMemo(() => {

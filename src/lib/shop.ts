@@ -20,7 +20,7 @@ ${task}
 要求:
 - name简短 不超过12个字
 - description一句话 不超过20个字 突出卖点或者趣味性
-- price是5到300之间的整数 符合商品本身的合理定价
+- price是5到100000之间的现实人民币整数价格 符合商品本身的合理定价
 - icon是一个最能代表这个商品的emoji 不要用文字
 - 6件商品尽量不要重复、不要太严肃刻板 可以有点生活气息或者惊喜感
 - 只输出JSON 不要有markdown代码块标记`
@@ -34,7 +34,7 @@ export interface GeneratedProduct {
 }
 
 const MIN_PRICE = 5
-const MAX_PRICE = 300
+const MAX_PRICE = 100000
 function clampPrice(price: number): number {
   if (!Number.isFinite(price)) return MIN_PRICE
   return Math.round(Math.min(MAX_PRICE, Math.max(MIN_PRICE, price)))

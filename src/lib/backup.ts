@@ -10,7 +10,6 @@ export const BACKUP_TABLES = [
   'conversations',
   'messages',
   'stickers',
-  'todos',
   'inventory',
   'moments',
   'momentComments',
@@ -21,6 +20,7 @@ export const BACKUP_TABLES = [
   'savedWorldviews',
   'aiTurns',
   'socialEvents',
+  'walletAccounts', 'walletTransactions', 'loans', 'jobListings', 'interviews',
 ] as const
 
 export type BackupTableName = (typeof BACKUP_TABLES)[number]
@@ -62,7 +62,7 @@ export function assertTalkBackup(value: unknown): asserts value is TalkBackup {
   if (backup.schemaVersion !== BACKUP_SCHEMA_VERSION) throw new Error('备份版本暂不支持')
   if (!backup.tables || typeof backup.tables !== 'object') throw new Error('备份文件缺少数据表')
   for (const name of BACKUP_TABLES) {
-    if (name === 'socialEvents' && backup.tables[name] === undefined) continue
+    if (['socialEvents','walletAccounts','walletTransactions','loans','jobListings','interviews'].includes(name) && backup.tables[name] === undefined) continue
     if (!Array.isArray(backup.tables[name])) throw new Error(`备份文件缺少 ${name} 表`)
   }
 }

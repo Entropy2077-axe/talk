@@ -5,11 +5,15 @@ import { Avatar } from '../components/Avatar'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { formatCurrency } from '../lib/wallet'
 import { checkForUpdate } from '../lib/updateCheck'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { db } from '../db/db'
+import { USER_WALLET_ID } from '../lib/finance'
 
 export function MePage() {
   const navigate = useNavigate()
   const settings = useSettingsStore()
-  const { userAvatar, userNickname, walletBalance } = settings
+  const { userAvatar, userNickname } = settings
+  const wallet = useLiveQuery(() => db.walletAccounts.get(USER_WALLET_ID), [])
   const [checking, setChecking] = useState(false)
   const [updateMessage, setUpdateMessage] = useState('')
   const [updateUrl, setUpdateUrl] = useState('')
@@ -44,7 +48,7 @@ export function MePage() {
         <Avatar avatar={userAvatar} size={60} />
         <div className="flex flex-col items-end gap-1">
           <span className="text-[16px] font-medium text-gray-900">{userNickname}</span>
-          <span className="text-xs text-gray-400">{formatCurrency(walletBalance, settings)}</span>
+          <span className="text-xs text-gray-400">{formatCurrency(wallet?.balance ?? 0, settings)}</span>
         </div>
       </button>
 

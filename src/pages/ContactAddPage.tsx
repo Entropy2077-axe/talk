@@ -13,9 +13,11 @@ import { randomAvatarColor } from '../lib/colors'
 import { AVATAR_EMOJIS } from '../lib/avatarEmojis'
 import { pickRandomTrait } from '../lib/randomTraits'
 import { initialWarmthForBase } from '../lib/relationship'
+import { setPairedContactRelation } from '../lib/contactRelations'
 import { rememberInitialContactRelation } from '../lib/memory'
 import { displayName } from '../lib/contact'
 import { pickAvatarCategory } from '../lib/avatarCategory'
+import { OCCUPATION_OPTIONS, employmentPatch } from '../lib/career'
 import { randomAnimeAvatar, searchPexelsPhoto } from '../lib/photoSearch'
 import { CONTACT_RELATION_LABELS, HOBBY_TAG_OPTIONS, PERSONALITY_TRAIT_OPTIONS, type ContactRelationLabel } from '../types'
 import {
@@ -60,6 +62,9 @@ export function ContactAddPage() {
   const [personalityTrait, setPersonalityTrait] = useState('')
   const [hobbies, setHobbies] = useState<string[]>([])
   const [extra, setExtra] = useState('')
+  const careerEnabled = useModuleEnabled('career')
+  const [occupation, setOccupation] = useState('')
+  const [customOccupation, setCustomOccupation] = useState('')
   const [avatar, setAvatar] = useState(AVATAR_EMOJIS[Math.floor(Math.random() * AVATAR_EMOJIS.length)])
   const [avatarManuallySet, setAvatarManuallySet] = useState(false)
   const [pickingAvatar, setPickingAvatar] = useState(false)
@@ -127,6 +132,7 @@ export function ContactAddPage() {
                 personalityTrait,
                 hobbies,
                 extra,
+                occupation: occupation === '自定义' ? customOccupation.trim() : occupation,
               },
               avatarCategory,
             ),
@@ -165,6 +171,7 @@ export function ContactAddPage() {
       setProgressStep('saving')
       const id = uuid()
       const now = Date.now()
+      const chosenOccupation = occupation === '自定义' ? customOccupation.trim() : occupation
       await db.contacts.add({
         id,
         name: parsed.name,
@@ -173,6 +180,8 @@ export function ContactAddPage() {
         avatarPhotographer,
         avatarPhotographerUrl,
         systemPrompt: parsed.persona,
+        personaConstraints: extra.trim() || undefined,
+        personaProfile: parsed.personaProfile,
         speechSamples: parsed.speechSamples,
         createdAt: now,
         memoryFacts: '',
@@ -188,6 +197,7 @@ export function ContactAddPage() {
         schedule: parsed.schedule,
         scheduleOverrides: [],
         mbti: parsed.mbti || undefined,
+        ...(careerEnabled && chosenOccupation ? employmentPatch(chosenOccupation, parsed.monthlySalary ?? 6000) : {}),
       })
       await db.conversations.add({
         id: uuid(),
@@ -197,13 +207,7 @@ export function ContactAddPage() {
         updatedAt: now,
       })
       for (const row of relationRows) {
-        await db.contactRelations.add({
-          id: uuid(),
-          fromContactId: id,
-          toContactId: row.targetContactId,
-          label: row.label,
-          createdAt: now,
-        })
+        await setPairedContactRelation(id, row.targetContactId, row.label)
         await rememberInitialContactRelation({
           fromContactId: id,
           toContactId: row.targetContactId,
@@ -364,6 +368,8 @@ export function ContactAddPage() {
           </>
         )}
 
+        {careerEnabled && <div className="mb-4"><label className="mb-2 block text-xs font-medium text-gray-400">职业（必选）</label><div className="flex flex-wrap gap-2"><button type="button" onClick={()=>setOccupation(OCCUPATION_OPTIONS[Math.floor(Math.random()*OCCUPATION_OPTIONS.length)])} className="rounded-full bg-gray-100 px-3 py-1.5 text-xs text-gray-600">🎲 随机</button>{[...OCCUPATION_OPTIONS,'自定义'].map(v=><button key={v} type="button" onClick={()=>setOccupation(v)} className={`rounded-full px-3 py-1.5 text-xs ${occupation===v?'bg-gray-900 text-white':'bg-gray-100 text-gray-600'}`}>{v}</button>)}</div>{occupation==='自定义'&&<input value={customOccupation} onChange={e=>setCustomOccupation(e.target.value)} placeholder="输入职业" className="mt-2 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"/>}</div>}
+
         {/* 兴趣爱好（可选） */}
         <div className="mb-4">
           <label className="mb-2 block text-xs font-medium text-gray-400">兴趣爱好（可选）</label>
@@ -466,7 +472,7 @@ export function ContactAddPage() {
         )}
         <button
           onClick={handleGenerate}
-          disabled={generating}
+          disabled={generating || (careerEnabled && (!occupation || (occupation === '自定义' && !customOccupation.trim())))}
           className="w-full rounded-lg bg-gray-900 py-2.5 text-sm text-white disabled:opacity-40"
         >
           {generating ? '正在添加…' : '确认添加'}

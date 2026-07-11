@@ -72,9 +72,15 @@ function tryParseJson(trimmedRaw: string): ParsedAiTurn | null {
       bubbles.push({ type: 'sticker', name: m.name.trim() })
     } else if (m.type === 'link' && typeof m.app === 'string' && typeof m.label === 'string') {
       bubbles.push({ type: 'link', app: m.app, label: m.label, data: m.data })
+    } else if (m.type === 'image' && typeof (m as unknown as Record<string,unknown>).query === 'string') {
+      const im=m as unknown as Record<string,unknown>; bubbles.push({type:'image',query:String(im.query).trim().slice(0,100),caption:typeof im.caption==='string'?im.caption.slice(0,100):undefined})
     } else if (m.type === 'scheduleChange') {
       const scheduleChange = parseScheduleChangeBubble(m as unknown as Record<string, unknown>)
       if (scheduleChange) bubbles.push(scheduleChange)
+    } else if (['transfer','redPacket','loanRequest','loanDecision','giftPurchase'].includes(String(m.type))) {
+      const fm = m as unknown as Record<string, unknown>
+      const amount = Math.round(Number(fm.amount))
+      if (Number.isFinite(amount) && amount > 0) bubbles.push({ type: m.type as 'transfer'|'redPacket'|'loanRequest'|'loanDecision'|'giftPurchase', amount, note: typeof fm.note === 'string' ? String(fm.note).slice(0,80) : undefined, loanId: typeof fm.loanId === 'string' ? String(fm.loanId) : undefined, decision: fm.decision === 'accept' ? 'accept' : fm.decision === 'reject' ? 'reject' : undefined, name: typeof fm.name === 'string' ? String(fm.name).slice(0,30) : undefined, icon: typeof fm.icon === 'string' ? String(fm.icon).slice(0,8) : undefined, description: typeof fm.description === 'string' ? String(fm.description).slice(0,80) : undefined })
     }
   }
   const mood = typeof parsed.mood === 'string' && parsed.mood.trim() ? parsed.mood.trim().slice(0, 20) : undefined

@@ -9,7 +9,7 @@ import { CONTEXT_WINDOW_SIZE, activeUpcomingPlansText, maybeUpdateMemory, recent
 import { activeIntentPrompt, activeIntents, markIntentsUsed } from './intent'
 import { describeCurrentTime, ageFromBirthday } from './time'
 import { describeCurrentSchedule, describeUpcomingScheduleText, pruneExpiredOverrides } from './schedule'
-import { processKnowledgeQueries } from './knowledgeBase'
+import { resolveKnowledgeQueries } from './knowledgeBase'
 import { evaluateInitialWarmth, relationshipLine } from './relationship'
 import { displayName } from './contact'
 import { previewForMessage } from './messagePreview'
@@ -17,6 +17,8 @@ import { validatePrivateTurn } from './responseQuality'
 import { recentSocialEventsText } from './socialEvents'
 import { useChatUiStore } from '../store/useChatUiStore'
 import { enqueueSelfIterationTask } from './selfIteration'
+import { USER_WALLET_ID, balanceOf, reserveRedPacket, transferFunds } from './finance'
+import { searchPexelsPhoto } from './photoSearch'
 import type { AiBubble, AppSettings, Contact, Message, MessageType, ScheduleOverride, Sticker } from '../types'
 
 /**
@@ -97,6 +99,8 @@ export function formatStructuredHistoryEvent(
           ['app', message.link.app],
           ['data', JSON.stringify(message.link.data ?? {})],
         ]
+      : message.finance && ['transfer','redPacket','loanRequest','loanResult','repayment'].includes(kind)
+        ? [['type', kind], ['actor', actor], ['amount', message.finance.amount], ['note', message.finance.note ?? ''], ['loanId', message.finance.loanId ?? ''], ['status', message.finance.status ?? '']]
       : kind === 'gift' && message.gift
         ? [
             ['type', kind],
@@ -199,6 +203,7 @@ export function buildUserProfileText(settings: AppSettings): string {
   const age = ageFromBirthday(settings.userBirthday)
   if (age !== null) parts.push(`年龄: ${age}岁`)
   if (settings.userBio) parts.push(`简介: ${settings.userBio}`)
+  if (isModuleEnabled('career') && settings.userOccupation) parts.push(`职业: ${settings.userOccupation} 月薪: ${settings.userMonthlySalary}`)
   return parts.join(' · ')
 }
 
@@ -323,6 +328,9 @@ async function runAiTurn(
     // ---- Step 1: build context sections (no JSON protocol) ----
     const scheduleText = describeUpcomingScheduleText(contact, new Date())
     const recentMemories = await recentMemoriesText(contact.id)
+    const financeContext = isModuleEnabled('career')
+      ? `\n【经济状况】你的可用余额：${await balanceOf(contact.id)}；对方可用余额：${await balanceOf(USER_WALLET_ID)}。未结清借款：${(await db.loans.filter(l => l.status === 'active' && (l.lenderId === contact.id || l.borrowerId === contact.id)).toArray()).map(l => `${l.borrowerId === contact.id ? '你欠对方' : '对方欠你'}${l.outstanding}`).join('；') || '无'}。所有金钱动作必须量力而行，不得凭空造钱。`
+      : ''
     const socialMemories = await socialMemoriesText(contact.id)
     const relationshipText = `【你和对方的关系】${relationshipLine(
       isModuleEnabled('relationship') ? (contact.relationshipBase || '朋友') : '朋友',
@@ -334,12 +342,15 @@ async function runAiTurn(
     const situationText = `【当前情境】现在: ${describeCurrentTime(new Date())}。对方: ${buildUserProfileText(settings)}。${activeMood ? `你的心情: ${activeMood}。` : ''}【日程】${describeCurrentSchedule(contact, new Date()) ? `\n当前: ${describeCurrentSchedule(contact, new Date())}` : '\n当前: 暂无安排'}${scheduleText ? `\n接下来:\n${scheduleText}` : '\n接下来: 暂无安排'}${activeUpcomingPlansText(contact, new Date()) ? `\n约定: ${activeUpcomingPlansText(contact, new Date())}` : ''}${recentEventsText ? `\n最近: ${recentEventsText}` : ''}`
     const contextSections = buildRawChatPrompt({
       name: contact.name,
-      persona: contact.systemPrompt,
+      persona: `${contact.systemPrompt}${isModuleEnabled('career') && contact.occupation ? `\n当前职业：${contact.occupation}，现实月薪：${contact.monthlySalary ?? 0}。工作会真实影响你的作息和日常话题。` : ''}${financeContext}`,
+      personaConstraints: contact.personaConstraints,
+      personaProfile: contact.personaProfile,
       stylePrompt: settings.globalSystemPrompt,
       selfIterationGlobalText: isModuleEnabled('selfIteration') ? settings.selfIterationGlobalPrompt : undefined,
       selfIterationContactText: isModuleEnabled('selfIteration') ? contact.selfIterationPrompt : undefined,
       relationshipBase: isModuleEnabled('relationship') ? (contact.relationshipBase || '朋友') : '朋友',
       personalityTrait: isModuleEnabled('personalityTraits') ? contact.personalityTrait : undefined,
+      personalityWarmth: isModuleEnabled('relationship') ? (contact.warmth ?? 0) : undefined,
       worldviewText: isModuleEnabled('worldview') ? (settings.worldview || undefined) : undefined,
       latestUserText: _triggeringUserText,
       recentContext: [
@@ -365,12 +376,13 @@ async function runAiTurn(
         if (m.type === 'link') return formatStructuredHistoryEvent(m, 'link')
         if (m.type === 'gift') return formatStructuredHistoryEvent(m, 'gift')
         if (m.type === 'scheduleChange') return formatStructuredHistoryEvent(m, 'scheduleChange')
+        if (['transfer','redPacket','loanRequest','loanResult','repayment'].includes(m.type)) return formatStructuredHistoryEvent(m, m.type)
         return { role: m.role, content: m.content }
       }),
     ])
 
     // ---- Step 1: main model generates raw text (no JSON) ----
-    const rawText = await chatCompletion({
+    let rawText = await chatCompletion({
       apiKey: settings.apiKey,
       baseUrl: settings.baseUrl,
       model: settings.model,
@@ -382,8 +394,8 @@ async function runAiTurn(
     console.log(`[chat] 主模型回复(${rawText.length}字): ${rawText.slice(0, 100)}...`)
 
     // ---- Step 2: utility model converts raw text to JSON ----
-    const conversionPrompt = buildJsonConversionPrompt(rawText)
-    const jsonRaw = await chatCompletion({
+    let conversionPrompt = buildJsonConversionPrompt(rawText)
+    let jsonRaw = await chatCompletion({
       apiKey: settings.apiKey,
       baseUrl: settings.baseUrl,
       model: settings.utilityModel,
@@ -398,6 +410,7 @@ async function runAiTurn(
     console.log(`[chat] 多功能模型转换JSON: ${jsonRaw.slice(0, 200)}`)
     let finalRaw = jsonRaw
     let { bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw)
+    const initiallyRequestedKnowledge = [...knowledgeQueries]
     const qualityCheckDebug = {
       enabled: true,
       repaired: false,
@@ -428,6 +441,23 @@ async function runAiTurn(
         console.warn(`[chat] 审查发现问题但未能修复 对方=${displayName(contact)} 原因=${checked.reason ?? 'unknown'}`)
       }
     }
+    knowledgeQueries = Array.from(new Set([...initiallyRequestedKnowledge, ...knowledgeQueries])).slice(0, 2)
+    if (isModuleEnabled('knowledgeBase') && knowledgeQueries.length > 0) {
+      const knowledge = await resolveKnowledgeQueries(knowledgeQueries, settings)
+      if (knowledge.text) {
+        const review = qualityCheckDebug.repaired || qualityCheckDebug.detectedInvalid
+          ? `\n【上一版审查未通过】${qualityCheckDebug.reason || '逻辑或角色一致性有问题'}。重新回答时必须同时修正这个问题。`
+          : ''
+        const enrichedMessages = chatMessages.map((message, index) => index === 0
+          ? { ...message, content: `${message.content}\n\n【针对陌生词汇的搜索结果】\n${knowledge.text}${review}\n你刚才对陌生词汇自然表示了疑问。现在根据可靠搜索结果重新回答用户，语气要自然，不要写成搜索报告，也不要提审查流程。` }
+          : message)
+        rawText = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, messages: enrichedMessages, signal: controller.signal })
+        conversionPrompt = buildJsonConversionPrompt(rawText)
+        jsonRaw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, messages: [{ role: 'system', content: conversionPrompt }], jsonMode: true, signal: controller.signal })
+        finalRaw = jsonRaw
+        ;({ bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw))
+      }
+    }
     console.log(`[chat] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 mood=${turnMood || '无'} thought=${turnThought ? '有(' + turnThought.length + '字)' : '无'} 对方=${displayName(contact)}`)
     if (bubbles.length === 0) {
       console.warn(`[chat] 本轮没有正常回复 对方=${displayName(contact)} JSON内容: ${jsonRaw.slice(0, 200)}`)
@@ -455,7 +485,6 @@ async function runAiTurn(
       knowledgeQueries,
       createdAt: Date.now(),
     })
-    if (isModuleEnabled('knowledgeBase')) processKnowledgeQueries(knowledgeQueries, settings)
     revealBubbles(
       conversationId,
       contact,
@@ -518,18 +547,43 @@ function revealBubbles(
         }
         await db.contacts.update(contact.id, { scheduleOverrides: [...pruned, override] })
       }
+      let imagePayload: Message['image']
+      let imageFailed = false
+      if (bubble.type === 'image') {
+        if (!settings.pexelsApiKey) imageFailed = true
+        else try { const photo=await searchPexelsPhoto(settings.pexelsApiKey,bubble.query,'landscape'); if(!photo)imageFailed=true; else imagePayload={url:photo.url,caption:bubble.caption,photographer:photo.photographer,photographerUrl:photo.photographerUrl,query:bubble.query} } catch(err){console.warn('[photo] 聊天图片发送失败',err);imageFailed=true}
+      }
+
+      let finance: Message['finance']
+      if (bubble.type === 'transfer') {
+        try { const tx = await transferFunds({ from: contact.id, to: USER_WALLET_ID, amount: bubble.amount, kind: 'transfer', note: bubble.note, idempotencyKey: `ai:${streamId}:${i}` }); finance = { transactionId: tx.id, amount: tx.amount, note: bubble.note, status: 'completed' } } catch (err) { console.warn('[finance] AI转账被拒绝', err); return }
+      } else if (bubble.type === 'redPacket') {
+        try { const tx = await reserveRedPacket(contact.id, bubble.amount, bubble.note); finance = { transactionId: tx.id, amount: tx.amount, note: bubble.note, status: 'pending' } } catch (err) { console.warn('[finance] AI红包被拒绝', err); return }
+      } else if (bubble.type === 'loanRequest') {
+        const loanId = uuid(); await db.loans.add({ id: loanId, lenderId: USER_WALLET_ID, borrowerId: contact.id, principal: bubble.amount, outstanding: bubble.amount, note: bubble.note, status: 'pending', createdAt: Date.now() }); finance = { loanId, amount: bubble.amount, note: bubble.note, status: 'pending' }
+      } else if (bubble.type === 'loanDecision' && bubble.loanId) {
+        const loan = await db.loans.get(bubble.loanId)
+        if (!loan || loan.status !== 'pending' || loan.borrowerId !== USER_WALLET_ID || loan.lenderId !== contact.id) return
+        if (bubble.decision === 'accept') { try { await transferFunds({ from: contact.id, to: USER_WALLET_ID, amount: loan.principal, kind: 'loan', note: loan.note, idempotencyKey: `loan:${loan.id}` }); await db.loans.update(loan.id,{status:'active',resolvedAt:Date.now()}); finance={loanId:loan.id,amount:loan.principal,note:loan.note,status:'accepted'} } catch { await db.loans.update(loan.id,{status:'rejected',resolvedAt:Date.now()}); finance={loanId:loan.id,amount:loan.principal,status:'rejected'} } } else { await db.loans.update(loan.id,{status:'rejected',resolvedAt:Date.now()}); finance={loanId:loan.id,amount:loan.principal,status:'rejected'} }
+      } else if (bubble.type === 'giftPurchase') {
+        if (!bubble.name) return
+        try { const tx = await transferFunds({ from: contact.id, amount: bubble.amount, kind: 'purchase', note: `送给用户：${bubble.name}`, idempotencyKey: `ai-gift:${streamId}:${i}` }); finance = { transactionId: tx.id, amount: tx.amount, note: bubble.description, status: 'completed' } } catch (err) { console.warn('[finance] AI购买礼物被拒绝', err); return }
+      }
 
       let content: string
       if (bubble.type === 'text') content = bubble.content
       else if (bubble.type === 'sticker') content = bubble.name
+      else if (bubble.type === 'image') content = imageFailed ? '图片没发出来…' : bubble.caption || '[图片]'
       else if (bubble.type === 'scheduleChange') content = bubble.summary
-      else content = bubble.label
+      else if (bubble.type === 'link') content = bubble.label
+      else if (bubble.type === 'giftPurchase') content = bubble.name || '礼物'
+      else content = bubble.note || (bubble.type === 'loanDecision' ? '借款决定' : '资金互动')
 
       const msg: Message = {
         id: uuid(),
         conversationId,
         role: 'assistant',
-        type: bubble.type,
+        type: bubble.type === 'loanDecision' ? 'loanResult' : bubble.type === 'giftPurchase' ? 'gift' : bubble.type === 'image' && imageFailed ? 'text' : bubble.type,
         content,
         link: bubble.type === 'link' ? { app: bubble.app, label: bubble.label, data: bubble.data } : undefined,
         scheduleChange:
@@ -544,6 +598,9 @@ function revealBubbles(
                 summary: bubble.summary,
               }
             : undefined,
+        finance,
+        gift: bubble.type === 'giftPurchase' ? { name: bubble.name || '礼物', icon: bubble.icon || '🎁', description: bubble.description } : undefined,
+        image: imagePayload,
         debugAiTurnId: aiTurnId,
         debugParsedBubble: bubble,
         debugRawAiResponse: i === bubbles.length - 1 ? (finalRaw || '') : undefined,
@@ -595,7 +652,7 @@ function revealBubbles(
             contactName: contact.name,
             latestUserText: _triggeringUserText,
             latestAssistantText: bubbles
-              .map((b) => (b.type === 'text' ? b.content : `[${b.type}] ${'name' in b ? b.name : 'label' in b ? b.label : b.summary}`))
+              .map((b) => (b.type === 'text' ? b.content : `[${b.type}] ${'name' in b ? b.name : 'label' in b ? b.label : 'summary' in b ? b.summary : 'query' in b ? b.query : b.note ?? b.amount}`))
               .join('\n'),
           })
         }

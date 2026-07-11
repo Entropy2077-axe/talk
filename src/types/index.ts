@@ -6,6 +6,10 @@ export interface Contact {
   avatar: string // emoji or data URL
   avatarColor: string // fallback background color
   systemPrompt: string // persona description generated at creation time — never shown to the user, never edited after creation
+  /** User-authored requirements, preserved verbatim as a higher-priority persona source. */
+  personaConstraints?: string
+  /** Structured anchors generated alongside the narrative persona. */
+  personaProfile?: PersonaProfile
   speechSamples?: string[] // short scene-labeled examples generated at creation time, used sparingly to stabilize voice
   bio?: string
   createdAt: number
@@ -44,9 +48,20 @@ export interface Contact {
   /** Contact-specific output of the self-iteration learner: next-user-turn expectation, relationship rules, and surprise history. */
   selfIterationPrompt?: string
   selfIterationUpdatedAt?: number
+  occupation?: string
+  monthlySalary?: number
+  jobStartedDate?: string
+  lastSalaryDate?: string
 }
 
 /** A recurring weekly time block — generated once at contact creation alongside the persona, not user-editable directly. */
+export interface PersonaProfile {
+  facts: string[]
+  boundaries: string[]
+  habits: string[]
+  behaviorAnchors: string[]
+}
+
 export interface ScheduleBlock {
   id: string
   dayOfWeek: number // 0=Sun..6=Sat
@@ -94,6 +109,7 @@ export interface IntentItem {
 
 /** A directed relationship link between two AI contacts (set up when adding a contact), used to decide who reacts to whose moments. */
 export const CONTACT_RELATION_LABELS = [
+  '普通朋友',
   '好朋友',
   '损友',
   '暧昧对象',
@@ -117,6 +133,17 @@ export const PERSONALITY_TRAIT_OPTIONS = [
   { value: '兄控', description: '对兄长系的人天然亲近 其他人较难打开心扉' },
   { value: '雌小鬼', description: '表面嘲讽捉弄 来拒去留 嘴上不饶人心里怕被丢下' },
   { value: '妈妈', description: '无底线包容 好感度永远不会下降 初始好感度固定为75' },
+  { value: '猫系', description: '尊重边界才会亲近 熟了以后嘴硬但黏人' },
+  { value: '犬系', description: '热情直球 忠诚爱分享 被回应会特别开心' },
+  { value: '爱哭包', description: '情绪外显 容易委屈 被安慰会迅速心软' },
+  { value: '撒娇怪', description: '用撒娇索取关注 被回应会更亲近 被忽略会委屈' },
+  { value: '小天使', description: '温柔治愈 善于原谅 但仍有自己的边界' },
+  { value: '爹系', description: '可靠照顾型 会提醒护短 不以控制代替关心' },
+  { value: '三无', description: '低反应少话 高好感后用行动和细节偏爱表达亲近' },
+  { value: '机器人', description: '理性精确 情绪表达迟缓 会逐渐学习关心' },
+  { value: '社恐', description: '陌生时紧张克制 熟悉后才会主动分享和依赖' },
+  { value: '吃货', description: '以美食和投喂作为日常亲近媒介 不强行聊吃' },
+  { value: '大小姐', description: '优雅挑剔 带一点优越感 只对亲近的人例外' },
   { value: '无', description: '普通性格 没有特殊的情绪反应模式' },
 ] as const
 export type PersonalityTrait = (typeof PERSONALITY_TRAIT_OPTIONS)[number]['value']
@@ -131,6 +158,8 @@ export interface ContactRelationLink {
   fromContactId: string
   toContactId: string
   label: ContactRelationLabel
+  /** Same value on both directional records of one user-defined relationship. */
+  pairId?: string
   createdAt: number
   /** Stable user-authored label is kept above; these values evolve from shared social experiences. */
   affinity?: number // -100..100, shared dynamic tone for this existing undirected link
@@ -226,12 +255,12 @@ export interface Group {
 }
 
 export type MessageRole = 'user' | 'assistant'
-export type MessageType = 'text' | 'sticker' | 'link' | 'gift' | 'scheduleChange'
+export type MessageType = 'text' | 'sticker' | 'image' | 'link' | 'gift' | 'scheduleChange' | 'transfer' | 'redPacket' | 'loanRequest' | 'loanResult' | 'repayment'
 export type GroupSpeakerLimit = 2 | 3 | 4 | 5 | 'all'
 export type GroupEnergyLevel = 'cold' | 'normal' | 'lively'
 
 export interface LinkPayload {
-  app: string // e.g. 'shop' | 'todo'
+  app: string // e.g. 'shop' | 'work'
   label: string
   data?: Record<string, unknown>
 }
@@ -263,7 +292,9 @@ export interface Message {
   replyToMessageId?: string // group chats: message id this message is replying to
   link?: LinkPayload
   gift?: GiftPayload
+  image?: { url: string; caption?: string; photographer?: string; photographerUrl?: string; query?: string }
   scheduleChange?: ScheduleChangePayload
+  finance?: FinanceMessagePayload
   bubbleGroupId?: string // groups bubbles emitted from one AI response
   speakerContactId?: string // group chats only: which member persona spoke this assistant bubble
   debugAiTurnId?: string // admin mode only: links this bubble to the full AI turn debug payload
@@ -290,15 +321,6 @@ export interface Sticker {
   createdAt: number
 }
 
-export interface Todo {
-  id: string
-  title: string
-  note?: string
-  done: boolean
-  createdAt: number
-  completedAt?: number
-}
-
 /** A purchased shop item sitting in the user's warehouse until used or gifted away. */
 export interface InventoryItem {
   id: string
@@ -321,6 +343,12 @@ export interface AppSettings {
   userBirthday: string // "YYYY-MM-DD", empty if unset
   userBio: string
   walletBalance: number // 金币(coins) the user can spend in the shop
+  userOccupation: string
+  userMonthlySalary: number
+  userJobStartedDate?: string
+  userLastSalaryDate?: string
+  jobBabyMode: boolean
+  walletMigrated?: boolean
   momentsCoverPhoto: string // data URL for the 朋友圈 page's cover banner, empty until the user sets one
   momentsLastReadAt?: number // updated when the user opens MomentsPage; drives Discover red dots
   // ---- autonomous behavior (see lib/proactiveChat.ts) ----
@@ -355,6 +383,33 @@ export interface AppSettings {
   selfIterationUpdatedAt?: number
   /** Feature-module toggles — see src/features/. Every module id listed here is active. */
   enabledModules: string[]
+}
+
+export type WalletOwnerId = 'user' | string
+export type WalletTransactionKind = 'migration' | 'salary' | 'purchase' | 'transfer' | 'red_packet' | 'loan' | 'repayment' | 'admin_adjustment'
+export interface WalletAccount { ownerId: WalletOwnerId; balance: number; updatedAt: number }
+export interface WalletTransaction {
+  id: string; idempotencyKey?: string; kind: WalletTransactionKind; fromOwnerId?: WalletOwnerId; toOwnerId?: WalletOwnerId
+  amount: number; note?: string; status: 'completed' | 'reserved' | 'cancelled'; createdAt: number; completedAt?: number
+}
+export interface Loan {
+  id: string; lenderId: WalletOwnerId; borrowerId: WalletOwnerId; principal: number; outstanding: number
+  note?: string; status: 'pending' | 'active' | 'rejected' | 'repaid'; createdAt: number; resolvedAt?: number
+}
+export interface FinanceMessagePayload {
+  transactionId?: string; loanId?: string; amount: number; note?: string
+  status?: 'pending' | 'completed' | 'claimed' | 'accepted' | 'rejected' | 'repaid'
+}
+export type JobDifficulty = '入门' | '普通' | '竞争激烈'
+export interface JobListing {
+  id: string; company: string; title: string; description: string; responsibilities: string[]; requirements: string[]
+  monthlySalary: number; difficulty: JobDifficulty; interviewer: string
+  status: 'open' | 'interviewing' | 'hired' | 'rejected'; sourceQuery?: string; createdAt: number; hiredBySkip?: boolean
+}
+export interface InterviewMessage { role: 'interviewer' | 'candidate'; content: string; createdAt: number }
+export interface InterviewSession {
+  id: string; jobId: string; status: 'active' | 'passed' | 'failed'; round: number; messages: InterviewMessage[]
+  score?: number; scoreBreakdown?: Record<string, number>; feedback?: string; createdAt: number; updatedAt: number
 }
 
 /** A dated fact about current internet culture (memes/anime/games), gathered by the knowledge-base refresh job — see lib/knowledgeBase.ts. */
@@ -447,7 +502,18 @@ export interface AiBubbleScheduleChange {
   activity: string
   summary: string
 }
-export type AiBubble = AiBubbleText | AiBubbleSticker | AiBubbleLink | AiBubbleScheduleChange
+export interface AiBubbleFinance {
+  type: 'transfer' | 'redPacket' | 'loanRequest' | 'loanDecision' | 'giftPurchase'
+  amount: number
+  note?: string
+  loanId?: string
+  decision?: 'accept' | 'reject'
+  name?: string
+  icon?: string
+  description?: string
+}
+export interface AiBubbleImage { type: 'image'; query: string; caption?: string }
+export type AiBubble = AiBubbleText | AiBubbleSticker | AiBubbleImage | AiBubbleLink | AiBubbleScheduleChange | AiBubbleFinance
 
 export interface AiResponse {
   messages: AiBubble[]
@@ -478,7 +544,8 @@ export interface GroupAiBubbleSticker {
   thought?: string
   mood?: string
 }
-export type GroupAiBubble = GroupAiBubbleText | GroupAiBubbleSticker
+export interface GroupAiBubbleImage { speakerIndex: number; speakerName?: string; type: 'image'; query: string; caption?: string; thought?: string; mood?: string }
+export type GroupAiBubble = GroupAiBubbleText | GroupAiBubbleSticker | GroupAiBubbleImage
 
 export interface GroupAiResponse {
   messages: GroupAiBubble[]

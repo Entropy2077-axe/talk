@@ -6,6 +6,8 @@ import { useSettingsStore } from '../store/useSettingsStore'
 import { chatCompletion } from '../lib/deepseek'
 import { buildShopPrompt, parseShopProducts, type GeneratedProduct } from '../lib/shop'
 import { formatCurrency } from '../lib/wallet'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { USER_WALLET_ID, transferFunds } from '../lib/finance'
 
 export function ShopPage() {
   const settings = useSettingsStore()
@@ -15,6 +17,7 @@ export function ShopPage() {
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
   const [hasBrowsed, setHasBrowsed] = useState(false)
+  const wallet = useLiveQuery(() => db.walletAccounts.get(USER_WALLET_ID), [])
 
   useEffect(() => {
     if (!toast) return
@@ -52,11 +55,11 @@ export function ShopPage() {
   }
 
   async function handleBuy(product: GeneratedProduct) {
-    if (settings.walletBalance < product.price) {
+    if ((wallet?.balance ?? 0) < product.price) {
       setToast('金币不够啦')
       return
     }
-    settings.setSettings({ walletBalance: settings.walletBalance - product.price })
+    await transferFunds({ from: USER_WALLET_ID, amount: product.price, kind: 'purchase', note: product.name })
     await db.inventory.add({
       id: uuid(),
       name: product.name,
@@ -73,7 +76,7 @@ export function ShopPage() {
       <TopBar
         title="商城"
         showBack
-        right={<span className="pr-1 text-sm text-gray-500">{formatCurrency(settings.walletBalance, settings)}</span>}
+        right={<span className="pr-1 text-sm text-gray-500">{formatCurrency(wallet?.balance ?? 0, settings)}</span>}
       />
       <div className="flex-1 overflow-y-auto">
 

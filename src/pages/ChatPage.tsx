@@ -9,13 +9,15 @@ import { ActionSheet } from '../components/ActionSheet'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { useModuleEnabled } from '../features'
 import { useChatUiStore } from '../store/useChatUiStore'
-import { DEFAULT_RUNTIME_STATE, regenerateAiTurn, sendMessage, useChatEngineStore } from '../lib/chatEngine'
+import { DEFAULT_RUNTIME_STATE, regenerateAiTurn, sendMessage, triggerAiTurn, useChatEngineStore } from '../lib/chatEngine'
 import { regenerateGroupAiTurn, sendGroupMessage } from '../lib/groupChatEngine'
 import { displayName } from '../lib/contact'
 import { applyMessageFeedback } from '../lib/messageFeedback'
 import { buildPrivateStatusLine } from '../lib/contactStatus'
 import { downloadDataUrl, generateChatCaptureImage, shareDataUrl } from '../lib/chatCapture'
 import type { Contact, Message } from '../types'
+import { v4 as uuid } from 'uuid'
+import { claimRedPacket, transferFunds, USER_WALLET_ID } from '../lib/finance'
 
 const EMPTY_MESSAGES: Message[] = []
 
@@ -27,6 +29,7 @@ export function ChatPage() {
   const settings = useSettingsStore()
   const setActiveConversation = useChatUiStore((s) => s.setActiveConversation)
   const mindReadingEnabled = useModuleEnabled('mindReading')
+  const careerEnabled = useModuleEnabled('career')
 
   const conversation = useLiveQuery(
     () => (conversationId ? db.conversations.get(conversationId) : undefined),
@@ -95,6 +98,10 @@ export function ChatPage() {
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([])
   const [captureImageUrl, setCaptureImageUrl] = useState('')
   const [captureBusy, setCaptureBusy] = useState(false)
+  const [appsOpen, setAppsOpen] = useState(false)
+  const [financeMode, setFinanceMode] = useState<'transfer'|'redPacket'|'loan'|null>(null)
+  const [financeAmount,setFinanceAmount]=useState('')
+  const [financeNote,setFinanceNote]=useState('')
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const bubbleRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -242,6 +249,22 @@ export function ChatPage() {
     }
     setToast('已重新生成这一轮')
   }
+
+  async function submitFinance() {
+    if (!contact || !conversationId || !financeMode) return
+    const amount=Math.round(Number(financeAmount)); if(!Number.isFinite(amount)||amount<=0){setToast('请输入有效金额');return}
+    try {
+      let finance: Message['finance']; let type: Message['type']
+      if(financeMode==='loan') { const loanId=uuid(); await db.loans.add({id:loanId,lenderId:contact.id,borrowerId:USER_WALLET_ID,principal:amount,outstanding:amount,note:financeNote,status:'pending',createdAt:Date.now()}); finance={loanId,amount,note:financeNote,status:'pending'};type='loanRequest' }
+      else { const tx=await transferFunds({from:USER_WALLET_ID,to:contact.id,amount,kind:financeMode==='transfer'?'transfer':'red_packet',note:financeNote});finance={transactionId:tx.id,amount,note:financeNote,status:financeMode==='transfer'?'completed':'claimed'};type=financeMode }
+      await db.messages.add({id:uuid(),conversationId,role:'user',type,content:financeNote||String(amount),finance,createdAt:Date.now()});await db.conversations.update(conversationId,{updatedAt:Date.now()});setFinanceMode(null);setFinanceAmount('');setFinanceNote('');void triggerAiTurn(conversationId,contact,settings,stickers)
+    } catch(e){setToast(e instanceof Error?e.message:String(e))}
+  }
+  async function handleFinanceCard(message: Message){
+    if(message.type==='redPacket'&&message.role==='assistant'&&message.finance?.transactionId&&message.finance.status==='pending'){try{await claimRedPacket(message.finance.transactionId,USER_WALLET_ID);await db.messages.update(message.id,{finance:{...message.finance,status:'claimed'}});setToast('红包已领取')}catch(e){setToast(e instanceof Error?e.message:String(e))}}
+    if(message.type==='loanRequest'&&message.role==='assistant'&&message.finance?.loanId&&message.finance.status==='pending'&&contact){const accept=confirm(`${displayName(contact)}想借 ${message.finance.amount}，是否同意？`);if(accept){try{await transferFunds({from:USER_WALLET_ID,to:contact.id,amount:message.finance.amount,kind:'loan',note:message.finance.note,idempotencyKey:`loan:${message.finance.loanId}`});await db.loans.update(message.finance.loanId,{status:'active',resolvedAt:Date.now()});await db.messages.update(message.id,{finance:{...message.finance,status:'accepted'}})}catch(e){setToast(e instanceof Error?e.message:String(e))}}else{await db.loans.update(message.finance.loanId,{status:'rejected',resolvedAt:Date.now()});await db.messages.update(message.id,{finance:{...message.finance,status:'rejected'}})}}
+  }
+  async function repayLoan(){if(!contact||!conversationId)return;const loan=await db.loans.filter(l=>l.status==='active'&&l.borrowerId===USER_WALLET_ID&&l.lenderId===contact.id).first();if(!loan){setToast('没有需要归还的借款');return}try{const tx=await transferFunds({from:USER_WALLET_ID,to:contact.id,amount:loan.outstanding,kind:'repayment',note:'归还借款',idempotencyKey:`repay:${loan.id}`});await db.loans.update(loan.id,{status:'repaid',outstanding:0,resolvedAt:Date.now()});await db.messages.add({id:uuid(),conversationId,role:'user',type:'repayment',content:'归还借款',finance:{transactionId:tx.id,loanId:loan.id,amount:loan.outstanding,status:'repaid'},createdAt:Date.now()});void triggerAiTurn(conversationId,contact,settings,stickers)}catch(e){setToast(e instanceof Error?e.message:String(e))}}
 
   function beginMessageSelection(initialId?: string) {
     setMenuMessageId(null)
@@ -431,7 +454,8 @@ export function ChatPage() {
               onSelect={() => toggleSelectedMessage(m.id)}
               onReply={!selectingMessages && isGroupConv ? () => setReplyToId(m.id) : undefined}
               onLongPress={() => setMenuMessageId(m.id)}
-              onLinkClick={selectingMessages ? undefined : () => setToast('小程序功能正在开发中')}
+              onLinkClick={selectingMessages ? undefined : () => { const routes:Record<string,string>={work:'/work',shop:'/shop',warehouse:'/warehouse'}; const path=m.link?.app?routes[m.link.app]:undefined; if(path)navigate(path);else setToast('暂不支持这个小程序') }}
+              onFinanceClick={selectingMessages ? undefined : handleFinanceCard}
             />
           )
           const showThought = mindReadingEnabled && m.thought && m.role === 'assistant'
@@ -507,6 +531,7 @@ export function ChatPage() {
               </div>
             )}
             <div className="flex items-end gap-2">
+              <button onClick={()=>setAppsOpen(true)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-2xl text-gray-600">＋</button>
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -582,6 +607,13 @@ export function ChatPage() {
           ]}
         />
       )}
+      {appsOpen && (
+        <ActionSheet onClose={()=>setAppsOpen(false)} options={[
+          ...(!isGroupConv&&careerEnabled?[{label:'💸 转账',onSelect:()=>{setAppsOpen(false);setFinanceMode('transfer' as const)}},{label:'🧧 红包',onSelect:()=>{setAppsOpen(false);setFinanceMode('redPacket' as const)}},{label:'🤝 借款',onSelect:()=>{setAppsOpen(false);setFinanceMode('loan' as const)}},{label:'💰 归还借款',onSelect:()=>{setAppsOpen(false);void repayLoan()}}]:[]),
+          {label:'💼 工作',onSelect:()=>navigate('/work')},{label:'🛍️ 商城',onSelect:()=>navigate('/shop')},{label:'🎒 仓库',onSelect:()=>navigate('/warehouse')}
+        ]}/>
+      )}
+      {financeMode&&<div className="absolute inset-0 z-50 flex items-end bg-black/30" onClick={()=>setFinanceMode(null)}><div className="w-full rounded-t-2xl bg-white p-4" onClick={e=>e.stopPropagation()}><h3 className="font-medium">{financeMode==='transfer'?'转账':financeMode==='redPacket'?'发红包':'向TA借款'}</h3><input type="number" min="1" value={financeAmount} onChange={e=>setFinanceAmount(e.target.value)} placeholder="金额" className="mt-3 w-full rounded-lg border px-3 py-2"/><input value={financeNote} onChange={e=>setFinanceNote(e.target.value)} placeholder="备注或借款理由" className="mt-2 w-full rounded-lg border px-3 py-2"/><button onClick={submitFinance} className="mt-3 w-full rounded-lg bg-gray-900 py-2.5 text-white">确认</button></div></div>}
     </div>
   )
 }

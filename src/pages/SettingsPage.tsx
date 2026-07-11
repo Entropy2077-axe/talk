@@ -11,6 +11,9 @@ import { searchPexelsPhoto } from '../lib/photoSearch'
 import { db } from '../db/db'
 import { assertTalkBackup, backupFileName, createBackup, restoreBackup } from '../lib/backup'
 import type { AppSettings } from '../types'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { USER_WALLET_ID, setUserBalance } from '../lib/finance'
+import { formatCurrency } from '../lib/wallet'
 
 export function SettingsPage() {
   const navigate = useNavigate()
@@ -33,6 +36,8 @@ export function SettingsPage() {
   const [backupStatus, setBackupStatus] = useState('')
   const [restoringBackup, setRestoringBackup] = useState(false)
   const [backgroundCropSrc, setBackgroundCropSrc] = useState('')
+  const wallet = useLiveQuery(() => db.walletAccounts.get(USER_WALLET_ID), [])
+  const [adminBalance, setAdminBalance] = useState('')
   const backupInputRef = useRef<HTMLInputElement | null>(null)
   const backgroundInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -260,6 +265,7 @@ export function SettingsPage() {
         />
         <p className="text-[11px] text-gray-400">背景只保存在本机，导出备份时会一起带走。</p>
       </section>
+      {adminModeEnabled && <section className="mt-3 bg-white px-4 py-3"><h2 className="text-sm font-medium text-gray-900">设定我的余额</h2><p className="mt-1 text-xs text-gray-400">当前 {formatCurrency(wallet?.balance ?? 0, useSettingsStore.getState())}</p><div className="mt-2 flex gap-2"><input type="number" min="0" value={adminBalance} onChange={e=>setAdminBalance(e.target.value)} placeholder="目标余额" className="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"/><button onClick={async()=>{const n=Number(adminBalance);if(Number.isFinite(n)&&n>=0&&confirm(`确认将余额设为 ${Math.round(n)}？`)){await setUserBalance(n);setAdminBalance('')}}} className="rounded-lg bg-gray-900 px-4 text-sm text-white">设定</button></div></section>}
 
       <section className="mt-3 bg-white px-4 py-3">
         <h2 className="mb-2 text-xs font-medium text-gray-400">货币图标</h2>

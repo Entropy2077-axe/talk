@@ -2,6 +2,7 @@ import { chatCompletion } from './deepseek'
 import { displayName } from './contact'
 import { activeUpcomingPlansText } from './memory'
 import { describeCurrentSchedule, describeUpcomingScheduleText } from './schedule'
+import { formatPersonaProfile, personalityTraitLine } from './prompt'
 import type { AiBubble, AppSettings, Contact, GroupAiBubble, GroupEnergyLevel } from '../types'
 
 interface QualityResult {
@@ -35,7 +36,9 @@ function privateBubblesText(bubbles: AiBubble[]): string {
       if (b.type === 'text') return b.content
       if (b.type === 'sticker') return `[sticker:${b.name}]`
       if (b.type === 'scheduleChange') return `[schedule:${b.summary}]`
-      return `[link:${b.label}]`
+      if (b.type === 'link') return `[link:${b.label}]`
+      if (b.type === 'image') return `[image:${b.query}:${b.caption ?? ''}]`
+      return `[finance:${b.type}:${b.amount}]`
     })
     .join('\n')
 }
@@ -47,7 +50,7 @@ function groupBubblesText(bubbles: GroupAiBubble[], speakers: Contact[]): string
       const name = speaker ? displayName(speaker) : `speaker${b.speakerIndex}`
       const meta = [b.thought ? `thought=${b.thought}` : '', b.mood ? `mood=${b.mood}` : ''].filter(Boolean).join(', ')
       const suffix = meta ? ` (${meta})` : ''
-      return b.type === 'text' ? `${name}: ${b.content}${suffix}` : `${name}: [sticker:${b.name}]${suffix}`
+      return b.type === 'text' ? `${name}: ${b.content}${suffix}` : b.type === 'sticker' ? `${name}: [sticker:${b.name}]${suffix}` : `${name}: [image:${b.query}]${suffix}`
     })
     .join('\n')
 }
@@ -104,7 +107,7 @@ export async function validatePrivateTurn(opts: {
   const activeMood = opts.contact.mood?.text && Date.now() < opts.contact.mood.expiresAt ? opts.contact.mood.text : ''
   const systemPrompt = `You are a strict roleplay response reviewer. Output JSON only: {"valid":true/false,"reason":"short","fixedRaw":"optional"}.
 Mandatory primary check: logical grounding. Decide whether the reply's inference is tightly supported by its premises: persona/identity, memory, relationship, mood, location, schedule/plans, recent events, and the latest user message.
-Then check: (1) reply fits persona, (2) answers user, (3) no invented facts, (4) mood field is present and non-empty, (5) thought field is present and non-empty.
+Then check: (1) reply fits persona and personality trait, (2) never violates user-authored persona constraints, (3) answers user, (4) no invented facts, (5) mood/thought are present. A trait may be subtle, but a reply that directly contradicts its behavioral anchor is invalid.
 If the prose feels good but the premise→reply logic is weak, unsupported, contradictory, or loosely associated, it is invalid.
 If valid, return valid=true.
 If invalid, rewrite as fixedRaw. Must include mood and thought: {"messages":[{"type":"text","content":"..."}],"mood":"15字情绪","thought":"30字内心想法 和嘴上说的不一样"}. Keep it short.`
@@ -120,6 +123,9 @@ If invalid, rewrite as fixedRaw. Must include mood and thought: {"messages":[{"t
 When rewriting, answer the latest user message first, keep it short, and admit a mistake naturally if needed.`
   const userPrompt = `Persona name: ${name}
 Persona: ${truncate(opts.contact.systemPrompt || '', 700)}
+User-authored persona constraints: ${truncate(opts.contact.personaConstraints || '(none)', 500)}
+Structured persona anchors: ${truncate(formatPersonaProfile(opts.contact.personaProfile) || '(none)', 700)}
+Personality trait: ${truncate(personalityTraitLine(opts.contact.personalityTrait, opts.contact.warmth ?? 0) || '(none)', 900)}
 Relationship: ${opts.contact.relationshipBase || '朋友'} ${truncate(opts.contact.relationshipDynamic || '', 160)}
 Memory/style: ${truncate(opts.contact.memoryStyle || opts.contact.memoryFacts || '', 260)}
 Current mood: ${activeMood || '(none)'}

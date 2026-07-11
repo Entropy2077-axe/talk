@@ -15,12 +15,17 @@ import { pruneExpiredOverrides, describeCurrentSchedule, describeUpcomingSchedul
 import { WEEKDAYS, describeCurrentTime } from '../lib/time'
 import { RELATIONSHIP_OPTIONS, formatSpeechSamplesForScene, buildRawChatPromptParts, buildJsonConversionPrompt } from '../lib/prompt'
 import { useModuleEnabled, isModuleEnabled } from '../features'
-import { warmthLabel, relationshipLine } from '../lib/relationship'
+import { personalityIntimacyStage, warmthLabel, relationshipLine } from '../lib/relationship'
 import { buildUserProfileText } from '../lib/chatEngine'
 import { useSettingsStore } from '../store/useSettingsStore'
 import type { ContactMemoryScope, ContactRelationLabel } from '../types'
 import { PERSONALITY_TRAIT_OPTIONS } from '../types'
 import { activeIntentPrompt, activeIntents, clearIntentQueue } from '../lib/intent'
+import { uniqueRelationPairs } from '../lib/contactRelations'
+import { chatCompletion } from '../lib/deepseek'
+import { buildOccupationPrompt, parseOccupation, employmentPatch, OCCUPATION_OPTIONS } from '../lib/career'
+import { formatCurrency } from '../lib/wallet'
+import { setWalletBalance } from '../lib/finance'
 
 function LatestAiTurnJson({ contactId }: { contactId: string }) {
   const latestTurn = useLiveQuery(async () => {
@@ -62,12 +67,15 @@ export function ContactCardPage() {
   const personalityEnabled = useModuleEnabled('personalityTraits')
   const adminEnabled = useSettingsStore((s) => s.adminModeEnabled)
   const moodEnabled = useModuleEnabled('mood')
+  const careerEnabled = useModuleEnabled('career')
+  const [assigningCareer, setAssigningCareer] = useState(false)
 
   const contact = useLiveQuery(() => (contactId ? db.contacts.get(contactId) : undefined), [contactId])
   const conversation = useLiveQuery(
     () => (contactId ? db.conversations.where('contactId').equals(contactId).first() : undefined),
     [contactId],
   )
+  const contactWallet = useLiveQuery(() => contactId ? db.walletAccounts.get(contactId) : undefined, [contactId])
   const structuredMemories = useLiveQuery(
     () => (contactId ? db.contactMemories.where('contactId').equals(contactId).reverse().sortBy('updatedAt') : []),
     [contactId],
@@ -81,7 +89,7 @@ export function ContactCardPage() {
       const otherIds = Array.from(new Set(links.map((link) => (link.fromContactId === contactId ? link.toContactId : link.fromContactId))))
       const contacts = await db.contacts.bulkGet(otherIds)
       const contactById = new Map(contacts.filter((c): c is NonNullable<typeof c> => !!c).map((c) => [c.id, c]))
-      return links
+      return uniqueRelationPairs(links)
         .map((link) => {
           const otherId = link.fromContactId === contactId ? link.toContactId : link.fromContactId
           const other = contactById.get(otherId)
@@ -99,6 +107,18 @@ export function ContactCardPage() {
     },
     { private: [], group: [], interpersonal: [] } as Record<ContactMemoryScope, typeof structuredMemories>,
   )
+  async function assignCareer() {
+    if (!contact || !settings.apiKey) return
+    const value = window.prompt(`输入职业（例如：${OCCUPATION_OPTIONS.slice(0,6).join('、')}）`, contact.occupation ?? '')?.trim()
+    if (!value) return
+    setAssigningCareer(true)
+    try {
+      const raw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, messages: [{ role: 'system', content: buildOccupationPrompt(value, contact.systemPrompt) }, { role: 'user', content: '生成职业资料' }], jsonMode: true })
+      const parsed = parseOccupation(raw)
+      if (!parsed) throw new Error('职业资料生成失败')
+      await db.contacts.update(contact.id, { ...employmentPatch(value, parsed.monthlySalary), ...(parsed.schedule ? { schedule: parsed.schedule } : {}) })
+    } finally { setAssigningCareer(false) }
+  }
   const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? []
   if (contact === undefined) return null
   if (contact === null || !contactId) {
@@ -160,10 +180,13 @@ export function ContactCardPage() {
     ? buildRawChatPromptParts({
         name: contact.name,
         persona: contact.systemPrompt,
+        personaConstraints: contact.personaConstraints,
+        personaProfile: contact.personaProfile,
         stylePrompt: settings.globalSystemPrompt,
         selfIterationGlobalText: isModuleEnabled('selfIteration') ? settings.selfIterationGlobalPrompt : undefined,
         selfIterationContactText: isModuleEnabled('selfIteration') ? contact.selfIterationPrompt : undefined,
         personalityTrait: personalityEnabled ? contact.personalityTrait : undefined,
+        personalityWarmth: relEnabled ? (contact.warmth ?? 0) : undefined,
         worldviewText: isModuleEnabled('worldview') ? (settings.worldview || undefined) : undefined,
         latestUserText: '【预览】这里会放入用户本轮最新消息',
         recentContext: [
@@ -235,7 +258,7 @@ export function ContactCardPage() {
             className="flex w-full items-center justify-between px-4 py-3.5 text-left active:bg-gray-50"
           >
             <span className="text-[15px] text-gray-900">性格特质</span>
-            <span className="text-sm text-gray-400">{contact.personalityTrait || '无'}</span>
+            <span className="text-right text-sm text-gray-400">{contact.personalityTrait || '无'}{contact.personalityTrait && contact.personalityTrait !== '无' && relEnabled ? ` · ${personalityIntimacyStage(contact.warmth ?? 0)}` : ''}</span>
           </button>
         )}
         {moodEnabled && (
@@ -264,6 +287,8 @@ export function ContactCardPage() {
             </span>
           </div>
         )}
+        {careerEnabled && <button onClick={assignCareer} disabled={assigningCareer} className="flex w-full items-center justify-between px-4 py-3.5 text-left active:bg-gray-50 disabled:opacity-50"><span className="text-[15px] text-gray-900">职业</span><span className="text-sm text-gray-400">{assigningCareer?'生成中…':contact.occupation?`${contact.occupation} · 月薪 ${formatCurrency(contact.monthlySalary??0,settings)}`:'赋予职业'}</span></button>}
+        {careerEnabled && <button onClick={adminEnabled ? async()=>{const raw=prompt('设定该AI的钱包余额',String(contactWallet?.balance??0));if(raw!==null&&Number.isFinite(Number(raw))&&Number(raw)>=0)await setWalletBalance(contact.id,Number(raw))}:undefined} className="flex w-full items-center justify-between px-4 py-3.5 text-left"><span className="text-[15px] text-gray-900">钱包</span><span className="text-sm text-gray-400">{formatCurrency(contactWallet?.balance??0,settings)}{adminEnabled?' · 点击设定':''}</span></button>}
       </div>
 
       <section className="mt-3 bg-white px-4 py-4">

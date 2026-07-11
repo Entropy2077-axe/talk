@@ -11,7 +11,8 @@ import {
 } from './groupChat'
 import { extractJsonObject } from './aiProtocol'
 import { CONTEXT_WINDOW_SIZE, activeUpcomingPlansText, maybeUpdateGroupMemory, nonGroupScopedMemoriesText } from './memory'
-import { knowledgeDigestText, processKnowledgeQueries } from './knowledgeBase'
+import { aiRelationshipPrompt } from './contactRelations'
+import { knowledgeDigestText, resolveKnowledgeQueries } from './knowledgeBase'
 import { isModuleEnabled } from '../features'
 import { describeCurrentTime } from './time'
 import { describeCurrentSchedule } from './schedule'
@@ -19,6 +20,7 @@ import { displayName } from './contact'
 import { previewForMessage } from './messagePreview'
 import { buildUserProfileText, useChatEngineStore } from './chatEngine'
 import { validateGroupDraft, validateGroupTurn } from './responseQuality'
+import { searchPexelsPhoto } from './photoSearch'
 import { recentSocialEventsText, recordSocialEvent } from './socialEvents'
 import { useChatUiStore } from '../store/useChatUiStore'
 import { generateGroupStoryOutline, storyOutlinePromptSection } from './storyOutline'
@@ -337,6 +339,7 @@ async function runGroupAiTurn(
     const recentEventsText = await recentSocialEventsText(members.map((m) => m.id), 4)
 
     const speakerMemoriesMap = await loadSpeakerMemories(speakers)
+    const aiRelationshipText = await aiRelationshipPrompt(members)
     const systemPrompt = buildGroupRawChatPrompt({
       stylePrompt: settings.globalSystemPrompt,
       groupName: group.name,
@@ -355,6 +358,7 @@ async function runGroupAiTurn(
       knowledgeDigestText: isModuleEnabled('knowledgeBase') ? (knowledgeDigestText(knowledgeEntries) || undefined) : undefined,
       selfIterationGlobalText: isModuleEnabled('selfIteration') ? settings.selfIterationGlobalPrompt : undefined,
       speakerMemoriesMap,
+      aiRelationshipText,
     })
 
     const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
@@ -470,7 +474,7 @@ ${rawText}
       console.log(`[group] 主模型重写草稿(${rawText.length}字): ${rawText.slice(0, 160)}...`)
     }
 
-    const jsonRaw = await chatCompletion({
+    let jsonRaw = await chatCompletion({
       apiKey: settings.apiKey,
       baseUrl: settings.baseUrl,
       model: settings.utilityModel,
@@ -487,6 +491,8 @@ ${rawText}
     if (streamByConversation.get(conversationId) !== streamId) return
     let finalRaw = jsonRaw
     let { bubbles, knowledgeQueries, turnSummary, groupVibe } = parseGroupAiResponse(finalRaw, speakers.length)
+    const initiallyRequestedKnowledge = [...knowledgeQueries]
+    let reviewFailure = draftFeedback
     if (bubbles.length > 0) {
       const checked = await validateGroupTurn({
         settings,
@@ -501,9 +507,21 @@ ${rawText}
       if (checked.repaired) {
         console.warn(`[group] 回复已被质量校验重写 群=${group.name} 原因=${checked.reason ?? 'unknown'}`)
         finalRaw = checked.raw
+        reviewFailure = checked.reason || '群聊回复审查未通过'
         ;({ bubbles, knowledgeQueries, turnSummary, groupVibe } = parseGroupAiResponse(finalRaw, speakers.length))
       } else if (checked.detectedInvalid) {
+        reviewFailure = checked.reason || '群聊回复审查未通过'
         console.warn(`[group] 审查发现问题但未能修复 群=${group.name} 原因=${checked.reason ?? 'unknown'}`)
+      }
+    }
+    knowledgeQueries = Array.from(new Set([...initiallyRequestedKnowledge, ...knowledgeQueries])).slice(0, 2)
+    if (isModuleEnabled('knowledgeBase') && knowledgeQueries.length > 0) {
+      const knowledge = await resolveKnowledgeQueries(knowledgeQueries, settings)
+      if (knowledge.text) {
+        rawText = await chatCompletion({ apiKey:settings.apiKey,baseUrl:settings.baseUrl,model:settings.model,messages:[...chatMessages,{role:'user',content:`刚才出现了你们不了解的词。搜索结果如下：\n${knowledge.text}${reviewFailure?`\n\n上一版审查问题：${reviewFailure}，重写时同时修正。`:''}\n请基于结果重新生成群聊草稿，保持原群聊格式，像刚查明白后自然接话，不要写成报告。`}],signal:controller.signal })
+        jsonRaw = await chatCompletion({apiKey:settings.apiKey,baseUrl:settings.baseUrl,model:settings.utilityModel,messages:[{role:'system',content:buildGroupJsonConversionPrompt(rawText,speakers,stickers.map(s=>s.name))}],jsonMode:true,signal:controller.signal})
+        finalRaw=jsonRaw
+        ;({bubbles,knowledgeQueries,turnSummary,groupVibe}=parseGroupAiResponse(finalRaw,speakers.length))
       }
     }
     console.log(`[group] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 群=${group.name}`)
@@ -522,7 +540,6 @@ ${rawText}
       createdAt: Date.now(),
     })
     void updateGroupMemoryAndVibe({ group, aiTurnId, settings, turnSummary, groupVibe })
-    if (isModuleEnabled('knowledgeBase')) processKnowledgeQueries(knowledgeQueries, settings)
     revealGroupBubbles(conversationId, group, members, speakers, bubbles, streamId, settings, aiTurnId)
   } catch (err) {
     if (streamByConversation.get(conversationId) !== streamId) return
@@ -554,24 +571,28 @@ function revealGroupBubbles(
       useChatEngineStore.getState().patch(conversationId, {
         typingLabel: speaker ? displayName(speaker) : '群成员',
       })
+      let imagePayload: Message['image']
+      let imageFailed=false
+      if (bubble.type === 'image') { if(!settings.pexelsApiKey)imageFailed=true; else try{const photo=await searchPexelsPhoto(settings.pexelsApiKey,bubble.query,'landscape');if(!photo)imageFailed=true;else imagePayload={url:photo.url,caption:bubble.caption,photographer:photo.photographer,photographerUrl:photo.photographerUrl,query:bubble.query}}catch{imageFailed=true} }
       const content =
         bubble.type === 'text'
           ? stripSpeakerNamePrefix(
               bubble.content,
               members.map((m) => m.name),
             )
-          : bubble.name
+          : bubble.type === 'sticker' ? bubble.name : imageFailed ? '图片没发出来…' : bubble.caption || '[图片]'
 
       const msg: Message = {
         id: uuid(),
         conversationId,
         role: 'assistant',
-        type: bubble.type,
+        type: bubble.type === 'image' && imageFailed ? 'text' : bubble.type,
         content,
         speakerContactId: speaker?.id,
         debugAiTurnId: aiTurnId,
         debugParsedBubble: bubble,
         thought: bubble.thought,
+        image: imagePayload,
         createdAt: Date.now(),
       }
       await db.messages.add(msg)

@@ -6,6 +6,7 @@ import { TopBar } from '../components/TopBar'
 import { Avatar } from '../components/Avatar'
 import { displayName } from '../lib/contact'
 import { warmthLabel } from '../lib/relationship'
+import { uniqueRelationPairs } from '../lib/contactRelations'
 import type { Contact } from '../types'
 
 const EMPTY_ARRAY: never[] = []
@@ -13,7 +14,8 @@ const EMPTY_ARRAY: never[] = []
 export function RelationshipsPage() {
   const navigate = useNavigate()
   const contactsRaw = useLiveQuery(() => db.contacts.toArray(), []) ?? EMPTY_ARRAY
-  const relations = useLiveQuery(() => db.contactRelations.toArray(), []) ?? EMPTY_ARRAY
+  const relationRows = useLiveQuery(() => db.contactRelations.toArray(), []) ?? EMPTY_ARRAY
+  const relations = useMemo(() => uniqueRelationPairs(relationRows), [relationRows])
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const contacts = useMemo(

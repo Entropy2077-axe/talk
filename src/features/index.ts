@@ -11,6 +11,7 @@ import { mindReadingModule } from './mindReading'
 import { intentModule } from './intent'
 import { selfIterationModule } from './selfIteration'
 import { storyOutlineModule } from './storyOutline'
+import { careerModule } from './career'
 import type { FeatureModule, ParentModule } from './types'
 
 // ---- parent modules (accordion groups in the UI) ----
@@ -53,6 +54,7 @@ export const ALL_MODULES: FeatureModule[] = [
   intentModule,
   selfIterationModule,
   storyOutlineModule,
+  careerModule,
 ]
 
 /** Modules that don't belong to any parent — shown as standalone toggles. */
@@ -77,6 +79,7 @@ export function isModuleEnabled(id: string): boolean {
  */
 const MODULE_LINK_APP_OWNERS: Record<string, string> = {
   shop: 'shop',
+  work: 'career',
 }
 
 export function getEnabledLinkApps(
