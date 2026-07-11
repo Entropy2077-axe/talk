@@ -1,7 +1,7 @@
 import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { chatCompletion } from './deepseek'
-import { clampWarmthDelta, applyWarmthDelta, maxWarmthForTrait, minWarmthForTrait, warmthStage, shouldUpdateBase, containsBreakupLanguage, WARMTH_BREAKUP_PENALTY, traitWarmthModifier } from './relationship'
+import { clampWarmthDelta, applyWarmthDelta, maxWarmthForTrait, minWarmthForTrait, warmthStage, shouldUpdateBase, containsBreakupLanguage, WARMTH_BREAKUP_PENALTY, traitWarmthModifier, customTraitWarmthModifier } from './relationship'
 import { displayName } from './contact'
 import { describeCurrentTime, toDateKey } from './time'
 import { isModuleEnabled } from '../features'
@@ -500,6 +500,8 @@ export async function maybeUpdateMemory(
         { role: 'user', content: formatMessagesForMemory(newMessages) },
       ],
       jsonMode: true,
+      purpose: 'memory',
+      automatic: true,
     })
     const updated = parseMemoryResponse(raw)
     if (!updated) return null
@@ -515,7 +517,7 @@ export async function maybeUpdateMemory(
     const oldWarmth = contact.warmth ?? 0
     const rawDelta = relEnabled ? updated.warmthDelta : 0
     let warmthDelta = personalityEnabled
-      ? traitWarmthModifier(contact.personalityTrait, rawDelta, oldWarmth)
+      ? (contact.customPersonalityTraits?.length ? customTraitWarmthModifier(contact.customPersonalityTraits, rawDelta, oldWarmth) : traitWarmthModifier(contact.personalityTrait, rawDelta, oldWarmth))
       : rawDelta
 
     const relationshipHighConfidence = updated.relationshipConfidence >= RELATIONSHIP_CONFIDENCE_THRESHOLD
@@ -934,6 +936,8 @@ export async function maybeUpdateGroupMemory(
         { role: 'user', content: '请生成' },
       ],
       jsonMode: true,
+      purpose: 'memory',
+      automatic: true,
     })
 
     const updates = parseGroupMemoryResponse(raw, targets.length)

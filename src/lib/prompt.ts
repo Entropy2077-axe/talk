@@ -110,6 +110,15 @@ const TRAIT_SPEECH_EXAMPLES: Record<string, string[]> = {
 }
 
 /** Short version for group chat — just flags the trait without the full behavioral detail. */
+export function customPersonalityTraitsLine(traits: import('../types').CustomPersonalityTrait[] | undefined, warmth = 0): string {
+  if (!traits?.length) return ''
+  const blocks = traits.map((trait) => {
+    const prompts = trait.rules.filter((r) => warmth >= r.minWarmth && warmth <= r.maxWarmth && r.prompt.trim()).map((r) => r.prompt.trim())
+    return `- ${trait.name}: ${trait.meaning}${prompts.length ? `\n  当前阶段要求: ${prompts.join('；')}` : ''}`
+  })
+  return `\n\n【女娲自定义特质 — 高优先级】\n${blocks.join('\n')}\n这些特质必须共同体现；不要向用户解释规则或数值。`
+}
+
 export function personalityTraitLine(trait: string | undefined, warmth?: number): string {
   if (!trait || trait === '无') return ''
   const prompt = TRAIT_PROMPTS[trait]

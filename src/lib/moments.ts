@@ -5,8 +5,9 @@ import { momentReactionProbability, uniqueRelationPairs } from './contactRelatio
 import { describeCurrentSchedule, isPhoneAvailable } from './schedule'
 import { searchPexelsPhoto } from './photoSearch'
 import { recordSocialEvent } from './socialEvents'
-import { formatSpeechSamplesForScene, personalityTraitLine } from './prompt'
+import { customPersonalityTraitsLine, formatSpeechSamplesForScene, personalityTraitLine } from './prompt'
 import { isModuleEnabled } from '../features'
+import { retrieveWorldbookContext } from './worldbook'
 import { recentMemoriesText, socialMemoriesText } from './memory'
 import { recentSocialEventsText } from './socialEvents'
 import type { AppSettings, Contact } from '../types'
@@ -248,10 +249,12 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
     baseUrl: settings.baseUrl,
     model: settings.model,
     messages: [
-      { role: 'system', content: buildMomentsPrompt(entries, isModuleEnabled('worldview') ? settings.worldview : '', stickerNames, contexts) },
+      { role: 'system', content: buildMomentsPrompt(entries, isModuleEnabled('worldview') ? await retrieveWorldbookContext(entries.map((e) => `${e.poster.name} ${e.poster.systemPrompt} ${e.poster.memoryFacts}`).join('\n')) : '', stickerNames, contexts) },
       { role: 'user', content: '请生成' },
     ],
     jsonMode: true,
+    purpose: 'moments',
+    automatic: true,
   })
 
   const expectedCommentCounts = entries.map((e) => e.commenters.filter((c) => c.willComment).length)
@@ -440,7 +443,7 @@ export async function postUserMoment(content: string, settings: AppSettings): Pr
             content: buildUserMomentCommentPrompt(
               content,
               commenterPlans.map((p) => p.contact),
-              isModuleEnabled('worldview') ? settings.worldview : '',
+              isModuleEnabled('worldview') ? await retrieveWorldbookContext(content) : '',
               stickerNames,
               new Map(contextRows),
             ),
@@ -448,6 +451,7 @@ export async function postUserMoment(content: string, settings: AppSettings): Pr
           { role: 'user', content: '请生成' },
         ],
         jsonMode: true,
+        purpose: 'moments',
       })
       comments = parseCommentsResponse(raw, commenterPlans.length) ?? []
     } catch {
@@ -514,7 +518,7 @@ function buildMomentReplyPrompt(
   const scheduleSection = scheduleLine ? `你${scheduleLine}(回复内容可以但不强制符合这个状态)\n` : ''
 
   const samples = formatSpeechSamplesForScene(poster.speechSamples, 'moment', 2)
-  return `${worldviewSection}你是${poster.name} 人设: ${poster.systemPrompt}\n${personalityTraitLine(poster.personalityTrait, poster.warmth ?? 0) || '性格特质: 无'}${samples ? `\n说话样例:\n${samples}` : ''}
+  return `${worldviewSection}你是${poster.name} 人设: ${poster.systemPrompt}\n${personalityTraitLine(poster.personalityTrait, poster.warmth ?? 0) || '性格特质: 无'}${customPersonalityTraitsLine(poster.customPersonalityTraits, poster.warmth ?? 0)}${samples ? `\n说话样例:\n${samples}` : ''}
 ${scheduleSection}
 你和用户的关系: ${poster.relationshipBase || '朋友'} ${poster.relationshipDynamic || ''} 好感度:${poster.warmth ?? 0} 当前心情:${poster.mood?.text || '平静'}
 最近可用素材: ${context || '无'}
@@ -570,10 +574,11 @@ export async function generateMomentReply(
       messages: [
         {
           role: 'system',
-          content: buildMomentReplyPrompt(poster, moment.content, threadLines, isModuleEnabled('worldview') ? settings.worldview : '', stickerNames, [privateMemories, socialMemories, events].filter(Boolean).join('\n').slice(0, 1100)),
+          content: buildMomentReplyPrompt(poster, moment.content, threadLines, isModuleEnabled('worldview') ? await retrieveWorldbookContext(`${poster.name}\n${poster.systemPrompt}\n${moment.content}\n${threadLines}`) : '', stickerNames, [privateMemories, socialMemories, events].filter(Boolean).join('\n').slice(0, 1100)),
         },
         { role: 'user', content: '请回复' },
       ],
+      purpose: 'moments',
     })
     const cleaned = cleanPlainReply(raw)
     if (!cleaned) return

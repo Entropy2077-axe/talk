@@ -3,7 +3,8 @@ import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { chatCompletion, coalesceConsecutiveRoles, type ChatMessage } from './deepseek'
 import { extractJsonObject, parseAiResponse, typingDelayMs } from './aiProtocol'
-import { formatSpeechSamplesForScene, buildRawChatPrompt, buildJsonConversionPrompt } from './prompt'
+import { formatSpeechSamplesForScene, buildRawChatPrompt, buildJsonConversionPrompt, customPersonalityTraitsLine } from './prompt'
+import { retrieveWorldbookTrace } from './worldbook'
 import { isModuleEnabled } from '../features'
 import { CONTEXT_WINDOW_SIZE, activeUpcomingPlansText, maybeUpdateMemory, recentMemoriesText, socialMemoriesText } from './memory'
 import { activeIntentPrompt, activeIntents, markIntentsUsed } from './intent'
@@ -144,8 +145,9 @@ function parseAiTurnDebugPayload(opts: {
   thought?: string
   qualityCheck: { enabled: boolean; repaired: boolean; reason?: string; detectedInvalid?: boolean }
   injectedIntents: ReturnType<typeof activeIntents>
+  promptTrace?: import('../types').PromptTrace
 }): unknown {
-  const { mainPrompt, conversionPrompt, finalRaw, jsonRaw, rawText, bubbles, knowledgeQueries, mood, thought, qualityCheck, injectedIntents } = opts
+  const { mainPrompt, conversionPrompt, finalRaw, jsonRaw, rawText, bubbles, knowledgeQueries, mood, thought, qualityCheck, injectedIntents, promptTrace } = opts
   const trimmed = finalRaw.trim()
   const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
   const text = fenceMatch ? fenceMatch[1].trim() : trimmed
@@ -176,6 +178,7 @@ function parseAiTurnDebugPayload(opts: {
     knowledgeQueries,
     injectedIntents,
     memoryUpdate: null,
+    promptTrace,
   }
 }
 
@@ -253,12 +256,13 @@ export async function triggerAiTurn(
   contact: Contact,
   settings: AppSettings,
   stickers: Sticker[],
+  proactiveContext = '',
 ): Promise<void> {
   const streamId = uuid()
   streamByConversation.set(conversationId, streamId)
   clearPending(conversationId)
   useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: displayName(contact) })
-  await runAiTurn(conversationId, contact, settings, stickers, streamId)
+  await runAiTurn(conversationId, contact, settings, stickers, streamId, '', proactiveContext)
 }
 
 export async function regenerateAiTurn(
@@ -297,6 +301,7 @@ async function runAiTurn(
   stickers: Sticker[],
   streamId: string,
   _triggeringUserText = '',
+  proactiveContext = '',
 ): Promise<void> {
   const engine = useChatEngineStore.getState()
   const now = Date.now()
@@ -332,6 +337,14 @@ async function runAiTurn(
       ? `\n【经济状况】你的可用余额：${await balanceOf(contact.id)}；对方可用余额：${await balanceOf(USER_WALLET_ID)}。未结清借款：${(await db.loans.filter(l => l.status === 'active' && (l.lenderId === contact.id || l.borrowerId === contact.id)).toArray()).map(l => `${l.borrowerId === contact.id ? '你欠对方' : '对方欠你'}${l.outstanding}`).join('；') || '无'}。所有金钱动作必须量力而行，不得凭空造钱。`
       : ''
     const socialMemories = await socialMemoriesText(contact.id)
+    const lifeEventText = isModuleEnabled('lifeSimulation')
+      ? (await db.lifeEvents.where('contactId').equals(contact.id).reverse().sortBy('occurredAt')).slice(0, 4).map((event) => event.summary).join('；')
+      : ''
+    const worldbookTrace = isModuleEnabled('worldview') ? await retrieveWorldbookTrace([
+      _triggeringUserText, proactiveContext, contact.name, contact.systemPrompt, contact.memoryFacts,
+      history.slice(-8).map((m) => m.content).join(' '),
+    ].filter(Boolean).join('\n')) : { text: '', matches: [] }
+    const worldbookText = worldbookTrace.text
     const relationshipText = `【你和对方的关系】${relationshipLine(
       isModuleEnabled('relationship') ? (contact.relationshipBase || '朋友') : '朋友',
       isModuleEnabled('relationship') ? (contact.relationshipDynamic || '') : '',
@@ -342,7 +355,7 @@ async function runAiTurn(
     const situationText = `【当前情境】现在: ${describeCurrentTime(new Date())}。对方: ${buildUserProfileText(settings)}。${activeMood ? `你的心情: ${activeMood}。` : ''}【日程】${describeCurrentSchedule(contact, new Date()) ? `\n当前: ${describeCurrentSchedule(contact, new Date())}` : '\n当前: 暂无安排'}${scheduleText ? `\n接下来:\n${scheduleText}` : '\n接下来: 暂无安排'}${activeUpcomingPlansText(contact, new Date()) ? `\n约定: ${activeUpcomingPlansText(contact, new Date())}` : ''}${recentEventsText ? `\n最近: ${recentEventsText}` : ''}`
     const contextSections = buildRawChatPrompt({
       name: contact.name,
-      persona: `${contact.systemPrompt}${isModuleEnabled('career') && contact.occupation ? `\n当前职业：${contact.occupation}，现实月薪：${contact.monthlySalary ?? 0}。工作会真实影响你的作息和日常话题。` : ''}${financeContext}`,
+      persona: `${contact.systemPrompt}${customPersonalityTraitsLine(contact.customPersonalityTraits, contact.warmth ?? 0)}${isModuleEnabled('career') && contact.occupation ? `\n当前职业：${contact.occupation}，现实月薪：${contact.monthlySalary ?? 0}。工作会真实影响你的作息和日常话题。` : ''}${financeContext}`,
       personaConstraints: contact.personaConstraints,
       personaProfile: contact.personaProfile,
       stylePrompt: settings.globalSystemPrompt,
@@ -351,13 +364,15 @@ async function runAiTurn(
       relationshipBase: isModuleEnabled('relationship') ? (contact.relationshipBase || '朋友') : '朋友',
       personalityTrait: isModuleEnabled('personalityTraits') ? contact.personalityTrait : undefined,
       personalityWarmth: isModuleEnabled('relationship') ? (contact.warmth ?? 0) : undefined,
-      worldviewText: isModuleEnabled('worldview') ? (settings.worldview || undefined) : undefined,
+      worldviewText: worldbookText || undefined,
       latestUserText: _triggeringUserText,
       recentContext: [
         relationshipText,
         userMemoryText,
         habitText,
         situationText,
+        lifeEventText ? `【近期生活】${lifeEventText}` : '',
+        proactiveContext,
       ].filter(Boolean).join('\n\n'),
       activeIntentText: injectedIntentText,
       stickerNames: stickers.map((s) => s.name),
@@ -388,6 +403,8 @@ async function runAiTurn(
       model: settings.model,
       messages: chatMessages,
       signal: controller.signal,
+      purpose: proactiveContext ? 'proactive' : 'chat',
+      automatic: !!proactiveContext,
     })
 
     if (streamByConversation.get(conversationId) !== streamId) return
@@ -404,6 +421,8 @@ async function runAiTurn(
       ],
       jsonMode: true,
       signal: controller.signal,
+      purpose: proactiveContext ? 'proactive' : 'chat',
+      automatic: !!proactiveContext,
     })
 
     if (streamByConversation.get(conversationId) !== streamId) return
@@ -451,9 +470,9 @@ async function runAiTurn(
         const enrichedMessages = chatMessages.map((message, index) => index === 0
           ? { ...message, content: `${message.content}\n\n【针对陌生词汇的搜索结果】\n${knowledge.text}${review}\n你刚才对陌生词汇自然表示了疑问。现在根据可靠搜索结果重新回答用户，语气要自然，不要写成搜索报告，也不要提审查流程。` }
           : message)
-        rawText = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, messages: enrichedMessages, signal: controller.signal })
+        rawText = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, messages: enrichedMessages, signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext })
         conversionPrompt = buildJsonConversionPrompt(rawText)
-        jsonRaw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, messages: [{ role: 'system', content: conversionPrompt }], jsonMode: true, signal: controller.signal })
+        jsonRaw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, messages: [{ role: 'system', content: conversionPrompt }], jsonMode: true, signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext })
         finalRaw = jsonRaw
         ;({ bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw))
       }
@@ -461,7 +480,7 @@ async function runAiTurn(
     console.log(`[chat] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 mood=${turnMood || '无'} thought=${turnThought ? '有(' + turnThought.length + '字)' : '无'} 对方=${displayName(contact)}`)
     if (bubbles.length === 0) {
       console.warn(`[chat] 本轮没有正常回复 对方=${displayName(contact)} JSON内容: ${jsonRaw.slice(0, 200)}`)
-      engine.patch(conversationId, { error: '对方这次没有正常回复 可以再发一条试试', aiTyping: false, typingLabel: undefined })
+      engine.patch(conversationId, { error: proactiveContext ? '' : '对方这次没有正常回复 可以再发一条试试', aiTyping: false, typingLabel: undefined })
       return
     }
     const aiTurnId = uuid()
@@ -481,6 +500,7 @@ async function runAiTurn(
         thought: turnThought,
         qualityCheck: qualityCheckDebug,
         injectedIntents,
+        promptTrace: { sections: [{ label: '世界书', content: worldbookText }, { label: '结构化记忆', content: recentMemories }, { label: '特质规则', content: contact.customPersonalityTraits?.map((trait) => `${trait.name}: ${trait.meaning}`).join('\n') || contact.personalityTrait || '' }, { label: '关系与心情', content: relationshipText }, { label: '日程与当前情境', content: situationText }, { label: '主动话题', content: proactiveContext }].filter((section) => section.content), worldbookMatches: worldbookTrace.matches.map((match) => ({ id: match.entry.id, title: match.entry.title, score: match.score, chars: match.entry.content.length })), memorySummary: recentMemories, traitSummary: contact.customPersonalityTraits?.map((trait) => trait.name).join('、') || contact.personalityTrait, proactiveSource: proactiveContext || undefined },
       }),
       knowledgeQueries,
       createdAt: Date.now(),

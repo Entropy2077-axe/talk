@@ -1,7 +1,7 @@
 import { db } from '../db/db'
 import { extractJsonObject, parseKnowledgeQueriesField } from './aiProtocol'
 import { activeUpcomingPlansText } from './memory'
-import { formatPersonaProfile, formatSpeechSamplesForScene, personalityTraitLine } from './prompt'
+import { customPersonalityTraitsLine, formatPersonaProfile, formatSpeechSamplesForScene, personalityTraitLine } from './prompt'
 import { describeCurrentSchedule } from './schedule'
 import { isModuleEnabled } from '../features'
 import type { Contact, GroupAiBubble, GroupAiResponse, GroupEnergyLevel, GroupSpeakerLimit } from '../types'
@@ -124,7 +124,7 @@ export function buildGroupSystemPrompt(opts: {
       const trait = c.personalityTrait?.trim()
       const traitLine =
         isModuleEnabled('personalityTraits') && trait && trait !== '无'
-          ? personalityTraitLine(trait, c.warmth ?? 0)
+          ? `${personalityTraitLine(trait, c.warmth ?? 0)}${customPersonalityTraitsLine(c.customPersonalityTraits, c.warmth ?? 0)}`
           : ''
       const samplesLine = formatSpeechSamplesForScene(c.speechSamples, 'group', 2)
       const recentMemoText = opts.speakerMemoriesMap?.get(c.id)
@@ -233,7 +233,7 @@ export function buildGroupRawChatPrompt(opts: {
 ${plansText ? `- 和用户的约定: ${plansText}。\n` : ''}${recentMemoText ? `- 最近记忆碎片:\n${recentMemoText}\n` : ''}${c.selfIterationPrompt ? `- 关系协商记录:\n${c.selfIterationPrompt}\n` : ''}
 感觉:
 - 人设必须严格遵守: ${c.systemPrompt || '自由发挥成一个普通朋友'}。${isModuleEnabled('career') && c.occupation ? `职业：${c.occupation}，月薪${c.monthlySalary ?? 0}。` : ''}${c.personaConstraints ? `\n- 用户补充说明（不可违背）: ${c.personaConstraints}` : ''}${c.personaProfile ? `\n- 人设硬约束:\n${formatPersonaProfile(c.personaProfile)}` : ''}
-${c.mbti ? `- MBTI: ${c.mbti}。` : ''}${personalityTraitLine(c.personalityTrait, c.warmth ?? 0)}
+${c.mbti ? `- MBTI: ${c.mbti}。` : ''}${personalityTraitLine(c.personalityTrait, c.warmth ?? 0)}${customPersonalityTraitsLine(c.customPersonalityTraits, c.warmth ?? 0)}
 ${samplesText ? `- 说话样例:\n${samplesText}` : ''}`
     })
     .join('\n\n')

@@ -69,6 +69,7 @@ ${truncate(opts.historyText || '（无）', 2500)}
     apiKey: opts.settings.apiKey,
     baseUrl: opts.settings.baseUrl,
     model: opts.settings.utilityModel || opts.settings.model,
+    purpose: 'other',
     messages,
     signal: opts.signal,
   })

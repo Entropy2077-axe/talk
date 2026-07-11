@@ -38,10 +38,13 @@ export const useSettingsStore = create<SettingsState>()(
       proactiveCooldownMs: 6 * 60 * 60 * 1000,
       proactiveMomentsMax: 3,
       proactiveTickIntervalMs: 5 * 60 * 1000,
+      automaticAiDailyCap: 0,
       tavilyApiKey: envTavilyKey,
       worldview: '',
+      worldbookMigrationCompleted: false,
       pexelsApiKey: envPexelsKey,
       themeMode: 'light',
+      topInsetAdjustmentPx: 0,
       chatBackground: '',
       currencyIconMode: 'coin',
       customCurrencyEmoji: '💎',
@@ -53,7 +56,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'talk-settings',
-      version: 5,
+      version: 7,
       migrate: (persisted, version) => {
         const next = persisted as Partial<SettingsState>
         if (version < 1 && Array.isArray(next.enabledModules) && !next.enabledModules.includes('intent')) {
@@ -72,6 +75,9 @@ export const useSettingsStore = create<SettingsState>()(
         if (typeof next.selfIterationGlobalPrompt !== 'string') {
           next.selfIterationGlobalPrompt = ''
         }
+        if (typeof next.topInsetAdjustmentPx !== 'number') next.topInsetAdjustmentPx = 0
+        if (typeof next.worldbookMigrationCompleted !== 'boolean') next.worldbookMigrationCompleted = false
+        if (typeof next.automaticAiDailyCap !== 'number') next.automaticAiDailyCap = 0
         return next
       },
     },

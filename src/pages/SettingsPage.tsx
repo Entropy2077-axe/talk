@@ -30,6 +30,8 @@ export function SettingsPage() {
     currencyIconMode,
     customCurrencyEmoji,
     adminModeEnabled,
+    topInsetAdjustmentPx,
+    automaticAiDailyCap,
     setSettings,
   } = useSettingsStore()
   const [confirmingWipe, setConfirmingWipe] = useState(false)
@@ -37,6 +39,12 @@ export function SettingsPage() {
   const [restoringBackup, setRestoringBackup] = useState(false)
   const [backgroundCropSrc, setBackgroundCropSrc] = useState('')
   const wallet = useLiveQuery(() => db.walletAccounts.get(USER_WALLET_ID), [])
+  const usage = useLiveQuery(async () => {
+    const now = Date.now(); const today = new Date(now).toDateString()
+    const records = await db.aiUsageRecords.toArray()
+    const recent = records.filter((r) => now - r.createdAt <= 30 * 24 * 60 * 60 * 1000)
+    return { today: records.filter((r) => new Date(r.createdAt).toDateString() === today), recent }
+  }, [])
   const [adminBalance, setAdminBalance] = useState('')
   const backupInputRef = useRef<HTMLInputElement | null>(null)
   const backgroundInputRef = useRef<HTMLInputElement | null>(null)
@@ -198,6 +206,14 @@ export function SettingsPage() {
 
       <section className="mt-3 bg-white px-4 py-3">
         <h2 className="mb-2 text-xs font-medium text-gray-400">外观</h2>
+        <div className="mb-4">
+          <div className="mb-2 flex items-center justify-between">
+            <div><p className="text-sm text-gray-800">顶部显示区域</p><p className="text-xs text-gray-400">自动避开系统安全区，并额外向下微调</p></div>
+            <span className="text-xs text-gray-500">+{topInsetAdjustmentPx ?? 0}px</span>
+          </div>
+          <input aria-label="顶部显示区域微调" type="range" min="0" max="80" step="1" value={topInsetAdjustmentPx ?? 0} onChange={(e) => setSettings({ topInsetAdjustmentPx: Number(e.target.value) })} className="w-full accent-gray-900" />
+          <button type="button" onClick={() => setSettings({ topInsetAdjustmentPx: 0 })} className="mt-1 text-xs text-gray-500">恢复默认</button>
+        </div>
         <div className="mb-3 flex items-center justify-between">
           <div>
             <p className="text-sm text-gray-800">暗色模式</p>
@@ -297,6 +313,8 @@ export function SettingsPage() {
           />
         )}
       </section>
+
+      <section className="mt-3 bg-white px-4 py-3"><h2 className="mb-2 text-xs font-medium text-gray-400">AI 调用预算</h2><p className="mb-2 text-xs text-gray-500">后台自动任务达到上限后会跳过；手动聊天和手动生成不会受限。</p>{usage && <><div className="mb-2 grid grid-cols-2 gap-2 text-xs text-gray-600"><p>今日调用 <b>{usage.today.filter((r) => r.success).length}</b></p><p>近30天 <b>{usage.recent.filter((r) => r.success).length}</b></p><p>今日估算 tokens <b>{usage.today.reduce((n, r) => n + r.inputTokens + r.outputTokens, 0)}</b></p><p>自动调用 <b>{usage.today.filter((r) => r.automatic && r.success).length}</b></p></div><div className="mb-3 flex flex-wrap gap-1">{(['chat','proactive','memory','moments','worldbook','lifeSimulation','persona','quality','other'] as const).map((purpose) => <span key={purpose} className="rounded bg-gray-100 px-1.5 py-1 text-[10px] text-gray-500">{purpose} {usage.today.filter((r) => r.purpose === purpose && r.success).length}</span>)}</div></>}<label className="mb-1 block text-xs text-gray-500">自动任务每日调用上限（0 为不限）</label><input type="number" min="0" value={automaticAiDailyCap} onChange={(e) => setSettings({ automaticAiDailyCap: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"/></section>
 
       <section className="mt-3 bg-white px-4 py-3">
         <h2 className="mb-2 text-xs font-medium text-gray-400">API 配置（DeepSeek）</h2>

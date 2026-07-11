@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { HashRouter } from 'react-router-dom'
 import './index.css'
 import App from './App.tsx'
+import { useSettingsStore } from './store/useSettingsStore'
 
 // See the --app-height comment in index.css: some Android WebViews don't
 // size 100dvh/100vh correctly against the real visible area, so the actual
@@ -34,15 +35,30 @@ import App from './App.tsx'
 // reflow right after so a stale layout can't linger.
 function syncAppHeight() {
   const height = window.visualViewport?.height ?? window.innerHeight
-  document.documentElement.style.setProperty('--app-height', `${height}px`)
+  const probe = document.createElement('div')
+  probe.style.cssText = 'position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top,0px)'
+  document.body.appendChild(probe)
+  const safeTop = Number.parseFloat(getComputedStyle(probe).paddingTop) || 0
+  probe.remove()
+  const manualTop = Math.max(0, Math.min(80, useSettingsStore.getState().topInsetAdjustmentPx || 0))
+  const top = safeTop + manualTop
+  const appHeight = Math.max(240, height - top)
+  document.documentElement.style.setProperty('--app-top-offset', `${top}px`)
+  document.documentElement.style.setProperty('--app-height', `${appHeight}px`)
   const shell = document.querySelector<HTMLElement>('.app-shell')
-  if (shell) shell.style.minHeight = `${height}px`
+  if (shell) {
+    shell.style.marginTop = `${top}px`
+    shell.style.height = `${appHeight}px`
+  }
   void document.body.offsetHeight // force a reflow, in case the property change alone doesn't trigger one
 }
 syncAppHeight()
 window.addEventListener('resize', syncAppHeight)
 window.addEventListener('orientationchange', syncAppHeight)
 window.visualViewport?.addEventListener('resize', syncAppHeight)
+useSettingsStore.subscribe((state, previous) => {
+  if (state.topInsetAdjustmentPx !== previous.topInsetAdjustmentPx) syncAppHeight()
+})
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

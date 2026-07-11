@@ -152,13 +152,13 @@ test('settings page exports a complete Talk backup json', async ({ page }) => {
 
   const backup = JSON.parse(await import('node:fs/promises').then((fs) => fs.readFile(path!, 'utf8')))
   expect(backup.format).toBe('talk-backup')
-  expect(backup.schemaVersion).toBe(1)
+  expect(backup.schemaVersion).toBe(2)
   expect(backup.settings.userNickname).toBe('Backup User')
   expect(backup.tables.contacts).toHaveLength(1)
   expect(backup.tables.conversations).toHaveLength(1)
   expect(backup.tables.messages).toHaveLength(1)
   expect(Object.keys(backup.tables)).toEqual(
-    expect.arrayContaining(['stickers', 'todos', 'moments', 'knowledgeEntries', 'savedWorldviews']),
+    expect.arrayContaining(['stickers', 'moments', 'knowledgeEntries', 'savedWorldviews', 'worldbookEntries']),
   )
 })
 
@@ -405,7 +405,7 @@ test('settings page offers preset background colors and image crop before saving
   await page.locator('input[accept="image/*"]').setInputFiles(imagePath)
   await expect(page.getByText('裁剪聊天背景')).toBeVisible()
   await expect(page.getByTestId('frame-cropper-stage')).toBeVisible()
-  await expect(page.locator('input[type="range"]')).toHaveCount(0)
+  await expect(page.getByTestId('frame-cropper-stage').locator('input[type="range"]')).toHaveCount(0)
   await expect(page.getByText('拖拽框选区域')).toBeVisible()
 })
 
@@ -420,6 +420,78 @@ test('currency icon setting updates wallet formatting globally', async ({ page }
   })
   await page.reload()
   await expect(page.getByText('¥ 88')).toBeVisible()
+})
+
+test('worldbook retrieval keeps permanent entries and ranks keyword matches', async ({ page }) => {
+  await page.goto('/#/')
+  const result = await page.evaluate(async () => {
+    const { rankWorldbookEntries } = await import('/src/lib/worldbook.ts')
+    const base = { enabled: true, priority: 20, createdAt: 1, updatedAt: 1 }
+    return rankWorldbookEntries([
+      { ...base, id: 'always', title: '基础法则', content: '所有人都遵守', keywords: [], alwaysInclude: true },
+      { ...base, id: 'magic', title: '魔法学院', content: '学院使用魔力', keywords: ['魔法'], alwaysInclude: false },
+      { ...base, id: 'space', title: '太空站', content: '轨道生活', keywords: ['宇宙'], alwaysInclude: false },
+    ], '她刚进入魔法学院').map((x: { entry: { id: string } }) => x.entry.id)
+  })
+  expect(result).toEqual(['always', 'magic'])
+})
+
+test('custom traits multiply matching warmth rules with a safe cap', async ({ page }) => {
+  await page.goto('/#/')
+  const result = await page.evaluate(async () => {
+    const { customTraitWarmthModifier } = await import('/src/lib/relationship.ts')
+    return customTraitWarmthModifier([
+      { id: 'a', name: 'A', meaning: 'A', rules: [{ id: 'a1', minWarmth: 0, maxWarmth: 50, positiveMultiplier: 2, negativeMultiplier: 0.5, prompt: '' }] },
+      { id: 'b', name: 'B', meaning: 'B', rules: [{ id: 'b1', minWarmth: 10, maxWarmth: 30, positiveMultiplier: 3, negativeMultiplier: 2, prompt: '' }] },
+    ], 2, 20)
+  })
+  expect(result).toBe(12)
+})
+
+test('top inset adjustment shortens the shell while keeping its bottom fixed', async ({ page }) => {
+  await page.goto('/#/settings')
+  const shell = page.locator('.app-shell')
+  const before = await shell.boundingBox()
+  await page.getByLabel('顶部显示区域微调').fill('40')
+  const after = await shell.boundingBox()
+  expect(before && after).toBeTruthy()
+  expect(Math.round(after!.y - before!.y)).toBe(40)
+  expect(Math.round((after!.y + after!.height) - (before!.y + before!.height))).toBe(0)
+})
+
+test('nuwa mode replaces preset creator fields with free-form fields', async ({ page }) => {
+  await page.goto('/#/contact/new')
+  await page.evaluate(async () => {
+    const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
+    const state = useSettingsStore.getState()
+    state.setSettings({ enabledModules: [...new Set([...state.enabledModules, 'nuwaMode'])] })
+  })
+  await page.reload()
+  await expect(page.getByPlaceholder('例如：慢热、敏感、有主见（顿号分隔）')).toBeVisible()
+  await expect(page.getByPlaceholder('例如：24岁')).toBeVisible()
+  await expect(page.getByRole('button', { name: '🎲 完全随机创建' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '18-22' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '恋人', exact: true })).toHaveCount(0)
+})
+
+test('life simulation catches up local state after elapsed time without an API key', async ({ page }) => {
+  await page.goto('/#/')
+  const result = await page.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts')
+    const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
+    const { runLifeSimulation } = await import('/src/lib/lifeSimulation.ts')
+    for (const table of db.tables) await table.clear()
+    const settings = useSettingsStore.getState()
+    settings.setSettings({ apiKey: '', enabledModules: [...new Set([...settings.enabledModules, 'lifeSimulation'])] })
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    await db.contacts.add({ id: 'life-contact', name: 'Life Test', avatar: '🙂', avatarColor: '#eee', systemPrompt: '测试角色', occupation: '设计师', createdAt: 1, memoryFacts: '', memoryStyle: '', memoryUpdatedAt: 0, memoryMessageCursor: 0, relationshipBase: '朋友', relationshipDynamic: '' })
+    await db.conversations.add({ id: 'life-conversation', contactId: 'life-contact', pinned: false, createdAt: 1, updatedAt: 1 })
+    await db.simulationState.put({ id: 'global', lastSimulatedAt: Date.now() - 36 * 60 * 60 * 1000, seed: 'regression-life', version: 1 })
+    await runLifeSimulation(useSettingsStore.getState())
+    return { events: await db.lifeEvents.count(), states: await db.contactLifeStates.count() }
+  })
+  expect(result.states).toBe(1)
+  expect(result.events).toBeGreaterThan(0)
 })
 
 test.skip('relationship deltas are rule based and prompt includes human style rules', async ({ page }) => {

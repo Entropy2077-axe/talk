@@ -48,6 +48,9 @@ export interface Contact {
   /** Contact-specific output of the self-iteration learner: next-user-turn expectation, relationship rules, and surprise history. */
   selfIterationPrompt?: string
   selfIterationUpdatedAt?: number
+  creatorProfile?: ContactCreatorProfile
+  customPersonalityTraits?: CustomPersonalityTrait[]
+  proactiveTopicHistory?: ProactiveTopicRecord[]
   occupation?: string
   monthlySalary?: number
   jobStartedDate?: string
@@ -120,7 +123,7 @@ export const CONTACT_RELATION_LABELS = [
   '看不顺眼',
   '对头',
 ] as const
-export type ContactRelationLabel = (typeof CONTACT_RELATION_LABELS)[number]
+export type ContactRelationLabel = (typeof CONTACT_RELATION_LABELS)[number] | (string & {})
 
 export const PERSONALITY_TRAIT_OPTIONS = [
   { value: '病娇', description: '初始好感100且无上限 好感只升不降 被温暖双倍心动 极度占有' },
@@ -311,7 +314,17 @@ export interface AiTurnDebug {
   raw: string
   parsed: unknown
   knowledgeQueries: string[]
+  promptTrace?: PromptTrace
   createdAt: number
+}
+
+export interface PromptTrace {
+  sections: Array<{ label: string; content: string }>
+  worldbookMatches?: Array<{ id: string; title: string; score: number; chars: number }>
+  memorySummary?: string
+  traitSummary?: string
+  proactiveSource?: string
+  callIds?: string[]
 }
 
 export interface Sticker {
@@ -361,18 +374,22 @@ export interface AppSettings {
   proactiveCooldownMs: number // a contact won't proactively message again until this long has passed since their last one
   proactiveMomentsMax: number // max moments to auto-post per background tick (default 3)
   proactiveTickIntervalMs: number // how often the background timer fires (default 5 min)
+  /** 0 = unlimited. Only automatic/background AI work counts against this daily cap. */
+  automaticAiDailyCap: number
   // ---- web search (see lib/webSearch.ts) ----
   tavilyApiKey: string // used only by the knowledge-base refresh job, not live during normal chat
   // ---- photo avatars/moments images (see lib/photoSearch.ts) ----
   pexelsApiKey: string // used for landscape/pet/person-photo categories; anime category uses waifu.pics which needs no key
   // ---- worldview (see lib/prompt.ts buildWorldviewDraftPrompt) ----
   worldview: string // shared world-setting text injected into every persona's prompt (chat, group chat, moments) once confirmed; empty until the user sets one
+  worldbookMigrationCompleted?: boolean
   // ---- knowledge base (see lib/knowledgeBase.ts) ----
   knowledgeQueryLog?: { date: string; count: number } // rolling daily counter backing the cap on reactive keyword-triggered knowledge lookups, keyed by local date
   // ---- admin/dev tooling (see lib/consoleCapture.ts + SkyEyePage) ----
   adminModeEnabled: boolean
   // ---- appearance ----
   themeMode?: 'light' | 'dark'
+  topInsetAdjustmentPx: number
   chatBackground?: string // empty = default; otherwise a CSS color or data URL used behind chat messages
   currencyIconMode?: 'coin' | 'emoji' | 'yen' | 'dollar'
   customCurrencyEmoji?: string
@@ -421,7 +438,7 @@ export interface KnowledgeEntry {
   fetchedAt: number // when this was gathered — surfaced in prompts so the model knows how fresh it is
 }
 
-/** A worldview the user has saved to their library (WorldSettingsPage) — separate from `settings.worldview`, which is the single currently-active one. Saving one doesn't activate it; the user picks which saved entry (if any) to make active. */
+/** Legacy saved whole-world snapshots retained for backup compatibility; new settings use WorldbookEntry. */
 export interface SavedWorldview {
   id: string
   name: string
@@ -511,6 +528,103 @@ export interface AiBubbleFinance {
   name?: string
   icon?: string
   description?: string
+}
+
+export interface WorldbookEntry {
+  id: string
+  title: string
+  content: string
+  keywords: string[]
+  enabled: boolean
+  alwaysInclude: boolean
+  priority: number
+  createdAt: number
+  updatedAt: number
+}
+
+export type LifeEventVisibility = 'private' | 'related' | 'public'
+export type LifeEventType = 'routine' | 'work' | 'social' | 'mood' | 'goal' | 'summary'
+
+export interface SimulationState {
+  id: 'global'
+  lastSimulatedAt: number
+  seed: string
+  version: number
+  lastStatus?: string
+}
+
+export interface ContactLifeState {
+  contactId: string
+  location: string
+  activity: string
+  energy: number
+  stress: number
+  socialNeed: number
+  currentGoal?: string
+  situation?: string
+  updatedAt: number
+}
+
+export interface LifeEvent {
+  id: string
+  contactId: string
+  type: LifeEventType
+  summary: string
+  details?: string
+  participantContactIds: string[]
+  visibility: LifeEventVisibility
+  importance: number
+  occurredAt: number
+  expiresAt?: number
+  surfacedAsMessage?: boolean
+  surfacedAsMoment?: boolean
+}
+
+export type AiUsagePurpose = 'chat' | 'proactive' | 'memory' | 'moments' | 'worldbook' | 'lifeSimulation' | 'persona' | 'quality' | 'other'
+
+export interface AiUsageRecord {
+  id: string
+  purpose: AiUsagePurpose
+  model: string
+  automatic: boolean
+  success: boolean
+  inputTokens: number
+  outputTokens: number
+  estimated: boolean
+  createdAt: number
+  error?: string
+}
+
+export interface CustomWarmthRule {
+  id: string
+  minWarmth: number
+  maxWarmth: number
+  positiveMultiplier: number
+  negativeMultiplier: number
+  prompt: string
+}
+
+export interface CustomPersonalityTrait {
+  id: string
+  name: string
+  meaning: string
+  rules: CustomWarmthRule[]
+}
+
+export interface ContactCreatorProfile {
+  personalityTendencies: string[]
+  age: string
+  gender: string
+  relationship: string
+  occupation: string
+  hobbies: string[]
+  notes: string
+}
+
+export interface ProactiveTopicRecord {
+  topic: string
+  source: 'event' | 'open_thread' | 'memory' | 'plan' | 'schedule' | 'career' | 'casual'
+  createdAt: number
 }
 export interface AiBubbleImage { type: 'image'; query: string; caption?: string }
 export type AiBubble = AiBubbleText | AiBubbleSticker | AiBubbleImage | AiBubbleLink | AiBubbleScheduleChange | AiBubbleFinance

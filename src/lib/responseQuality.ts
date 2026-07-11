@@ -73,6 +73,7 @@ async function validateAndMaybeRepair(opts: {
         { role: 'system', content: opts.systemPrompt },
         { role: 'user', content: opts.userPrompt },
       ],
+      purpose: 'quality',
     })
     const result = parseQualityResult(judged)
     if (!result) {
@@ -248,6 +249,7 @@ ${truncate(opts.targetedContext || '(none)', 600)}
 ${truncate(opts.rawText, 3000)}`,
         },
       ],
+      purpose: 'quality',
     })
     const result = parseQualityResult(judged)
     if (!result) return { valid: true }

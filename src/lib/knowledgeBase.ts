@@ -127,6 +127,7 @@ async function searchAndStore(topics: { query: string }[], settings: AppSettings
     apiKey: settings.apiKey,
     baseUrl: settings.baseUrl,
     model: settings.model,
+    purpose: 'other',
     messages: [
       { role: 'system', content: buildKnowledgeSummaryPrompt(rawResultsPerQuery) },
       { role: 'user', content: '请生成' },

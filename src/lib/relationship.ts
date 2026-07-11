@@ -7,6 +7,8 @@
  * text and warmth value directly.
  */
 
+import type { CustomPersonalityTrait } from '../types'
+
 export const WARMTH_MIN = -100
 export const WARMTH_MAX = 100
 
@@ -23,6 +25,15 @@ export function minWarmthForTrait(trait?: string): number {
 
 /** Extra warmth penalty applied when breakup language is detected in the assessment. */
 export const WARMTH_BREAKUP_PENALTY = -30
+
+export function customTraitWarmthModifier(traits: CustomPersonalityTrait[] | undefined, delta: number, warmth: number): number {
+  if (!traits?.length || delta === 0) return delta
+  let multiplier = 1
+  for (const trait of traits) for (const rule of trait.rules) {
+    if (warmth >= rule.minWarmth && warmth <= rule.maxWarmth) multiplier *= delta > 0 ? rule.positiveMultiplier : rule.negativeMultiplier
+  }
+  return Math.round(delta * Math.max(0, Math.min(10, multiplier)))
+}
 
 /** Initial warmth for a brand-new contact, biased by the relationship-base label and personality trait. */
 export function initialWarmthForBase(base: string, trait?: string): number {
@@ -315,6 +326,8 @@ export async function evaluateInitialWarmth(
       apiKey: settings.apiKey,
       baseUrl: settings.baseUrl,
       model: settings.utilityModel,
+      purpose: 'memory',
+      automatic: true,
       messages: [
         {
           role: 'system',

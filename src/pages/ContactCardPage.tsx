@@ -68,6 +68,7 @@ export function ContactCardPage() {
   const adminEnabled = useSettingsStore((s) => s.adminModeEnabled)
   const moodEnabled = useModuleEnabled('mood')
   const careerEnabled = useModuleEnabled('career')
+  const lifeSimulationEnabled = useModuleEnabled('lifeSimulation')
   const [assigningCareer, setAssigningCareer] = useState(false)
 
   const contact = useLiveQuery(() => (contactId ? db.contacts.get(contactId) : undefined), [contactId])
@@ -76,6 +77,8 @@ export function ContactCardPage() {
     [contactId],
   )
   const contactWallet = useLiveQuery(() => contactId ? db.walletAccounts.get(contactId) : undefined, [contactId])
+  const lifeEvents = useLiveQuery(() => contactId ? db.lifeEvents.where('contactId').equals(contactId).reverse().sortBy('occurredAt') : [], [contactId]) ?? []
+  const lifeState = useLiveQuery(() => contactId ? db.contactLifeStates.get(contactId) : undefined, [contactId])
   const structuredMemories = useLiveQuery(
     () => (contactId ? db.contactMemories.where('contactId').equals(contactId).reverse().sortBy('updatedAt') : []),
     [contactId],
@@ -113,7 +116,7 @@ export function ContactCardPage() {
     if (!value) return
     setAssigningCareer(true)
     try {
-      const raw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, messages: [{ role: 'system', content: buildOccupationPrompt(value, contact.systemPrompt) }, { role: 'user', content: '生成职业资料' }], jsonMode: true })
+      const raw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, messages: [{ role: 'system', content: buildOccupationPrompt(value, contact.systemPrompt) }, { role: 'user', content: '生成职业资料' }], jsonMode: true, purpose: 'persona' })
       const parsed = parseOccupation(raw)
       if (!parsed) throw new Error('职业资料生成失败')
       await db.contacts.update(contact.id, { ...employmentPatch(value, parsed.monthlySalary), ...(parsed.schedule ? { schedule: parsed.schedule } : {}) })
@@ -187,7 +190,7 @@ export function ContactCardPage() {
         selfIterationContactText: isModuleEnabled('selfIteration') ? contact.selfIterationPrompt : undefined,
         personalityTrait: personalityEnabled ? contact.personalityTrait : undefined,
         personalityWarmth: relEnabled ? (contact.warmth ?? 0) : undefined,
-        worldviewText: isModuleEnabled('worldview') ? (settings.worldview || undefined) : undefined,
+        worldviewText: isModuleEnabled('worldview') ? '【运行时按当前对话检索世界书条目；此预览不固定命中结果】' : undefined,
         latestUserText: '【预览】这里会放入用户本轮最新消息',
         recentContext: [
           `【你和对方的关系】${relationshipLine(
@@ -233,6 +236,8 @@ export function ContactCardPage() {
           </p>
         )}
       </section>
+
+      {lifeSimulationEnabled && <section className="mt-3 bg-white px-4 py-4"><h3 className="mb-2 text-xs font-medium text-gray-400">🌙 生活回顾</h3>{lifeState && <p className="mb-2 text-xs text-gray-500">此刻：{lifeState.location} · {lifeState.activity} · 精力 {lifeState.energy}</p>}{lifeEvents.filter((event) => event.visibility !== 'private').length === 0 ? <p className="text-sm text-gray-400">最近没有适合分享的生活动态</p> : <div className="space-y-2">{lifeEvents.filter((event) => event.visibility !== 'private').slice(0, 10).map((event) => <div key={event.id} className="rounded-lg bg-gray-50 px-3 py-2"><p className="text-sm text-gray-700">{event.summary}</p><p className="mt-0.5 text-[10px] text-gray-400">{new Date(event.occurredAt).toLocaleString()} · {event.type === 'summary' ? '阶段回顾' : '生活事件'}</p></div>)}</div>}</section>}
 
       <div className="mt-3 bg-white">
         <button

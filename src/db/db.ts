@@ -13,6 +13,8 @@ import type {
   MomentComment,
   MomentLike,
   SavedWorldview,
+  WorldbookEntry,
+  SimulationState, ContactLifeState, LifeEvent, AiUsageRecord,
   SocialEvent,
   Sticker,
   WalletAccount, WalletTransaction, Loan, JobListing, InterviewSession,
@@ -31,6 +33,11 @@ export class TalkDB extends Dexie {
   groups!: Table<Group, string>
   knowledgeEntries!: Table<KnowledgeEntry, string>
   savedWorldviews!: Table<SavedWorldview, string>
+  worldbookEntries!: Table<WorldbookEntry, string>
+  simulationState!: Table<SimulationState, string>
+  contactLifeStates!: Table<ContactLifeState, string>
+  lifeEvents!: Table<LifeEvent, string>
+  aiUsageRecords!: Table<AiUsageRecord, string>
   aiTurns!: Table<AiTurnDebug, string>
   socialEvents!: Table<SocialEvent, string>
   contactMemories!: Table<ContactMemory, string>
@@ -172,6 +179,15 @@ export class TalkDB extends Dexie {
     })
     // 待办功能整体移除，显式删除旧表。
     this.version(18).stores({ todos: null })
+    this.version(19).stores({
+      worldbookEntries: 'id, enabled, alwaysInclude, priority, updatedAt, *keywords',
+    })
+    this.version(20).stores({
+      simulationState: 'id, lastSimulatedAt',
+      contactLifeStates: '&contactId, updatedAt',
+      lifeEvents: 'id, contactId, occurredAt, visibility, importance, *participantContactIds',
+      aiUsageRecords: 'id, purpose, automatic, success, createdAt',
+    })
   }
 }
 

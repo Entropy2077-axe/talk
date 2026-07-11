@@ -54,6 +54,7 @@
      this instead of the dvh unit directly. 100dvh here is just the pre-JS
      fallback for the first paint. */
   --app-height: 100dvh;
+  --app-top-offset: 0px;
 }
 
 :root[data-theme='dark'] {

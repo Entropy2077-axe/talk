@@ -2,6 +2,8 @@ export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
 }
+import { assertAutomaticAiBudget, estimateTokens, recordAiUsage } from './aiUsage'
+import type { AiUsagePurpose } from '../types'
 
 /**
  * Merges consecutive same-role messages into one. Each AI turn is stored as
@@ -84,7 +86,14 @@ export async function chatCompletion(opts: {
    * memory. Leave this off there and rely on prompt instructions instead.
    */
   jsonMode?: boolean
+  purpose?: AiUsagePurpose
+  automatic?: boolean
 }): Promise<string> {
+  const purpose = opts.purpose ?? 'other'
+  const automatic = opts.automatic ?? false
+  if (automatic) await assertAutomaticAiBudget()
+  const inputTokens = opts.messages.reduce((sum, message) => sum + estimateTokens(message.content), 0)
+  try {
   const res = await fetch(`${normalizeBaseUrl(opts.baseUrl)}/v1/chat/completions`, {
     method: 'POST',
     signal: opts.signal,
@@ -108,5 +117,12 @@ export async function chatCompletion(opts: {
   if (typeof content !== 'string') {
     throw new Error('API返回内容为空或格式异常')
   }
+  const promptTokens = Number(json?.usage?.prompt_tokens)
+  const completionTokens = Number(json?.usage?.completion_tokens)
+  await recordAiUsage({ purpose, model: opts.model, automatic, success: true, inputTokens: Number.isFinite(promptTokens) ? promptTokens : inputTokens, outputTokens: Number.isFinite(completionTokens) ? completionTokens : estimateTokens(content), estimated: !Number.isFinite(promptTokens) || !Number.isFinite(completionTokens) })
   return content
+  } catch (error) {
+    await recordAiUsage({ purpose, model: opts.model, automatic, success: false, inputTokens, outputTokens: 0, estimated: true, error: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200) })
+    throw error
+  }
 }

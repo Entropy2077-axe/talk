@@ -24,6 +24,8 @@ import { SkyEyePage } from './pages/SkyEyePage'
 import { ALL_MODULES, useModuleEnabled } from './features'
 import { NotificationBanner } from './components/NotificationBanner'
 import { ensureWallets, settleSalaries } from './lib/finance'
+import { ensureLegacyWorldviewMigrated } from './lib/worldbook'
+import { runLifeSimulation } from './lib/lifeSimulation'
 // Runs once at module load, regardless of admin mode — so there's already
 // log history by the time someone opens "天眼".
 installConsoleCapture()
@@ -42,6 +44,7 @@ function useAutonomousBehaviorTimer() {
     if (!enabled) return
     const tick = () => {
       const settings = useSettingsStore.getState()
+      runLifeSimulation(settings).catch(() => {})
       refreshMoments(settings).catch(() => {})
       maybeTriggerProactiveMessage(settings).catch(() => {})
     }
@@ -83,6 +86,13 @@ function App() {
   const adminModeEnabled = useSettingsStore((s) => s.adminModeEnabled)
   const enabledModules = useSettingsStore((s) => s.enabledModules)
   useEffect(() => { void ensureWallets().then(() => settleSalaries()) }, [enabledModules])
+  useEffect(() => {
+    const resume = () => { if (document.visibilityState === 'visible') void runLifeSimulation() }
+    void runLifeSimulation()
+    document.addEventListener('visibilitychange', resume)
+    return () => document.removeEventListener('visibilitychange', resume)
+  }, [enabledModules])
+  useEffect(() => { void ensureLegacyWorldviewMigrated() }, [])
 
   // Build deduplicated route list from enabled modules.
   const moduleRoutes = useMemo(() => {

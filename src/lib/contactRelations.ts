@@ -5,7 +5,7 @@ import type { Contact, ContactRelationLabel } from '../types'
 
 export type RelationSentiment = 'good' | 'neutral' | 'bad'
 
-const SENTIMENT_BY_LABEL: Record<ContactRelationLabel, RelationSentiment> = {
+const SENTIMENT_BY_LABEL: Record<string, RelationSentiment> = {
   普通朋友: 'neutral',
   好朋友: 'good',
   损友: 'good',

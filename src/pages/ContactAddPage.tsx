@@ -19,7 +19,9 @@ import { displayName } from '../lib/contact'
 import { pickAvatarCategory } from '../lib/avatarCategory'
 import { OCCUPATION_OPTIONS, employmentPatch } from '../lib/career'
 import { randomAnimeAvatar, searchPexelsPhoto } from '../lib/photoSearch'
-import { CONTACT_RELATION_LABELS, HOBBY_TAG_OPTIONS, PERSONALITY_TRAIT_OPTIONS, type ContactRelationLabel } from '../types'
+import { retrieveWorldbookContext } from '../lib/worldbook'
+import { customTraitsValidationError, hasOverlappingCustomTraitRules } from '../lib/contactCreator'
+import { CONTACT_RELATION_LABELS, HOBBY_TAG_OPTIONS, PERSONALITY_TRAIT_OPTIONS, type ContactRelationLabel, type CustomPersonalityTrait } from '../types'
 import {
   AGE_RANGE_OPTIONS,
   GENDER_OPTIONS,
@@ -58,6 +60,7 @@ export function ContactAddPage() {
   const [gender, setGender] = useState('')
   const personalityEnabled = useModuleEnabled('personalityTraits')
   const relEnabled = useModuleEnabled('relationship')
+  const nuwaEnabled = useModuleEnabled('nuwaMode')
   const [relationship, setRelationship] = useState('')
   const [personalityTrait, setPersonalityTrait] = useState('')
   const [hobbies, setHobbies] = useState<string[]>([])
@@ -72,6 +75,12 @@ export function ContactAddPage() {
   const [progressStep, setProgressStep] = useState<'persona' | 'avatar' | 'saving' | null>(null)
   const [error, setError] = useState('')
   const [relationRows, setRelationRows] = useState<RelationRow[]>([])
+  const [customTraits, setCustomTraits] = useState<CustomPersonalityTrait[]>([])
+  const [customTendencies, setCustomTendencies] = useState('')
+  const [customAge, setCustomAge] = useState('')
+  const [customGender, setCustomGender] = useState('')
+  const [customRelationship, setCustomRelationship] = useState('')
+  const [customHobbies, setCustomHobbies] = useState('')
 
   function addRelationRow() {
     const taken = new Set(relationRows.map((r) => r.targetContactId))
@@ -106,16 +115,23 @@ export function ContactAddPage() {
     setTags((prev) => [...prev, pickRandomTrait(prev)])
   }
 
-  async function handleGenerate() {
+  async function handleGenerate(overrides?: { tags: string[]; ageRange: string; gender: string; relationship: string; personalityTrait: string; hobbies: string[]; occupation: string; relationRows: RelationRow[] }) {
     if (!settings.apiKey) {
       setError('还没有配置API Key 请先去"我-设置"里填写')
       return
+    }
+    if (nuwaEnabled) {
+      const traitError = customTraitsValidationError(customTraits)
+      if (traitError) { setError(traitError); return }
+      if (relationRows.some((row) => !row.targetContactId || !row.label.trim())) { setError('联系人关系不能留空'); return }
     }
     setGenerating(true)
     setError('')
     setProgressStep('persona')
     try {
-      const avatarCategory = pickAvatarCategory(tags)
+      const values = overrides ?? { tags: nuwaEnabled ? customTendencies.split(/[、,，]+/).map((x) => x.trim()).filter(Boolean) : tags, ageRange: nuwaEnabled ? customAge : ageRange, gender: nuwaEnabled ? customGender : gender, relationship: nuwaEnabled ? customRelationship : relationship, personalityTrait, hobbies: nuwaEnabled ? customHobbies.split(/[、,，]+/).map((x) => x.trim()).filter(Boolean) : hobbies, occupation: nuwaEnabled ? customOccupation.trim() : (occupation === '自定义' ? customOccupation.trim() : occupation), relationRows }
+      const avatarCategory = pickAvatarCategory(values.tags)
+      const worldbookText = await retrieveWorldbookContext([values.tags.join(' '), values.ageRange, values.gender, values.relationship, values.personalityTrait, values.hobbies.join(' '), values.occupation, extra].join('\n'), { maxEntries: 8, maxChars: 6500 })
       const raw = await chatCompletion({
         apiKey: settings.apiKey,
         baseUrl: settings.baseUrl,
@@ -125,14 +141,14 @@ export function ContactAddPage() {
             role: 'system',
             content: buildPersonaGenerationPrompt(
               {
-                personalityTags: tags,
-                ageRange,
-                gender,
-                relationship,
-                personalityTrait,
-                hobbies,
-                extra,
-                occupation: occupation === '自定义' ? customOccupation.trim() : occupation,
+                personalityTags: values.tags,
+                ageRange: values.ageRange,
+                gender: values.gender,
+                relationship: values.relationship,
+                personalityTrait: values.personalityTrait,
+                hobbies: values.hobbies,
+                extra: [extra, worldbookText ? `【创建时必须遵守的世界书】\n${worldbookText}` : ''].filter(Boolean).join('\n\n'),
+                occupation: values.occupation,
               },
               avatarCategory,
             ),
@@ -140,6 +156,7 @@ export function ContactAddPage() {
           { role: 'user', content: '请生成' },
         ],
         jsonMode: true,
+        purpose: 'persona',
       })
       const parsed = parsePersonaGeneration(raw)
       if (!parsed) throw new Error('生成结果解析失败 请重试一次')
@@ -171,7 +188,7 @@ export function ContactAddPage() {
       setProgressStep('saving')
       const id = uuid()
       const now = Date.now()
-      const chosenOccupation = occupation === '自定义' ? customOccupation.trim() : occupation
+      const chosenOccupation = values.occupation
       await db.contacts.add({
         id,
         name: parsed.name,
@@ -181,6 +198,8 @@ export function ContactAddPage() {
         avatarPhotographerUrl,
         systemPrompt: parsed.persona,
         personaConstraints: extra.trim() || undefined,
+        creatorProfile: { personalityTendencies: values.tags, age: values.ageRange, gender: values.gender, relationship: values.relationship, occupation: values.occupation, hobbies: values.hobbies, notes: extra.trim() },
+        customPersonalityTraits: nuwaEnabled ? customTraits : undefined,
         personaProfile: parsed.personaProfile,
         speechSamples: parsed.speechSamples,
         createdAt: now,
@@ -189,11 +208,11 @@ export function ContactAddPage() {
         memoryUpdatedAt: 0,
         memoryMessageCursor: 0,
         ...(relEnabled
-          ? { warmth: initialWarmthForBase(relationship || '朋友', personalityTrait) }
+          ? { warmth: initialWarmthForBase(values.relationship || '朋友', values.personalityTrait) }
           : {}),
-        relationshipBase: relationship || '朋友',
+        relationshipBase: values.relationship || '朋友',
         relationshipDynamic: '',
-        personalityTrait: personalityTrait || '无',
+        personalityTrait: nuwaEnabled ? '无' : (values.personalityTrait || '无'),
         schedule: parsed.schedule,
         scheduleOverrides: [],
         mbti: parsed.mbti || undefined,
@@ -206,7 +225,7 @@ export function ContactAddPage() {
         createdAt: now,
         updatedAt: now,
       })
-      for (const row of relationRows) {
+      for (const row of values.relationRows) {
         await setPairedContactRelation(id, row.targetContactId, row.label)
         await rememberInitialContactRelation({
           fromContactId: id,
@@ -224,11 +243,40 @@ export function ContactAddPage() {
     }
   }
 
+  function addCustomTrait() {
+    setCustomTraits((prev) => [...prev, { id: uuid(), name: '', meaning: '', rules: [{ id: uuid(), minWarmth: -100, maxWarmth: 100, positiveMultiplier: 1, negativeMultiplier: 1, prompt: '' }] }])
+  }
+
+  function updateCustomTrait(id: string, patch: Partial<CustomPersonalityTrait>) {
+    setCustomTraits((prev) => prev.map((trait) => trait.id === id ? { ...trait, ...patch } : trait))
+  }
+
+  function moveCustomTrait(index: number, direction: -1 | 1) {
+    setCustomTraits((prev) => {
+      const target = index + direction
+      if (target < 0 || target >= prev.length) return prev
+      const next = [...prev]; [next[index], next[target]] = [next[target], next[index]]
+      return next
+    })
+  }
+
+
+  function completelyRandom() {
+    const pick = <T,>(items: readonly T[]) => items[Math.floor(Math.random() * items.length)]
+    const randomRows: RelationRow[] = existingContacts.filter(() => Math.random() < 0.35).map((contact) => ({ key: uuid(), targetContactId: contact.id, label: pick(CONTACT_RELATION_LABELS) }))
+    const randomOccupation = careerEnabled ? pick(OCCUPATION_OPTIONS) : ''
+    const values = { tags: [pick(PERSONALITY_TAG_OPTIONS), pick(PERSONALITY_TAG_OPTIONS)].filter((v, i, a) => a.indexOf(v) === i), ageRange: pick(AGE_RANGE_OPTIONS), gender: pick(GENDER_OPTIONS.filter((x) => x !== '不限')), relationship: pick(RELATIONSHIP_OPTIONS), personalityTrait: personalityEnabled ? pick(PERSONALITY_TRAIT_OPTIONS.filter((x) => x.value !== '无')).value : '', hobbies: [...HOBBY_TAG_OPTIONS].sort(() => Math.random() - 0.5).slice(0, 1 + Math.floor(Math.random() * 4)), occupation: randomOccupation, relationRows: randomRows }
+    setTags(values.tags); setAgeRange(values.ageRange); setGender(values.gender); setRelationship(values.relationship); setPersonalityTrait(values.personalityTrait); setHobbies(values.hobbies); setOccupation(randomOccupation); setRelationRows(randomRows)
+    void handleGenerate(values)
+  }
+
   return (
     <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
       <TopBar title="添加联系人" showBack />
 
       <div className="mt-3 flex-1 overflow-y-auto bg-white px-4 py-4">
+        {!nuwaEnabled && <button type="button" onClick={completelyRandom} disabled={generating} className="mb-4 w-full rounded-xl bg-gradient-to-r from-purple-600 to-pink-500 py-3 text-sm font-medium text-white disabled:opacity-50">🎲 完全随机创建</button>}
+        {nuwaEnabled && <p className="mb-4 text-xs text-purple-600">女娲模式已开启：以下角色属性全部自由填写，并作为不可改写的人设约束。</p>}
         <p className="mb-4 text-xs text-gray-400">
           描述一下你想认识的这个人 名字会由对方自己来定 确认添加后就正式加上了 之后不能再改TA的性格设定
         </p>
@@ -245,7 +293,7 @@ export function ContactAddPage() {
           不手动选的话 系统会按性格自动配一张动漫头像/风景照/网图人像/宠物照
         </p>
 
-        <label className="mb-2 block text-xs font-medium text-gray-400">性格倾向（可多选，也可以自己填）</label>
+        {!nuwaEnabled && <><label className="mb-2 block text-xs font-medium text-gray-400">性格倾向（可多选，也可以自己填）</label>
         <div className="mb-2 flex flex-wrap gap-2">
           {PERSONALITY_TAG_OPTIONS.map((tag) => (
             <button
@@ -393,7 +441,13 @@ export function ContactAddPage() {
               </button>
             ))}
           </div>
-        </div>
+        </div></>}
+
+        {nuwaEnabled && <div className="mb-4 space-y-3"><div><label className="mb-1 block text-xs font-medium text-gray-400">性格倾向</label><input value={customTendencies} onChange={(e) => setCustomTendencies(e.target.value)} placeholder="例如：慢热、敏感、有主见（顿号分隔）" className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"/></div><div className="grid grid-cols-2 gap-2"><div><label className="mb-1 block text-xs text-gray-400">年龄</label><input value={customAge} onChange={(e) => setCustomAge(e.target.value)} placeholder="例如：24岁" className="w-full rounded-lg border px-3 py-2 text-sm"/></div><div><label className="mb-1 block text-xs text-gray-400">性别</label><input value={customGender} onChange={(e) => setCustomGender(e.target.value)} placeholder="自由填写" className="w-full rounded-lg border px-3 py-2 text-sm"/></div></div><div><label className="mb-1 block text-xs text-gray-400">关系定位</label><input value={customRelationship} onChange={(e) => setCustomRelationship(e.target.value)} placeholder="与用户是什么关系" className="w-full rounded-lg border px-3 py-2 text-sm"/></div>{careerEnabled && <div><label className="mb-1 block text-xs text-gray-400">职业</label><input value={customOccupation} onChange={(e) => setCustomOccupation(e.target.value)} placeholder="自由填写职业" className="w-full rounded-lg border px-3 py-2 text-sm"/></div>}<div><label className="mb-1 block text-xs text-gray-400">兴趣爱好</label><input value={customHobbies} onChange={(e) => setCustomHobbies(e.target.value)} placeholder="多个兴趣用顿号分隔" className="w-full rounded-lg border px-3 py-2 text-sm"/></div></div>}
+
+        {nuwaEnabled && <section className="mb-4"><div className="mb-2 flex items-center justify-between"><label className="text-xs font-medium text-gray-500">自定义性格特质</label><button type="button" onClick={addCustomTrait} className="text-xs text-purple-600">+ 添加特质</button></div><div className="space-y-3">{customTraits.map((trait, traitIndex) => <div key={trait.id} className="rounded-xl border border-gray-200 p-3"><div className="mb-2 flex items-center justify-end gap-2 text-xs"><button onClick={() => moveCustomTrait(traitIndex, -1)} disabled={traitIndex === 0}>↑</button><button onClick={() => moveCustomTrait(traitIndex, 1)} disabled={traitIndex === customTraits.length - 1}>↓</button><button onClick={() => setCustomTraits((x) => x.filter((t) => t.id !== trait.id))} className="text-red-500">删除特质</button></div><div className="flex gap-2"><input value={trait.name} onChange={(e) => updateCustomTrait(trait.id, { name: e.target.value })} placeholder="特质名称" className="w-1/3 rounded-lg border px-2 py-1.5 text-sm"/><input value={trait.meaning} onChange={(e) => updateCustomTrait(trait.id, { meaning: e.target.value })} placeholder="特质含义" className="flex-1 rounded-lg border px-2 py-1.5 text-sm"/></div>{trait.rules.map((rule) => <div key={rule.id} className="mt-2 rounded-lg bg-gray-50 p-2"><div className="grid grid-cols-4 gap-1"><input type="number" value={rule.minWarmth} onChange={(e) => updateCustomTrait(trait.id, { rules: trait.rules.map((r) => r.id === rule.id ? { ...r, minWarmth: Number(e.target.value) } : r) })} title="最低好感" className="rounded border px-1 py-1 text-xs"/><input type="number" value={rule.maxWarmth} onChange={(e) => updateCustomTrait(trait.id, { rules: trait.rules.map((r) => r.id === rule.id ? { ...r, maxWarmth: Number(e.target.value) } : r) })} title="最高好感" className="rounded border px-1 py-1 text-xs"/><input type="number" min="0" max="10" step="0.1" value={rule.positiveMultiplier} onChange={(e) => updateCustomTrait(trait.id, { rules: trait.rules.map((r) => r.id === rule.id ? { ...r, positiveMultiplier: Number(e.target.value) } : r) })} title="上升倍率" className="rounded border px-1 py-1 text-xs"/><input type="number" min="0" max="10" step="0.1" value={rule.negativeMultiplier} onChange={(e) => updateCustomTrait(trait.id, { rules: trait.rules.map((r) => r.id === rule.id ? { ...r, negativeMultiplier: Number(e.target.value) } : r) })} title="下降倍率" className="rounded border px-1 py-1 text-xs"/></div><div className="mt-1 flex gap-1"><input value={rule.prompt} onChange={(e) => updateCustomTrait(trait.id, { rules: trait.rules.map((r) => r.id === rule.id ? { ...r, prompt: e.target.value } : r) })} placeholder="命中区间时给予的提示词" className="flex-1 rounded border px-2 py-1 text-xs"/><button onClick={() => updateCustomTrait(trait.id, { rules: trait.rules.filter((r) => r.id !== rule.id) })} className="text-xs text-red-500">删规则</button></div></div>)}<button type="button" onClick={() => updateCustomTrait(trait.id, { rules: [...trait.rules, { id: uuid(), minWarmth: -100, maxWarmth: 100, positiveMultiplier: 1, negativeMultiplier: 1, prompt: '' }] })} className="mt-2 text-xs text-purple-600">+ 添加区间规则</button><span className="ml-2 text-[10px] text-gray-400">优先级 {traitIndex + 1}</span></div>)}</div></section>}
+
+        {nuwaEnabled && customTraits.some(hasOverlappingCustomTraitRules) && <p className="-mt-3 mb-4 text-xs text-amber-600">存在重叠区间；命中时倍率会相乘、提示词会合并。</p>}
 
         {existingContacts.length > 0 && (
           <>
@@ -421,7 +475,7 @@ export function ContactAddPage() {
                       </option>
                     ))}
                   </select>
-                  <select
+                  {nuwaEnabled ? <input value={row.label} onChange={(e) => updateRelationRow(row.key, { label: e.target.value })} placeholder="自定义关系" className="flex-1 rounded-lg border border-gray-200 px-2 py-1.5 text-xs"/> : <select
                     value={row.label}
                     onChange={(e) =>
                       updateRelationRow(row.key, { label: e.target.value as ContactRelationLabel })
@@ -433,7 +487,7 @@ export function ContactAddPage() {
                         {l}
                       </option>
                     ))}
-                  </select>
+                  </select>}
                   <button onClick={() => removeRelationRow(row.key)} className="shrink-0 text-xs text-gray-300">
                     删除
                   </button>
@@ -471,8 +525,8 @@ export function ContactAddPage() {
           </div>
         )}
         <button
-          onClick={handleGenerate}
-          disabled={generating || (careerEnabled && (!occupation || (occupation === '自定义' && !customOccupation.trim())))}
+          onClick={() => void handleGenerate()}
+          disabled={generating || (careerEnabled && (nuwaEnabled ? !customOccupation.trim() : (!occupation || (occupation === '自定义' && !customOccupation.trim()))))}
           className="w-full rounded-lg bg-gray-900 py-2.5 text-sm text-white disabled:opacity-40"
         >
           {generating ? '正在添加…' : '确认添加'}

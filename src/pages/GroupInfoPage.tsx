@@ -153,7 +153,7 @@ export function GroupInfoPage() {
           userProfileText: buildUserProfileText(settings),
           targetedContextText: '【预览】这里会放入用户本轮@、回复对象等定向上下文。',
           recentEventsText: '【预览】这里会放入最近朋友圈/群聊等社交事件。',
-          worldviewText: isModuleEnabled('worldview') ? (settings.worldview || undefined) : undefined,
+          worldviewText: isModuleEnabled('worldview') ? '【运行时按群聊内容检索世界书条目；此预览不固定命中结果】' : undefined,
           knowledgeDigestText: isModuleEnabled('knowledgeBase') ? (knowledgeDigestText(knowledgeEntries) || undefined) : undefined,
           selfIterationGlobalText: isModuleEnabled('selfIteration') ? settings.selfIterationGlobalPrompt : undefined,
           speakerMemoriesMap: new Map(),

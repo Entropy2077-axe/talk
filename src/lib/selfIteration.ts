@@ -143,6 +143,8 @@ async function runTask(task: SelfIterationTask): Promise<void> {
     apiKey: settings.apiKey,
     baseUrl: settings.baseUrl,
     model: settings.model,
+    purpose: 'memory',
+    automatic: true,
     messages: [{ role: 'system', content: prompt } satisfies ChatMessage],
     jsonMode: true,
   })

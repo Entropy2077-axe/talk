@@ -23,6 +23,7 @@ import { validateGroupDraft, validateGroupTurn } from './responseQuality'
 import { searchPexelsPhoto } from './photoSearch'
 import { recentSocialEventsText, recordSocialEvent } from './socialEvents'
 import { useChatUiStore } from '../store/useChatUiStore'
+import { retrieveWorldbookContext } from './worldbook'
 import { generateGroupStoryOutline, storyOutlinePromptSection } from './storyOutline'
 import type { AppSettings, Contact, Group, GroupAiBubble, Message, Sticker } from '../types'
 
@@ -77,19 +78,19 @@ function parseGroupTurnDebugPayload(
   const text = fenceMatch ? fenceMatch[1].trim() : trimmed
   try {
     const parsed = JSON.parse(text)
-    return parsed && typeof parsed === 'object' ? { ...(parsed as Record<string, unknown>), mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, storyOutline } : parsed
+    return parsed && typeof parsed === 'object' ? { ...(parsed as Record<string, unknown>), mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, storyOutline, promptTrace: { sections: [{ label: '群聊主提示词', content: mainPrompt }] } } : parsed
   } catch {
     const extracted = extractJsonObject(text)
     if (extracted) {
       try {
         const parsed = JSON.parse(extracted)
-        return parsed && typeof parsed === 'object' ? { ...(parsed as Record<string, unknown>), mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, storyOutline } : parsed
+        return parsed && typeof parsed === 'object' ? { ...(parsed as Record<string, unknown>), mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, storyOutline, promptTrace: { sections: [{ label: '群聊主提示词', content: mainPrompt }] } } : parsed
       } catch {
         // fall through
       }
     }
   }
-  return { mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, knowledgeQueries, turnSummary, groupVibe, storyOutline }
+  return { mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, knowledgeQueries, turnSummary, groupVibe, storyOutline, promptTrace: { sections: [{ label: '群聊主提示词', content: mainPrompt }] } }
 }
 
 /** Admin-only safe stop for a group generation and its queued bubbles. */
@@ -149,6 +150,8 @@ async function updateGroupMemoryAndVibe(opts: {
             content: appendedMemory.slice(-5000),
           },
         ],
+        purpose: 'memory',
+        automatic: true,
       })
       const compressed = parseCompressedGroupMemory(raw)
       if (compressed) patch.memory = compressed
@@ -337,6 +340,7 @@ async function runGroupAiTurn(
     const knowledgeEntries = await db.knowledgeEntries.toArray()
     const targetContext = targetedContextText(latestUserMessage, contactById, messageById, settings.userNickname)
     const recentEventsText = await recentSocialEventsText(members.map((m) => m.id), 4)
+    const worldbookText = isModuleEnabled('worldview') ? await retrieveWorldbookContext([group.name, group.vibe, targetContext, history.slice(-10).map((m) => m.content).join(' '), members.map((m) => `${m.name} ${m.systemPrompt}`).join(' ')].filter(Boolean).join('\n')) : ''
 
     const speakerMemoriesMap = await loadSpeakerMemories(speakers)
     const aiRelationshipText = await aiRelationshipPrompt(members)
@@ -354,7 +358,7 @@ async function runGroupAiTurn(
       userProfileText: buildUserProfileText(settings),
       targetedContextText: targetContext,
       recentEventsText: recentEventsText || undefined,
-      worldviewText: isModuleEnabled('worldview') ? (settings.worldview || undefined) : undefined,
+      worldviewText: worldbookText || undefined,
       knowledgeDigestText: isModuleEnabled('knowledgeBase') ? (knowledgeDigestText(knowledgeEntries) || undefined) : undefined,
       selfIterationGlobalText: isModuleEnabled('selfIteration') ? settings.selfIterationGlobalPrompt : undefined,
       speakerMemoriesMap,
@@ -388,7 +392,7 @@ async function runGroupAiTurn(
         `【用户资料】${buildUserProfileText(settings)}`,
         targetContext ? `【本轮定向上下文】\n${targetContext}` : '',
         recentEventsText ? `【最近发生的事】\n${recentEventsText}` : '',
-        isModuleEnabled('worldview') && settings.worldview ? `【世界设定】\n${settings.worldview}` : '',
+        worldbookText ? `【世界书命中】\n${worldbookText}` : '',
         `【发言人逻辑前提】\n${speakerPremises}`,
       ].filter(Boolean).join('\n\n')
       try {
@@ -426,6 +430,7 @@ async function runGroupAiTurn(
       model: settings.model,
       messages: chatMessages,
       signal: controller.signal,
+      purpose: 'chat',
     })
 
     if (streamByConversation.get(conversationId) !== streamId) return
@@ -469,6 +474,7 @@ ${rawText}
           },
         ]),
         signal: controller.signal,
+        purpose: 'chat',
       })
       if (streamByConversation.get(conversationId) !== streamId) return
       console.log(`[group] 主模型重写草稿(${rawText.length}字): ${rawText.slice(0, 160)}...`)
@@ -501,7 +507,7 @@ ${rawText}
         targetedContext: targetContext,
         raw: finalRaw,
         bubbles,
-        signal: controller.signal,
+      signal: controller.signal,
       })
       if (streamByConversation.get(conversationId) !== streamId) return
       if (checked.repaired) {
