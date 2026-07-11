@@ -444,6 +444,7 @@ async function runGroupAiTurn(
       allowAiChatter: group.allowAiChatter ?? true,
       energyLevel: group.energyLevel ?? 'normal',
       targetedContext: targetContext,
+      worldbookText: worldbookText || undefined,
       signal: controller.signal,
     })
     if (streamByConversation.get(conversationId) !== streamId) return
@@ -507,6 +508,7 @@ ${rawText}
         targetedContext: targetContext,
         raw: finalRaw,
         bubbles,
+        worldbookText: worldbookText || undefined,
       signal: controller.signal,
       })
       if (streamByConversation.get(conversationId) !== streamId) return

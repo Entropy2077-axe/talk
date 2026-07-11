@@ -446,6 +446,7 @@ async function runAiTurn(
         recentConversationText: formatRecentConversationForReview(recentHistory, contact),
         raw: finalRaw,
         bubbles,
+        worldbookText: worldbookText || undefined,
         signal: controller.signal,
       })
       if (streamByConversation.get(conversationId) !== streamId) return

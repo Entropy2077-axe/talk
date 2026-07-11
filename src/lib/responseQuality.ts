@@ -98,6 +98,7 @@ export async function validatePrivateTurn(opts: {
   recentConversationText?: string
   raw: string
   bubbles: AiBubble[]
+  worldbookText?: string
   signal?: AbortSignal
 }): Promise<{ raw: string; repaired: boolean; reason?: string; detectedInvalid?: boolean }> {
   const name = displayName(opts.contact)
@@ -106,16 +107,17 @@ export async function validatePrivateTurn(opts: {
   const upcomingSchedule = describeUpcomingScheduleText(opts.contact, now)
   const upcomingPlans = activeUpcomingPlansText(opts.contact, now)
   const activeMood = opts.contact.mood?.text && Date.now() < opts.contact.mood.expiresAt ? opts.contact.mood.text : ''
+  const worldbookInfo = opts.worldbookText ? `\nWorldbook (canon world rules — content consistent with these is NOT "invented facts", it is legitimate world-building):\n${opts.worldbookText}` : ''
   const systemPrompt = `You are a strict roleplay response reviewer. Output JSON only: {"valid":true/false,"reason":"short","fixedRaw":"optional"}.
-Mandatory primary check: logical grounding. Decide whether the reply's inference is tightly supported by its premises: persona/identity, memory, relationship, mood, location, schedule/plans, recent events, and the latest user message.
-Then check: (1) reply fits persona and personality trait, (2) never violates user-authored persona constraints, (3) answers user, (4) no invented facts, (5) mood/thought are present. A trait may be subtle, but a reply that directly contradicts its behavioral anchor is invalid.
+Mandatory primary check: logical grounding. Decide whether the reply's inference is tightly supported by its premises: persona/identity, memory, relationship, mood, location, schedule/plans, recent events,${opts.worldbookText ? ' worldbook (see user prompt),' : ''} and the latest user message.
+Then check: (1) reply fits persona and personality trait, (2) never violates user-authored persona constraints, (3) answers user, (4) no invented facts — BUT worldbook entries define canonical world rules; content grounded in an active worldbook entry is NOT "invented" even if it seems fantastical, (5) mood/thought are present. A trait may be subtle, but a reply that directly contradicts its behavioral anchor is invalid.
 If the prose feels good but the premise→reply logic is weak, unsupported, contradictory, or loosely associated, it is invalid.
 If valid, return valid=true.
 If invalid, rewrite as fixedRaw. Must include mood and thought: {"messages":[{"type":"text","content":"..."}],"mood":"15字情绪","thought":"30字内心想法 和嘴上说的不一样"}. Keep it short.`
   const strictContinuityPrompt = `Extra invalid cases:
 - The user is questioning/correcting the assistant, but the reply ignores that and continues an old bit.
 - The reply confuses the persona's own identity with a third party mentioned in chat, such as acting as if "teacher" is the persona when the persona is not a teacher.
-- The reply invents concrete scenes like class, teacher, classroom, offline meetings, prior promises, or past events that are not supported by persona/memory/latest message.
+- The reply invents concrete scenes like class, teacher, classroom, offline meetings, prior promises, or past events that are not supported by persona/memory/latest message${opts.worldbookText ? ' or worldbook entries' : ''}.
 - The reply tries to forcibly rationalize a previous mistake instead of naturally clarifying it.
 - Logical incoherence: wrong reference resolution, wrong cause/effect, contradictory timeline, contradicting the user's correction, answering a different question, or treating a joke/metaphor as literal without evidence.
 - If the user asks "why/what/are you X/did X happen", the reply must directly resolve that logical question before adding emotion or banter.
@@ -139,7 +141,7 @@ Latest user message: ${truncate(opts.latestUserText || '(background event)', 500
 Assistant rendered reply:
 ${truncate(privateBubblesText(opts.bubbles), 900)}
 Raw assistant protocol:
-${truncate(opts.raw, 1200)}`
+${truncate(opts.raw, 1200)}${worldbookInfo}`
 
   return validateAndMaybeRepair({
     settings: opts.settings,
@@ -157,14 +159,17 @@ export async function validateGroupTurn(opts: {
   targetedContext: string
   raw: string
   bubbles: GroupAiBubble[]
+  worldbookText?: string
   signal?: AbortSignal
 }): Promise<{ raw: string; repaired: boolean; reason?: string; detectedInvalid?: boolean }> {
   const speakerText = opts.speakers
     .map((speaker, i) => `${i + 1}. ${displayName(speaker)}: ${truncate(speaker.systemPrompt || '', 260)}`)
     .join('\n')
+  const worldbookInfo = opts.worldbookText ? `\nActive worldbook entries (canon world rules — content consistent with these is NOT "invented facts"):
+${opts.worldbookText}` : ''
   const systemPrompt = `You are a strict group-chat response reviewer. Output JSON only: {"valid":true/false,"reason":"short","fixedRaw":"optional"}.
 Judge whether each speaker follows their persona, the reply handles @mentions/replies, and the scene remains a natural group chat rather than several private replies to the user.
-Also check the protocol: speakerIndex must be one of the listed speakers; content must not contain leaked <name>, speaker-name prefixes, parenthesized thoughts, bracketed moods, or wrapping quotes; every message must include non-empty thought and mood, and they must not leak into content; groupVibe must be present and non-empty.
+Also check the protocol: speakerIndex must be one of the listed speakers; content must not contain leaked <name>, speaker-name prefixes, parenthesized thoughts, bracketed moods, or wrapping quotes; every message must include non-empty thought and mood, and they must not leak into content; groupVibe must be present and non-empty.${opts.worldbookText ? ' Content grounded in an active worldbook entry is NOT "invented facts" — worldbook defines canon world rules.' : ''}
 If valid, return valid=true and omit fixedRaw.
 If invalid, rewrite fixedRaw using this exact protocol JSON: {"messages":[{"speakerIndex":1,"speakerName":"...","type":"text","content":"...","thought":"...","mood":"..."}],"turnSummary":"...","groupVibe":"...","knowledgeQueries":[]}. Only use listed speakerIndex values. Keep it short.`
   const userPrompt = `Group: ${opts.groupName}
@@ -175,7 +180,7 @@ ${truncate(opts.targetedContext || '(none)', 500)}
 Assistant rendered reply:
 ${truncate(groupBubblesText(opts.bubbles, opts.speakers), 900)}
 Raw assistant protocol:
-${truncate(opts.raw, 1200)}`
+${truncate(opts.raw, 1200)}${worldbookInfo}`
 
   return validateAndMaybeRepair({
     settings: opts.settings,
@@ -194,6 +199,7 @@ export async function validateGroupDraft(opts: {
   allowAiChatter: boolean
   energyLevel: GroupEnergyLevel
   targetedContext: string
+  worldbookText?: string
   signal?: AbortSignal
 }): Promise<{ valid: boolean; reason?: string }> {
   const speakerText = opts.speakers.map((speaker, i) => `${i + 1}. ${displayName(speaker)}`).join('\n')
@@ -234,7 +240,7 @@ export async function validateGroupDraft(opts: {
 8. 草稿是否过度复读同一个特殊词、梗、比喻、称号或外号；如果多名AI都围绕同一个词解释/吐槽/复述，应判为无效。
 9. 草稿是否有话题推进；如果同一个梗已经被反复接住，除非用户明确继续问这个梗，否则应该收束或自然转到相邻话题。
 
-只要违反任一必需规则，就 valid=false，并用一句话指出最重要的问题。`,
+只要违反任一必需规则，就 valid=false，并用一句话指出最重要的问题。${opts.worldbookText ? `\n\n注意：以下世界书条目定义了这个世界的规则。草稿中符合世界书设定的内容不属于"编造"或"偏离人设"，是合理的世界构建。\n世界书：\n${opts.worldbookText}` : ''}`,
         },
         {
           role: 'user',
