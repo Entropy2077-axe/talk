@@ -631,7 +631,7 @@ function revealBubbles(
         thought: turnThought && i === bubbles.length - 1 ? turnThought : undefined,
         createdAt: Date.now(),
       }
-      if (turnThought) {
+      if (turnThought && i === bubbles.length - 1) {
         console.log(`[chat] 想法已存入消息: ${turnThought}`)
       }
       await db.messages.add(msg)

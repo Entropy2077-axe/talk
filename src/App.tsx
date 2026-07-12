@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, type ElementType } from 'react'
+import { useEffect, useMemo, type ElementType } from 'react'
 import { Route, Routes, useLocation } from 'react-router-dom'
 import { App as CapacitorApp } from '@capacitor/app'
 import { useSettingsStore } from './store/useSettingsStore'
@@ -12,28 +12,26 @@ import { AppErrorBoundary } from './components/AppErrorBoundary'
 import { ensureWallets, settleSalaries } from './lib/finance'
 import { ensureLegacyWorldviewMigrated } from './lib/worldbook'
 import { runLifeSimulation } from './lib/lifeSimulation'
+import { MessagesPage } from './pages/MessagesPage'
+import { ContactsPage } from './pages/ContactsPage'
+import { DiscoverPage } from './pages/DiscoverPage'
+import { MePage } from './pages/MePage'
+import { ChatPage } from './pages/ChatPage'
+import { ContactCardPage } from './pages/ContactCardPage'
+import { ContactAddPage } from './pages/ContactAddPage'
+import { GroupAddPage } from './pages/GroupAddPage'
+import { GroupInfoPage } from './pages/GroupInfoPage'
+import { MomentsPage } from './pages/MomentsPage'
+import { SettingsPage } from './pages/SettingsPage'
+import { StickersPage } from './pages/StickersPage'
+import { ProfileEditPage } from './pages/ProfileEditPage'
+import { ModulesPage } from './pages/ModulesPage'
+import { SkyEyePage } from './pages/SkyEyePage'
+import { SocialInboxPage } from './pages/SocialInboxPage'
 // Runs once at module load, regardless of admin mode — so there's already
 // log history by the time someone opens "天眼".
 installConsoleCapture()
 
-// Most pages are only opened occasionally. Loading them on demand keeps the
-// first chat-list render small, particularly on older Android WebViews.
-const MessagesPage = lazy(() => import('./pages/MessagesPage').then(({ MessagesPage }) => ({ default: MessagesPage })))
-const ContactsPage = lazy(() => import('./pages/ContactsPage').then(({ ContactsPage }) => ({ default: ContactsPage })))
-const DiscoverPage = lazy(() => import('./pages/DiscoverPage').then(({ DiscoverPage }) => ({ default: DiscoverPage })))
-const MePage = lazy(() => import('./pages/MePage').then(({ MePage }) => ({ default: MePage })))
-const ChatPage = lazy(() => import('./pages/ChatPage').then(({ ChatPage }) => ({ default: ChatPage })))
-const ContactCardPage = lazy(() => import('./pages/ContactCardPage').then(({ ContactCardPage }) => ({ default: ContactCardPage })))
-const ContactAddPage = lazy(() => import('./pages/ContactAddPage').then(({ ContactAddPage }) => ({ default: ContactAddPage })))
-const GroupAddPage = lazy(() => import('./pages/GroupAddPage').then(({ GroupAddPage }) => ({ default: GroupAddPage })))
-const GroupInfoPage = lazy(() => import('./pages/GroupInfoPage').then(({ GroupInfoPage }) => ({ default: GroupInfoPage })))
-const MomentsPage = lazy(() => import('./pages/MomentsPage').then(({ MomentsPage }) => ({ default: MomentsPage })))
-const SettingsPage = lazy(() => import('./pages/SettingsPage').then(({ SettingsPage }) => ({ default: SettingsPage })))
-const StickersPage = lazy(() => import('./pages/StickersPage').then(({ StickersPage }) => ({ default: StickersPage })))
-const ProfileEditPage = lazy(() => import('./pages/ProfileEditPage').then(({ ProfileEditPage }) => ({ default: ProfileEditPage })))
-const ModulesPage = lazy(() => import('./pages/ModulesPage').then(({ ModulesPage }) => ({ default: ModulesPage })))
-const SkyEyePage = lazy(() => import('./pages/SkyEyePage').then(({ SkyEyePage }) => ({ default: SkyEyePage })))
-const SocialInboxPage = lazy(() => import('./pages/SocialInboxPage').then(({ SocialInboxPage }) => ({ default: SocialInboxPage })))
 
 /**
  * "Looks autonomous while the app is open" — a foreground timer that
@@ -136,8 +134,7 @@ function App() {
     <AppErrorBoundary key={location.key}>
       <div className={`app-shell ${themeMode === 'dark' ? 'theme-dark' : ''}`}>
         <NotificationBanner />
-        <Suspense fallback={<main className="flex flex-1 items-center justify-center bg-[#f4f4f6] text-sm text-gray-400">正在打开…</main>}>
-          <Routes>
+        <Routes>
         <Route element={<TabLayout />}>
           <Route path="/" element={<MessagesPage />} />
           <Route path="/contacts" element={<ContactsPage />} />
@@ -161,8 +158,7 @@ function App() {
         {adminModeEnabled && (
           <Route path="/sky-eye" element={<SkyEyePage />} />
         )}
-          </Routes>
-        </Suspense>
+        </Routes>
       </div>
     </AppErrorBoundary>
   )

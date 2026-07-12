@@ -4,6 +4,9 @@ import type { WorldbookEntry } from '../types'
 
 export interface WorldbookMatch { entry: WorldbookEntry; score: number }
 
+let lastLoggedMatchSignature = ''
+let lastLoggedMatchAt = 0
+
 function terms(text: string): string[] {
   const normalized = text.toLowerCase()
   const latin = normalized.match(/[a-z0-9_-]{2,}/g) ?? []
@@ -43,7 +46,13 @@ export async function retrieveWorldbookTrace(query: string, opts: { maxEntries?:
     used += blockLength
   }
   if (useSettingsStore.getState().adminModeEnabled && selected.length) {
-    console.log('[worldbook] 命中:', selected.map((m) => `${m.entry.title}(${m.score})`).join('、'))
+    const signature = selected.map((m) => `${m.entry.id}:${m.score}`).join('|')
+    const now = Date.now()
+    if (signature !== lastLoggedMatchSignature || now - lastLoggedMatchAt > 30_000) {
+      lastLoggedMatchSignature = signature
+      lastLoggedMatchAt = now
+      console.log('[worldbook] 命中:', selected.map((m) => `${m.entry.title}(${m.score})`).join('、'))
+    }
   }
   return { text: selected.map((m) => `【${m.entry.title}】\n${m.entry.content}`).join('\n\n'), matches: selected }
 }

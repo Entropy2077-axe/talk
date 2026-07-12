@@ -150,6 +150,7 @@ function buildMomentsPrompt(
 
   return `${worldviewSection}【场景】
 你是一个朋友圈内容生成器。下面有几个人准备发朋友圈，请你扮演他们每个人写出符合各自人设的内容。
+人设、特色人格、说话样例、关系和当前心情是角色选择主题、情绪、措辞与互动方式的逻辑前提，不是可忽略的文风装饰。事实不冲突时，必须写出这个角色才会发的内容；不得把不同角色写成泛化的同一种朋友圈，也不得为了表现特殊人格编造不存在的经历。
 这不是私聊——朋友圈是公开广播，不能写成"我跟你说""咱们"这种对着特定人的语气。
 先判断每个人此刻为什么会想发，再写正文。最近素材只是可选来源，最多自然使用两项；不要逐条复述，更不能公开私聊秘密、用户隐私或未经同意的关系细节。素材不足时就发普通日常，不要硬造大事。避免与近期内容重复同一情绪、句式或主题。
 
@@ -205,7 +206,7 @@ function parseMomentsResponse(raw: string, expected: number[]): ParsedMoment[] |
 }
 
 /** Moments need their own review pass: broad feed context makes repeated hooks easy to miss. */
-async function reviewMomentPayload(settings: AppSettings, raw: string, expectedShape: string): Promise<string> {
+async function reviewMomentPayload(settings: AppSettings, raw: string, expectedShape: string, personaContext = ''): Promise<string> {
   try {
     const recent = await db.moments.orderBy('createdAt').reverse().limit(18).toArray()
     const history = recent.map((moment) => moment.content).join('\n').slice(0, 2200)
@@ -218,8 +219,8 @@ async function reviewMomentPayload(settings: AppSettings, raw: string, expectedS
       purpose: 'quality',
       automatic: true,
       messages: [
-        { role: 'system', content: `You review AI-generated Moments JSON. Output JSON only: {"valid":true|false,"fixedRaw":"optional complete replacement JSON"}. Reject content that repeats, escalates, or keeps circling the same request, object, joke, wording, or topic from the recent feed or within one generated batch. Also reject copy-paste-like comments where several people merely repeat the same point. Preserve the required JSON shape exactly: ${expectedShape}. If invalid, return a complete replacement JSON in fixedRaw with fresh, natural everyday content; do not add explanations.` },
-        { role: 'user', content: `Recent feed:\n${history || '(empty)'}\n\nCandidate JSON:\n${raw.slice(0, 6000)}` },
+        { role: 'system', content: `You review AI-generated Moments JSON. Output JSON only: {"valid":true|false,"fixedRaw":"optional complete replacement JSON"}. Reject content that repeats, escalates, or keeps circling the same request, object, joke, wording, or topic from the recent feed or within one generated batch. Also reject copy-paste-like comments where several people merely repeat the same point. Persona adherence is a logical requirement: reject content that is generic or contradicts a listed persona, trait, boundary, habit, MBTI, relationship, or speaking sample when those should affect the post/comment. Preserve the required JSON shape exactly: ${expectedShape}. If invalid, return a complete replacement JSON in fixedRaw with fresh, natural everyday content; do not add explanations.` },
+        { role: 'user', content: `Persona context:\n${personaContext || '(none provided)'}\n\nRecent feed:\n${history || '(empty)'}\n\nCandidate JSON:\n${raw.slice(0, 6000)}` },
       ],
     })
     const parsed = JSON.parse(judged) as { valid?: unknown; fixedRaw?: unknown }
@@ -284,7 +285,8 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
   })
 
   const expectedCommentCounts = entries.map((e) => e.commenters.filter((c) => c.willComment).length)
-  const reviewedRaw = await reviewMomentPayload(settings, raw, '{"moments":[{"content":"...","imageKeyword":"...","comments":["..."]}]}')
+  const personaContext = entries.map((entry) => `Poster ${entry.poster.name}: ${entry.poster.systemPrompt}\nTrait: ${entry.poster.personalityTrait || 'none'}\nCommenters: ${entry.commenters.filter((commenter) => commenter.willComment).map((commenter) => `${commenter.contact.name}: ${commenter.contact.systemPrompt}`).join(' | ') || 'none'}`).join('\n\n')
+  const reviewedRaw = await reviewMomentPayload(settings, raw, '{"moments":[{"content":"...","imageKeyword":"...","comments":["..."]}]}', personaContext)
   const parsed = parseMomentsResponse(reviewedRaw, expectedCommentCounts)
   if (!parsed) return { postedCount: 0, message: '生成失败 请再刷新试试' }
 
@@ -480,7 +482,8 @@ export async function postUserMoment(content: string, settings: AppSettings): Pr
         jsonMode: true,
         purpose: 'moments',
       })
-      const reviewedRaw = await reviewMomentPayload(settings, raw, '{"comments":["..."]}')
+      const personaContext = commenterPlans.map(({ contact }) => `${contact.name}: ${contact.systemPrompt}\nTrait: ${contact.personalityTrait || 'none'}\nRelationship: ${contact.relationshipBase || 'friend'}`).join('\n\n')
+      const reviewedRaw = await reviewMomentPayload(settings, raw, '{"comments":["..."]}', personaContext)
       comments = parseCommentsResponse(reviewedRaw, commenterPlans.length) ?? []
     } catch {
       // reactions are a nice-to-have; the moment itself already posted successfully

@@ -77,14 +77,14 @@ export async function draftReply(
     apiKey: settings.apiKey,
     baseUrl: settings.baseUrl,
     model: settings.model,
-    maxTokens: 180,
+    maxTokens: 800,
     purpose: 'other',
     messages: [
       {
         role: 'system',
         content: `你是用户的即时消息代写助手。直接替用户写一条现在可以发送的回复，不要分析、标题、策略说明、引号或 Markdown。
 必须自然贴合用户的个人简介、当前聊天语境与对方设定；可使用给出的世界观、关系、记忆、日程和近期社交事件，但不能编造事实、泄露其他私聊内容或替用户作超出上下文的承诺。
-回复务必简短：优先 1 句，最多 2 句，控制在 60 个中文字符左右。不要有 AI 腔、复述总结或无意义客套。
+回复长度应服从当前语境：简单时可简短，用户需要解释、安慰、澄清或展开讨论时可以自然写完整；不要机械限字，也不要有 AI 腔、复述总结或无意义客套。
 
 【用户资料】
 ${userProfileText(settings)}

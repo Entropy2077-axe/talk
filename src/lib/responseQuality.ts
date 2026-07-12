@@ -111,6 +111,7 @@ export async function validatePrivateTurn(opts: {
   const systemPrompt = `You are a strict roleplay response reviewer. Output JSON only: {"valid":true/false,"reason":"short","fixedRaw":"optional"}.
 Mandatory primary check: logical grounding. Decide whether the reply's inference is tightly supported by its premises: persona/identity, memory, relationship, mood, location, schedule/plans, recent events,${opts.worldbookText ? ' worldbook (see user prompt),' : ''} and the latest user message.
 Then check: (1) reply fits persona and personality trait, (2) never violates user-authored persona constraints, (3) answers user, (4) no invented facts — BUT worldbook entries define canonical world rules; content grounded in an active worldbook entry is NOT "invented" even if it seems fantastical, (5) mood/thought are present. A trait may be subtle, but a reply that directly contradicts its behavioral anchor is invalid.
+Treat persona adherence as a logical validity requirement, not a style preference. When facts allow more than one reply, the selected reply must be the one this particular persona would naturally choose. Reject a generic, flattened response if the persona's special trait, stated boundary, habit, MBTI, or behavioral anchor should materially affect motivation, tone, initiative, or emotional reaction in this situation.
 If the prose feels good but the premise→reply logic is weak, unsupported, contradictory, or loosely associated, it is invalid.
 If valid, return valid=true.
 If invalid, rewrite as fixedRaw. Must include mood and thought: {"messages":[{"type":"text","content":"..."}],"mood":"15字情绪","thought":"30字内心想法 和嘴上说的不一样"}. Keep it short.`
@@ -170,6 +171,7 @@ export async function validateGroupTurn(opts: {
 ${opts.worldbookText}` : ''
   const systemPrompt = `You are a strict group-chat response reviewer. Output JSON only: {"valid":true/false,"reason":"short","fixedRaw":"optional"}.
 Judge whether each speaker follows their persona, the reply handles @mentions/replies, and the scene remains a natural group chat rather than several private replies to the user.
+Persona is a hard logical premise for every speaker: reject a speaker whose response could be factually possible but is generic or contradicts the speaker's stated trait, boundary, habit, MBTI, or behavior anchor. In any plausible alternative, require the response that best reflects that speaker's distinctive personality without inventing facts.
 Also check the protocol: speakerIndex must be one of the listed speakers; content must not contain leaked <name>, speaker-name prefixes, parenthesized thoughts, bracketed moods, or wrapping quotes; every message must include non-empty thought and mood, and they must not leak into content; groupVibe must be present and non-empty.${opts.worldbookText ? ' Content grounded in an active worldbook entry is NOT "invented facts" — worldbook defines canon world rules.' : ''}
 If valid, return valid=true and omit fixedRaw.
 If invalid, rewrite fixedRaw using this exact protocol JSON: {"messages":[{"speakerIndex":1,"speakerName":"...","type":"text","content":"...","thought":"...","mood":"..."}],"turnSummary":"...","groupVibe":"...","knowledgeQueries":[]}. Only use listed speakerIndex values. Keep it short.`
@@ -240,6 +242,7 @@ export async function validateGroupDraft(opts: {
 7. 草稿是否像真实群聊，而不是每个人机械回答用户。
 8. 草稿是否过度复读同一个特殊词、梗、比喻、称号或外号；如果多名AI都围绕同一个词解释/吐槽/复述，应判为无效。
 9. 草稿是否有话题推进；如果同一个梗已经被反复接住，除非用户明确继续问这个梗，否则应该收束或自然转到相邻话题。
+10. 每位发言人是否把人设、用户补充约束、结构化人设、MBTI 和特色人格当作逻辑前提；如果事实允许多种回应，是否选择了最符合该角色的反应，而非泛化的普通聊天口吻。违反即无效。
 
 只要违反任一必需规则，就 valid=false，并用一句话指出最重要的问题。${opts.worldbookText ? `\n\n注意：以下世界书条目定义了这个世界的规则。草稿中符合世界书设定的内容不属于"编造"或"偏离人设"，是合理的世界构建。\n世界书：\n${opts.worldbookText}` : ''}`,
         },

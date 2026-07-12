@@ -478,7 +478,7 @@ export function ChatPage() {
           const previousMessage = messages[index - 1]
           const showConversationTime = !previousMessage || m.createdAt - previousMessage.createdAt > 10 * 60 * 1000
           const msgBubble = (
-            <div key={m.id} className="animate-[message-in_180ms_ease-out]">
+            <div className="animate-[message-in_180ms_ease-out]">
               {showConversationTime && <p className="my-4 text-center text-[11px] text-gray-400">{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>}
               <MessageBubble
               ref={(el) => {
@@ -507,7 +507,7 @@ export function ChatPage() {
           const showThought = mindReadingEnabled && m.thought && m.role === 'assistant'
           if (showThought) {
             return (
-              <div key={m.id}>
+              <div key={`thought-${m.id}`}>
                 {msgBubble}
                 <div className="flex justify-start px-3">
                   <div className="ml-10 max-w-[85%]">
@@ -522,7 +522,7 @@ export function ChatPage() {
               </div>
             )
           }
-          return msgBubble
+          return <div key={`message-${m.id}`}>{msgBubble}</div>
         })}
       </div>
 
