@@ -1,5 +1,7 @@
-import { WarehousePage } from '../pages/WarehousePage'
+import { lazy } from 'react'
 import type { FeatureModule } from './types'
+
+const WarehousePage = lazy(() => import('../pages/WarehousePage').then(({ WarehousePage }) => ({ default: WarehousePage })))
 
 export const warehouseModule: FeatureModule = {
   id: 'warehouse',

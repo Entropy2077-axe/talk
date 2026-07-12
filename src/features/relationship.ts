@@ -1,5 +1,7 @@
-import { RelationshipsPage } from '../pages/RelationshipsPage'
+import { lazy } from 'react'
 import type { FeatureModule } from './types'
+
+const RelationshipsPage = lazy(() => import('../pages/RelationshipsPage').then(({ RelationshipsPage }) => ({ default: RelationshipsPage })))
 
 export const relationshipModule: FeatureModule = {
   id: 'relationship',

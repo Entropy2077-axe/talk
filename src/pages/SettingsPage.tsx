@@ -26,6 +26,7 @@ export function SettingsPage() {
     tavilyApiKey,
     pexelsApiKey,
     themeMode,
+    animationsEnabled,
     chatBackground,
     currencyIconMode,
     customCurrencyEmoji,
@@ -50,11 +51,7 @@ export function SettingsPage() {
   const backgroundInputRef = useRef<HTMLInputElement | null>(null)
 
   async function handleWipeContacts() {
-    await db.transaction('rw', db.contacts, db.conversations, db.messages, async () => {
-      await db.messages.clear()
-      await db.conversations.clear()
-      await db.contacts.clear()
-    })
+    await Promise.all([db.messages.clear(), db.conversations.clear(), db.contacts.clear(), db.groups.clear(), db.moments.clear(), db.momentComments.clear(), db.momentLikes.clear(), db.contactRelations.clear(), db.contactMemories.clear(), db.socialEvents.clear(), db.groupPlans.clear(), db.contactLifeStates.clear(), db.lifeEvents.clear(), db.simulationState.clear(), db.aiUsageRecords.clear(), db.aiTurns.clear(), db.adminLogs.clear(), db.adminAiTraces.clear()])
     navigate('/contacts')
   }
 
@@ -231,6 +228,20 @@ export function SettingsPage() {
                 (themeMode ?? 'light') === 'dark' ? 'translate-x-5' : 'translate-x-0'
               }`}
             />
+          </button>
+        </div>
+        <div className="mb-3 flex items-center justify-between border-t border-gray-100 pt-3">
+          <div>
+            <p className="text-sm text-gray-800">界面动效</p>
+            <p className="mt-0.5 text-[11px] text-gray-400">切换、提示与消息出现的轻量动画</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSettings({ animationsEnabled: !(animationsEnabled ?? true) })}
+            aria-label="切换界面动效"
+            className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${(animationsEnabled ?? true) ? 'bg-gray-900' : 'bg-gray-200'}`}
+          >
+            <span className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white transition-transform ${(animationsEnabled ?? true) ? 'translate-x-5' : 'translate-x-0'}`} />
           </button>
         </div>
 

@@ -1,5 +1,7 @@
-import { MoodSettingsPage } from '../pages/MoodSettingsPage'
+import { lazy } from 'react'
 import type { FeatureModule } from './types'
+
+const MoodSettingsPage = lazy(() => import('../pages/MoodSettingsPage').then(({ MoodSettingsPage }) => ({ default: MoodSettingsPage })))
 
 export const moodModule: FeatureModule = {
   id: 'mood',

@@ -3,6 +3,11 @@ export interface Contact {
   id: string
   name: string // the persona's own name, chosen by the AI at creation time — not user-renameable
   remark?: string // user's own nickname for this contact, like a real contacts app; overrides name for display
+  /** Public identity facts. `name` remains the generated display nickname for compatibility. */
+  realName?: string
+  nickname?: string
+  gender?: string
+  birthday?: string // YYYY-MM-DD
   avatar: string // emoji or data URL
   avatarColor: string // fallback background color
   systemPrompt: string // persona description generated at creation time — never shown to the user, never edited after creation
@@ -85,6 +90,8 @@ export interface ScheduleOverride {
   location: string
   activity: string
   summary: string // short human-facing text shown in the chat bubble, e.g. "周三晚上：一起吃烧烤"
+  /** Conversation-derived plans take precedence over the generated weekly routine. */
+  priority?: 'special'
   createdAt: number
 }
 
@@ -208,7 +215,13 @@ export type SocialEventType =
   | 'moment_posted'
   | 'moment_liked'
   | 'moment_commented'
+  | 'group_turn'
   | 'group_targeted_message'
+  | 'group_plan_created'
+  | 'group_plan_confirmed'
+  | 'group_plan_completed'
+  | 'group_plan_cancelled'
+  | 'group_plan_aftermath'
   | 'message_feedback'
 
 export interface SocialEvent {
@@ -254,11 +267,29 @@ export interface Group {
   energyLevel?: GroupEnergyLevel // controls how many bubbles each selected speaker tends to send
   memoryTurnCount?: number // number of AI turns folded into group.memory; used to compress every few turns
   createdAt: number
+  momentSharing?: 'enabled' | 'relationshipOnly' | 'private'
   memoryMessageCursor?: number // how many of this group's messages have already been folded into members' memory (see memory.ts) — optional since it predates group memory
 }
 
+export type GroupPlanStatus = 'pending' | 'confirmed' | 'completed' | 'cancelled'
+
+export interface GroupPlan {
+  id: string
+  groupId: string
+  sourceConversationId: string
+  sourceMessageId?: string
+  title: string
+  summary: string
+  scheduledAt?: number
+  location?: string
+  participantContactIds: string[]
+  status: GroupPlanStatus
+  createdAt: number
+  resolvedAt?: number
+}
+
 export type MessageRole = 'user' | 'assistant'
-export type MessageType = 'text' | 'sticker' | 'image' | 'link' | 'gift' | 'scheduleChange' | 'transfer' | 'redPacket' | 'loanRequest' | 'loanResult' | 'repayment'
+export type MessageType = 'text' | 'sticker' | 'image' | 'link' | 'gift' | 'scheduleChange' | 'groupPlan' | 'transfer' | 'redPacket' | 'loanRequest' | 'loanResult' | 'repayment'
 export type GroupSpeakerLimit = 2 | 3 | 4 | 5 | 'all'
 export type GroupEnergyLevel = 'cold' | 'normal' | 'lively'
 
@@ -297,6 +328,7 @@ export interface Message {
   gift?: GiftPayload
   image?: { url: string; caption?: string; photographer?: string; photographerUrl?: string; query?: string }
   scheduleChange?: ScheduleChangePayload
+  groupPlanId?: string
   finance?: FinanceMessagePayload
   bubbleGroupId?: string // groups bubbles emitted from one AI response
   speakerContactId?: string // group chats only: which member persona spoke this assistant bubble
@@ -393,6 +425,7 @@ export interface AppSettings {
   chatBackground?: string // empty = default; otherwise a CSS color or data URL used behind chat messages
   currencyIconMode?: 'coin' | 'emoji' | 'yen' | 'dollar'
   customCurrencyEmoji?: string
+  animationsEnabled?: boolean
   /** How long an AI mood lasts before expiring (ms). Default 30 min. */
   moodExpiryMs: number
   /** Shared output of the self-iteration learner: expression habits plus decontextualized user boundaries/preferences. */
@@ -401,6 +434,10 @@ export interface AppSettings {
   /** Feature-module toggles — see src/features/. Every module id listed here is active. */
   enabledModules: string[]
 }
+
+export interface AdminLogRecord { id: string; level: 'log' | 'info' | 'warn' | 'error'; message: string; createdAt: number }
+export interface AdminAiTrace { id: string; purpose: AiUsagePurpose; model: string; messages: { role: string; content: string }[]; output?: string; error?: string; inputTokens: number; outputTokens: number; createdAt: number }
+export interface SaveSlot { id: string; slot: number; name: string; createdAt: number; updatedAt: number; snapshot: unknown }
 
 export type WalletOwnerId = 'user' | string
 export type WalletTransactionKind = 'migration' | 'salary' | 'purchase' | 'transfer' | 'red_packet' | 'loan' | 'repayment' | 'admin_adjustment'
@@ -621,6 +658,19 @@ export interface ContactCreatorProfile {
   notes: string
 }
 
+export interface SavedPersona {
+  id: string
+  name?: string
+  nickname?: string
+  realName?: string
+  birthday?: string
+  createdAt: number
+  updatedAt: number
+  profile: ContactCreatorProfile
+  personaConstraints?: string
+  customPersonalityTraits?: CustomPersonalityTrait[]
+}
+
 export interface ProactiveTopicRecord {
   topic: string
   source: 'event' | 'open_thread' | 'memory' | 'plan' | 'schedule' | 'career' | 'casual'
@@ -665,6 +715,7 @@ export interface GroupAiResponse {
   messages: GroupAiBubble[]
   turnSummary?: string
   groupVibe: string
+  planCandidates?: { title: string; summary: string; participantIndexes: number[]; location?: string }[]
   memoryCandidates?: { contactName: string; content: string }[]
   knowledgeQueries?: string[]
 }

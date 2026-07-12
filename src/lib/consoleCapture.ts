@@ -1,4 +1,6 @@
 import { create } from 'zustand'
+import { v4 as uuid } from 'uuid'
+import { db } from '../db/db'
 
 /**
  * Captures console output app-wide into an in-memory buffer, viewable from
@@ -20,12 +22,12 @@ interface ConsoleCaptureStore {
   clear: () => void
 }
 
-const MAX_LOGS = 300
+const MAX_LOGS = 1000
 let nextId = 0
 
 export const useConsoleCaptureStore = create<ConsoleCaptureStore>((set) => ({
   logs: [],
-  clear: () => set({ logs: [] }),
+  clear: () => { set({ logs: [] }); void db.adminLogs.clear() },
 }))
 
 function formatArg(arg: unknown): string {
@@ -40,9 +42,14 @@ function formatArg(arg: unknown): string {
 
 function push(level: CapturedLog['level'], args: unknown[]) {
   const message = args.map(formatArg).join(' ')
+  const record = { id: uuid(), level, message, createdAt: Date.now() }
   useConsoleCaptureStore.setState((s) => ({
-    logs: [...s.logs, { id: nextId++, level, message, timestamp: Date.now() }].slice(-MAX_LOGS),
+    logs: [...s.logs, { id: nextId++, level, message, timestamp: record.createdAt }].slice(-MAX_LOGS),
   }))
+  void db.adminLogs.add(record).then(async () => {
+    const overflow = (await db.adminLogs.orderBy('createdAt').toArray()).slice(0, -MAX_LOGS)
+    if (overflow.length) await db.adminLogs.bulkDelete(overflow.map((item) => item.id))
+  }).catch(() => {})
 }
 
 let installed = false
@@ -50,6 +57,9 @@ let installed = false
 export function installConsoleCapture(): void {
   if (installed) return
   installed = true
+  void db.adminLogs.orderBy('createdAt').toArray().then((records) => {
+    useConsoleCaptureStore.setState({ logs: records.slice(-MAX_LOGS).map((record, index) => ({ id: index, level: record.level, message: record.message, timestamp: record.createdAt })) })
+  }).catch(() => {})
   const original = {
     log: console.log.bind(console),
     info: console.info.bind(console),

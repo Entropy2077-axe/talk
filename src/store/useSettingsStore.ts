@@ -47,11 +47,12 @@ export const useSettingsStore = create<SettingsState>()(
       topInsetAdjustmentPx: 0,
       chatBackground: '',
       currencyIconMode: 'coin',
+      animationsEnabled: true,
       customCurrencyEmoji: '💎',
       moodExpiryMs: 30 * 60 * 1000,
       selfIterationGlobalPrompt: '',
       adminModeEnabled: false,
-      enabledModules: ['shop', 'warehouse', 'worldview', 'knowledgeBase', 'relationship', 'personalityTraits', 'mood', 'intent', 'storyOutline', 'career'],
+      enabledModules: ['shop', 'warehouse', 'worldview', 'knowledgeBase', 'relationship', 'personalityTraits', 'intent', 'storyOutline', 'career'],
       setSettings: (patch) => set(patch),
     }),
     {
@@ -78,6 +79,8 @@ export const useSettingsStore = create<SettingsState>()(
         if (typeof next.topInsetAdjustmentPx !== 'number') next.topInsetAdjustmentPx = 0
         if (typeof next.worldbookMigrationCompleted !== 'boolean') next.worldbookMigrationCompleted = false
         if (typeof next.automaticAiDailyCap !== 'number') next.automaticAiDailyCap = 0
+        if (typeof next.animationsEnabled !== 'boolean') next.animationsEnabled = true
+        if (Array.isArray(next.enabledModules)) next.enabledModules = next.enabledModules.filter((id) => id !== 'mood')
         return next
       },
     },

@@ -1,34 +1,39 @@
-import { useEffect, useMemo } from 'react'
-import { Route, Routes } from 'react-router-dom'
+import { lazy, Suspense, useEffect, useMemo, type ElementType } from 'react'
+import { Route, Routes, useLocation } from 'react-router-dom'
 import { App as CapacitorApp } from '@capacitor/app'
 import { useSettingsStore } from './store/useSettingsStore'
 import { refreshMoments } from './lib/moments'
 import { maybeTriggerProactiveMessage } from './lib/proactiveChat'
 import { installConsoleCapture } from './lib/consoleCapture'
 import { TabLayout } from './components/TabLayout'
-import { MessagesPage } from './pages/MessagesPage'
-import { ContactsPage } from './pages/ContactsPage'
-import { DiscoverPage } from './pages/DiscoverPage'
-import { MePage } from './pages/MePage'
-import { ChatPage } from './pages/ChatPage'
-import { ContactCardPage } from './pages/ContactCardPage'
-import { ContactAddPage } from './pages/ContactAddPage'
-import { GroupAddPage } from './pages/GroupAddPage'
-import { GroupInfoPage } from './pages/GroupInfoPage'
-import { MomentsPage } from './pages/MomentsPage'
-import { SettingsPage } from './pages/SettingsPage'
-import { StickersPage } from './pages/StickersPage'
-import { ProfileEditPage } from './pages/ProfileEditPage'
-import { ModulesPage } from './pages/ModulesPage'
-import { SkyEyePage } from './pages/SkyEyePage'
 import { ALL_MODULES, useModuleEnabled } from './features'
 import { NotificationBanner } from './components/NotificationBanner'
+import { AppErrorBoundary } from './components/AppErrorBoundary'
 import { ensureWallets, settleSalaries } from './lib/finance'
 import { ensureLegacyWorldviewMigrated } from './lib/worldbook'
 import { runLifeSimulation } from './lib/lifeSimulation'
 // Runs once at module load, regardless of admin mode — so there's already
 // log history by the time someone opens "天眼".
 installConsoleCapture()
+
+// Most pages are only opened occasionally. Loading them on demand keeps the
+// first chat-list render small, particularly on older Android WebViews.
+const MessagesPage = lazy(() => import('./pages/MessagesPage').then(({ MessagesPage }) => ({ default: MessagesPage })))
+const ContactsPage = lazy(() => import('./pages/ContactsPage').then(({ ContactsPage }) => ({ default: ContactsPage })))
+const DiscoverPage = lazy(() => import('./pages/DiscoverPage').then(({ DiscoverPage }) => ({ default: DiscoverPage })))
+const MePage = lazy(() => import('./pages/MePage').then(({ MePage }) => ({ default: MePage })))
+const ChatPage = lazy(() => import('./pages/ChatPage').then(({ ChatPage }) => ({ default: ChatPage })))
+const ContactCardPage = lazy(() => import('./pages/ContactCardPage').then(({ ContactCardPage }) => ({ default: ContactCardPage })))
+const ContactAddPage = lazy(() => import('./pages/ContactAddPage').then(({ ContactAddPage }) => ({ default: ContactAddPage })))
+const GroupAddPage = lazy(() => import('./pages/GroupAddPage').then(({ GroupAddPage }) => ({ default: GroupAddPage })))
+const GroupInfoPage = lazy(() => import('./pages/GroupInfoPage').then(({ GroupInfoPage }) => ({ default: GroupInfoPage })))
+const MomentsPage = lazy(() => import('./pages/MomentsPage').then(({ MomentsPage }) => ({ default: MomentsPage })))
+const SettingsPage = lazy(() => import('./pages/SettingsPage').then(({ SettingsPage }) => ({ default: SettingsPage })))
+const StickersPage = lazy(() => import('./pages/StickersPage').then(({ StickersPage }) => ({ default: StickersPage })))
+const ProfileEditPage = lazy(() => import('./pages/ProfileEditPage').then(({ ProfileEditPage }) => ({ default: ProfileEditPage })))
+const ModulesPage = lazy(() => import('./pages/ModulesPage').then(({ ModulesPage }) => ({ default: ModulesPage })))
+const SkyEyePage = lazy(() => import('./pages/SkyEyePage').then(({ SkyEyePage }) => ({ default: SkyEyePage })))
+const SocialInboxPage = lazy(() => import('./pages/SocialInboxPage').then(({ SocialInboxPage }) => ({ default: SocialInboxPage })))
 
 /**
  * "Looks autonomous while the app is open" — a foreground timer that
@@ -39,6 +44,7 @@ installConsoleCapture()
  */
 function useAutonomousBehaviorTimer() {
   const enabled = useModuleEnabled('proactiveChat')
+  const intervalMs = useSettingsStore((s) => s.proactiveTickIntervalMs)
 
   useEffect(() => {
     if (!enabled) return
@@ -48,9 +54,9 @@ function useAutonomousBehaviorTimer() {
       refreshMoments(settings).catch(() => {})
       maybeTriggerProactiveMessage(settings).catch(() => {})
     }
-    const id = setInterval(tick, useSettingsStore.getState().proactiveTickIntervalMs)
+    const id = setInterval(tick, intervalMs)
     return () => clearInterval(id)
-  }, [enabled])
+  }, [enabled, intervalMs])
 }
 
 /**
@@ -83,8 +89,10 @@ function App() {
   useAutonomousBehaviorTimer()
   useAndroidBackButton()
   const themeMode = useSettingsStore((s) => s.themeMode ?? 'light')
+  const animationsEnabled = useSettingsStore((s) => s.animationsEnabled ?? true)
   const adminModeEnabled = useSettingsStore((s) => s.adminModeEnabled)
   const enabledModules = useSettingsStore((s) => s.enabledModules)
+  const location = useLocation()
   useEffect(() => { void ensureWallets().then(() => settleSalaries()) }, [enabledModules])
   useEffect(() => {
     const resume = () => { if (document.visibilityState === 'visible') void runLifeSimulation() }
@@ -97,7 +105,7 @@ function App() {
   // Build deduplicated route list from enabled modules.
   const moduleRoutes = useMemo(() => {
     const seen = new Set<string>()
-    const routes: { path: string; Component: React.ComponentType }[] = []
+    const routes: { path: string; Component: ElementType }[] = []
     for (const m of ALL_MODULES) {
       if (!enabledModules.includes(m.id)) continue
       for (const r of m.routes ?? []) {
@@ -112,11 +120,24 @@ function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = themeMode
   }, [themeMode])
+  useEffect(() => {
+    document.documentElement.dataset.animations = animationsEnabled ? 'on' : 'off'
+  }, [animationsEnabled])
+  useEffect(() => {
+    if (!animationsEnabled) return
+    const shell = document.querySelector<HTMLElement>('.app-shell')
+    if (!shell) return
+    shell.classList.remove('page-transition')
+    void shell.offsetWidth
+    shell.classList.add('page-transition')
+  }, [location.pathname, animationsEnabled])
 
   return (
-    <div className={`app-shell ${themeMode === 'dark' ? 'theme-dark' : ''}`}>
-      <NotificationBanner />
-      <Routes>
+    <AppErrorBoundary key={location.key}>
+      <div className={`app-shell ${themeMode === 'dark' ? 'theme-dark' : ''}`}>
+        <NotificationBanner />
+        <Suspense fallback={<main className="flex flex-1 items-center justify-center bg-[#f4f4f6] text-sm text-gray-400">正在打开…</main>}>
+          <Routes>
         <Route element={<TabLayout />}>
           <Route path="/" element={<MessagesPage />} />
           <Route path="/contacts" element={<ContactsPage />} />
@@ -129,6 +150,7 @@ function App() {
         <Route path="/group/new" element={<GroupAddPage />} />
         <Route path="/group/:groupId" element={<GroupInfoPage />} />
         <Route path="/moments" element={<MomentsPage />} />
+        <Route path="/social-inbox" element={<SocialInboxPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/stickers" element={<StickersPage />} />
         <Route path="/profile/edit" element={<ProfileEditPage />} />
@@ -139,8 +161,10 @@ function App() {
         {adminModeEnabled && (
           <Route path="/sky-eye" element={<SkyEyePage />} />
         )}
-      </Routes>
-    </div>
+          </Routes>
+        </Suspense>
+      </div>
+    </AppErrorBoundary>
   )
 }
 

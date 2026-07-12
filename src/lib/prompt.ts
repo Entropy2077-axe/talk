@@ -258,7 +258,10 @@ export function buildSystemPromptSections(opts: {
     opts.linkApps.length > 0
       ? opts.linkApps.map((l) => `- ${l.app}: ${l.desc}`).join('\n')
       : '（当前没有可用小程序）'
-  const protocol = FIXED_PROTOCOL_PROMPT.replace('{{STICKERS}}', stickersText).replace('{{LINKS}}', linksText)
+  const protocol = `${FIXED_PROTOCOL_PROMPT.replace('{{STICKERS}}', stickersText).replace('{{LINKS}}', linksText)}
+
+【心情硬规则】
+mood 只能从以下 emoji 中选择一个，不能输出文字说明：😀 😊 🥰 😌 😶 😴 🤔 😳 🥺 😟 😠 😤 😞 😭 😈。`
 
   // Brief format reminder at the very beginning, before any role/content.
   const formatReminder = '⚠️ 你的整个回复必须是一个JSON对象 格式见最后的【输出格式】章节。不要输出纯文本、不要加解释、不要用markdown代码块。mood和thought字段必填不能为空。'
@@ -358,6 +361,9 @@ export interface PersonaAnswers {
 
 export interface PersonaGenerationResult {
   name: string
+  realName?: string
+  nickname?: string
+  birthday?: string
   persona: string
   schedule: ScheduleBlock[]
   avatarKeyword: string
@@ -396,6 +402,9 @@ export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCate
 请你设计一个具体的人 输出如下JSON:
 {
   "name": "这个人的名字或者网名",
+  "realName": "真实姓名",
+  "nickname": "网名/昵称",
+  "birthday": "YYYY-MM-DD",
   "persona": "第三人称描述这个人的性格、说话习惯、大概的背景和生活状态、和用户的关系细节 写成一段自然语言 200到400字之间 要具体真实 不要写成产品说明书",
   "mbti": "这个人的MBTI类型 根据你设计的人设推断最符合的四字母 比如INFP/ESTJ/INTJ等 必须是一个有效的MBTI类型",
   "speechSamples": ["[日常] 一句符合这个人说话方式的短消息", "[被关心] 一句短消息", "[情绪触发] 一句短消息", "[亲近互动] 一句短消息"],
@@ -409,6 +418,7 @@ export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCate
 
 要求:
 - name要符合年龄段和性别 可以是真实姓名也可以是网名/昵称 不要用"AI""助手""小美"这种明显是虚构工具人的名字 除非用户明确要求
+- realName、nickname、birthday 均为必填：realName 是自然可信的真名，nickname 是日常网名/昵称；birthday 必须为 YYYY-MM-DD，并根据给出的年龄段换算合理出生年份。用户在补充要求中给出的身份资料优先，只有明确留空时才由你补全。
 - persona里要体现性格倾向和关系定位 但要写得像在描述一个真实存在的普通人 而不是罗列标签
 - persona和schedule必须明确符合所选职业 monthlySalary按现实人民币尺度生成1000到200000之间的整数
 - personaProfile必须忠实提取补充要求中的明确事实，不得遗漏、改写或用推测补充；每个数组0到6条，简短具体
@@ -443,6 +453,9 @@ export function parsePersonaGeneration(raw: string): PersonaGenerationResult | n
       return {
         avatarKeyword: typeof parsed.avatarKeyword === 'string' ? parsed.avatarKeyword.trim() : '',
         name: parsed.name.trim(),
+        realName: typeof parsed.realName === 'string' ? parsed.realName.trim().slice(0, 40) : undefined,
+        nickname: typeof parsed.nickname === 'string' ? parsed.nickname.trim().slice(0, 40) : undefined,
+        birthday: typeof parsed.birthday === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.birthday.trim()) ? parsed.birthday.trim() : undefined,
         persona: parsed.persona.trim(),
         schedule: validateScheduleBlocks(parsed.schedule),
         personalityTrait: PERSONALITY_TRAIT_OPTIONS.some((opt) => opt.value === trait) ? trait : '无',

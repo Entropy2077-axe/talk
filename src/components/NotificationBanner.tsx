@@ -26,7 +26,7 @@ export function NotificationBanner() {
         navigate(`/chat/${notification.conversationId}`)
         dismissNotification()
       }}
-      className="absolute left-2 right-2 top-2 z-50 flex items-center gap-2.5 rounded-2xl bg-white p-3 text-left shadow-lg ring-1 ring-black/5"
+      className="absolute left-2 right-2 top-2 z-50 flex animate-[notice-in_180ms_ease-out] items-center gap-2.5 rounded-2xl bg-white p-3 text-left shadow-lg ring-1 ring-black/5"
       style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.75rem)' }}
     >
       <Avatar avatar={notification.contactAvatar} color={notification.contactAvatarColor} size={36} />

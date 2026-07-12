@@ -3,6 +3,8 @@ export interface ChatMessage {
   content: string
 }
 import { assertAutomaticAiBudget, estimateTokens, recordAiUsage } from './aiUsage'
+import { v4 as uuid } from 'uuid'
+import { db } from '../db/db'
 import type { AiUsagePurpose } from '../types'
 
 /**
@@ -29,6 +31,14 @@ export function coalesceConsecutiveRoles(messages: ChatMessage[]): ChatMessage[]
 
 function normalizeBaseUrl(baseUrl: string) {
   return baseUrl.replace(/\/+$/, '')
+}
+
+async function traceAiCall(opts: { purpose: AiUsagePurpose; model: string; messages: ChatMessage[]; output?: string; error?: string; inputTokens: number; outputTokens: number }) {
+  try {
+    await db.adminAiTraces.add({ id: uuid(), ...opts, createdAt: Date.now() })
+    const overflow = (await db.adminAiTraces.orderBy('createdAt').toArray()).slice(0, -500)
+    if (overflow.length) await db.adminAiTraces.bulkDelete(overflow.map((item) => item.id))
+  } catch {}
 }
 
 export async function listModels(apiKey: string, baseUrl: string): Promise<string[]> {
@@ -88,6 +98,7 @@ export async function chatCompletion(opts: {
   jsonMode?: boolean
   purpose?: AiUsagePurpose
   automatic?: boolean
+  maxTokens?: number
 }): Promise<string> {
   const purpose = opts.purpose ?? 'other'
   const automatic = opts.automatic ?? false
@@ -106,6 +117,7 @@ export async function chatCompletion(opts: {
       messages: opts.messages,
       ...(opts.jsonMode ? { response_format: { type: 'json_object' } } : {}),
       temperature: 1.1,
+      ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
     }),
   })
   if (!res.ok) {
@@ -120,9 +132,32 @@ export async function chatCompletion(opts: {
   const promptTokens = Number(json?.usage?.prompt_tokens)
   const completionTokens = Number(json?.usage?.completion_tokens)
   await recordAiUsage({ purpose, model: opts.model, automatic, success: true, inputTokens: Number.isFinite(promptTokens) ? promptTokens : inputTokens, outputTokens: Number.isFinite(completionTokens) ? completionTokens : estimateTokens(content), estimated: !Number.isFinite(promptTokens) || !Number.isFinite(completionTokens) })
+  await traceAiCall({ purpose, model: opts.model, messages: opts.messages, output: content, inputTokens: Number.isFinite(promptTokens) ? promptTokens : inputTokens, outputTokens: Number.isFinite(completionTokens) ? completionTokens : estimateTokens(content) })
   return content
   } catch (error) {
-    await recordAiUsage({ purpose, model: opts.model, automatic, success: false, inputTokens, outputTokens: 0, estimated: true, error: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200) })
+  await recordAiUsage({ purpose, model: opts.model, automatic, success: false, inputTokens, outputTokens: 0, estimated: true, error: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200) })
+    await traceAiCall({ purpose, model: opts.model, messages: opts.messages, error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500), inputTokens, outputTokens: 0 })
     throw error
   }
+}
+
+export async function chatCompletionStream(opts: Omit<Parameters<typeof chatCompletion>[0], 'jsonMode'> & { onDelta: (text: string) => void }): Promise<string> {
+  const purpose = opts.purpose ?? 'other'
+  const inputTokens = opts.messages.reduce((sum, message) => sum + estimateTokens(message.content), 0)
+  const res = await fetch(`${normalizeBaseUrl(opts.baseUrl)}/v1/chat/completions`, { method: 'POST', signal: opts.signal, headers: { Authorization: `Bearer ${opts.apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: opts.model, messages: opts.messages, stream: true, temperature: 1.1, ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}) }) })
+  if (!res.ok || !res.body) throw new Error(`API请求失败 HTTP ${res.status}`)
+  const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let output = ''
+  while (true) {
+    const { done, value } = await reader.read(); if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n'); buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue
+      const data = line.slice(5).trim(); if (!data || data === '[DONE]') continue
+      try { const delta = JSON.parse(data)?.choices?.[0]?.delta?.content; if (typeof delta === 'string') { output += delta; opts.onDelta(delta) } } catch {}
+    }
+  }
+  await recordAiUsage({ purpose, model: opts.model, automatic: opts.automatic ?? false, success: true, inputTokens, outputTokens: estimateTokens(output), estimated: true })
+  await traceAiCall({ purpose, model: opts.model, messages: opts.messages, output, inputTokens, outputTokens: estimateTokens(output) })
+  return output
 }

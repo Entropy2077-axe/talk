@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react'
+import type { ElementType } from 'react'
 
 export interface FeatureModule {
   id: string
@@ -8,7 +8,7 @@ export interface FeatureModule {
   /** Parent module id — sub-modules are grouped under a parent in the UI */
   parentId?: string
   /** Route definitions — only registered when module is enabled */
-  routes?: { path: string; component: ComponentType }[]
+  routes?: { path: string; component: ElementType }[]
   /** Discover page entries — only shown when module is enabled */
   discoverEntries?: { to: string; icon: string; label: string }[]
   /** Prompt link apps (mini-programs) — only included when module is enabled */

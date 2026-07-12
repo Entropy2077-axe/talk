@@ -1,5 +1,7 @@
-import { KnowledgeBasePage } from '../pages/KnowledgeBasePage'
+import { lazy } from 'react'
 import type { FeatureModule } from './types'
+
+const KnowledgeBasePage = lazy(() => import('../pages/KnowledgeBasePage').then(({ KnowledgeBasePage }) => ({ default: KnowledgeBasePage })))
 
 export const knowledgeBaseModule: FeatureModule = {
   id: 'knowledgeBase',

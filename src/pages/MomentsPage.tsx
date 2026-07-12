@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
@@ -6,7 +7,7 @@ import { TopBar } from '../components/TopBar'
 import { Avatar } from '../components/Avatar'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { displayName } from '../lib/contact'
-import { generateMomentReply, parseCommentSticker, postUserMoment, refreshMoments } from '../lib/moments'
+import { generateMomentDiscussion, parseCommentSticker, postUserMoment, refreshMoments } from '../lib/moments'
 import { recordSocialEvent } from '../lib/socialEvents'
 import { resizeImageDataUrl } from '../lib/image'
 import { formatListTime } from '../lib/time'
@@ -15,6 +16,8 @@ import type { Contact, MomentComment, MomentLike } from '../types'
 const EMPTY_ARRAY: never[] = []
 
 export function MomentsPage() {
+  const [searchParams] = useSearchParams()
+  const focusMomentId = searchParams.get('focus')
   const settings = useSettingsStore()
   const moments = useLiveQuery(() => db.moments.orderBy('createdAt').reverse().toArray(), []) ?? EMPTY_ARRAY
   const contacts = useLiveQuery(() => db.contacts.toArray(), []) ?? EMPTY_ARRAY
@@ -108,12 +111,9 @@ export function MomentsPage() {
     setCommentingId(null)
     setReplyTarget(null)
 
-    // The poster answers directly in the comment thread (background,
-    // fire-and-forget) instead of the old pendingEvents-to-next-chat detour.
-    const poster = posterContactId ? contactById.get(posterContactId) : undefined
-    if (poster) {
-      generateMomentReply(momentId, poster, newId, settings)
-    }
+    // One bounded batch lets the directly addressed person and at most two
+    // relevant friends reply. AI-authored replies never trigger another batch.
+    void generateMomentDiscussion(momentId, posterContactId, newId, settings)
   }
 
   async function handleRefresh() {
@@ -263,7 +263,7 @@ export function MomentsPage() {
             const momentComments = commentsByMoment.get(m.id) ?? []
             const userLiked = momentLikes.some((l) => l.likerId === 'user')
             return (
-              <div key={m.id} className="border-b border-gray-100 bg-white px-4 py-3">
+              <div key={m.id} className={`border-b border-gray-100 bg-white px-4 py-3 ${m.id === focusMomentId ? 'ring-2 ring-inset ring-[#07c160]' : ''}`}>
                 <div className="flex gap-3">
                   <Avatar avatar={posterAvatar} color={posterAvatarColor} size={40} />
                   <div className="min-w-0 flex-1">

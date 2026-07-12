@@ -22,6 +22,7 @@ import { buildUserProfileText, useChatEngineStore } from './chatEngine'
 import { validateGroupDraft, validateGroupTurn } from './responseQuality'
 import { searchPexelsPhoto } from './photoSearch'
 import { recentSocialEventsText, recordSocialEvent } from './socialEvents'
+import { createGroupPlan, planCardMessage } from './groupPlans'
 import { useChatUiStore } from '../store/useChatUiStore'
 import { retrieveWorldbookContext } from './worldbook'
 import { generateGroupStoryOutline, storyOutlinePromptSection } from './storyOutline'
@@ -497,7 +498,7 @@ ${rawText}
 
     if (streamByConversation.get(conversationId) !== streamId) return
     let finalRaw = jsonRaw
-    let { bubbles, knowledgeQueries, turnSummary, groupVibe } = parseGroupAiResponse(finalRaw, speakers.length)
+    let { bubbles, knowledgeQueries, turnSummary, groupVibe, planCandidates } = parseGroupAiResponse(finalRaw, speakers.length)
     const initiallyRequestedKnowledge = [...knowledgeQueries]
     let reviewFailure = draftFeedback
     if (bubbles.length > 0) {
@@ -516,7 +517,7 @@ ${rawText}
         console.warn(`[group] 回复已被质量校验重写 群=${group.name} 原因=${checked.reason ?? 'unknown'}`)
         finalRaw = checked.raw
         reviewFailure = checked.reason || '群聊回复审查未通过'
-        ;({ bubbles, knowledgeQueries, turnSummary, groupVibe } = parseGroupAiResponse(finalRaw, speakers.length))
+        ;({ bubbles, knowledgeQueries, turnSummary, groupVibe, planCandidates } = parseGroupAiResponse(finalRaw, speakers.length))
       } else if (checked.detectedInvalid) {
         reviewFailure = checked.reason || '群聊回复审查未通过'
         console.warn(`[group] 审查发现问题但未能修复 群=${group.name} 原因=${checked.reason ?? 'unknown'}`)
@@ -529,7 +530,7 @@ ${rawText}
         rawText = await chatCompletion({ apiKey:settings.apiKey,baseUrl:settings.baseUrl,model:settings.model,messages:[...chatMessages,{role:'user',content:`刚才出现了你们不了解的词。搜索结果如下：\n${knowledge.text}${reviewFailure?`\n\n上一版审查问题：${reviewFailure}，重写时同时修正。`:''}\n请基于结果重新生成群聊草稿，保持原群聊格式，像刚查明白后自然接话，不要写成报告。`}],signal:controller.signal })
         jsonRaw = await chatCompletion({apiKey:settings.apiKey,baseUrl:settings.baseUrl,model:settings.utilityModel,messages:[{role:'system',content:buildGroupJsonConversionPrompt(rawText,speakers,stickers.map(s=>s.name))}],jsonMode:true,signal:controller.signal})
         finalRaw=jsonRaw
-        ;({bubbles,knowledgeQueries,turnSummary,groupVibe}=parseGroupAiResponse(finalRaw,speakers.length))
+        ;({bubbles,knowledgeQueries,turnSummary,groupVibe,planCandidates}=parseGroupAiResponse(finalRaw,speakers.length))
       }
     }
     console.log(`[group] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 群=${group.name}`)
@@ -547,8 +548,21 @@ ${rawText}
       knowledgeQueries,
       createdAt: Date.now(),
     })
+    const createdPlans = []
+    for (const candidate of planCandidates) {
+      const plan = await createGroupPlan({
+        group,
+        conversationId,
+        title: candidate.title,
+        summary: candidate.summary,
+        location: candidate.location,
+        participantContactIds: candidate.participantIndexes.map((index) => speakers[index - 1]?.id).filter((id): id is string => !!id),
+      })
+      if (plan) createdPlans.push(plan)
+    }
+    for (const plan of createdPlans) await db.messages.add(planCardMessage(plan))
     void updateGroupMemoryAndVibe({ group, aiTurnId, settings, turnSummary, groupVibe })
-    revealGroupBubbles(conversationId, group, members, speakers, bubbles, streamId, settings, aiTurnId)
+    revealGroupBubbles(conversationId, group, members, speakers, bubbles, streamId, settings, aiTurnId, turnSummary)
   } catch (err) {
     if (streamByConversation.get(conversationId) !== streamId) return
     if (err instanceof DOMException && err.name === 'AbortError') return
@@ -567,6 +581,7 @@ function revealGroupBubbles(
   streamId: string,
   settings: AppSettings,
   aiTurnId: string,
+  turnSummary: string,
 ): void {
   const timers: ReturnType<typeof setTimeout>[] = []
   let cumulative = 0
@@ -625,6 +640,24 @@ function revealGroupBubbles(
       if (i === bubbles.length - 1) {
         useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined })
         maybeUpdateGroupMemory(group.id, conversationId, members, settings)
+
+        // A group conversation is shared context: unlike a private chat, it
+        // can naturally colour a member's later 1:1 chat and a follow-up
+        // moment. Persist only the model's one-line group summary, never the
+        // raw transcript, so this creates continuity without leaking details
+        // from messages that were not meant to leave the group.
+        if (turnSummary.trim()) {
+          await recordSocialEvent({
+            type: 'group_turn',
+            actorId: speaker?.id ?? 'user',
+            relatedContactIds: group.memberContactIds,
+            conversationId,
+            groupId: group.id,
+            messageId: msg.id,
+            summary: `群聊“${group.name}”刚聊到：${turnSummary.trim()}`,
+            importance: 2,
+          })
+        }
       }
     }, cumulative)
     timers.push(timer)

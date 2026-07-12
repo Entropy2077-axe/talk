@@ -1,3 +1,4 @@
+import type { ElementType } from 'react'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { shopModule } from './shop'
 import { warehouseModule } from './warehouse'
@@ -6,7 +7,6 @@ import { knowledgeBaseModule } from './knowledgeBase'
 import { relationshipModule } from './relationship'
 import { personalityTraitsModule } from './personalityTraits'
 import { proactiveChatModule } from './proactiveChat'
-import { moodModule } from './mood'
 import { mindReadingModule } from './mindReading'
 import { intentModule } from './intent'
 import { selfIterationModule } from './selfIteration'
@@ -14,6 +14,8 @@ import { storyOutlineModule } from './storyOutline'
 import { careerModule } from './career'
 import { nuwaModeModule } from './nuwaMode'
 import { lifeSimulationModule } from './lifeSimulation'
+import { saveLoadModule } from './saveLoad'
+import { aiReplyAssistModule } from './aiReplyAssist'
 import type { FeatureModule, ParentModule } from './types'
 
 // ---- parent modules (accordion groups in the UI) ----
@@ -51,7 +53,6 @@ export const ALL_MODULES: FeatureModule[] = [
   relationshipModule,
   personalityTraitsModule,
   proactiveChatModule,
-  moodModule,
   mindReadingModule,
   intentModule,
   selfIterationModule,
@@ -59,6 +60,8 @@ export const ALL_MODULES: FeatureModule[] = [
   careerModule,
   nuwaModeModule,
   lifeSimulationModule,
+  saveLoadModule,
+  aiReplyAssistModule,
 ]
 
 /** Modules that don't belong to any parent — shown as standalone toggles. */
@@ -99,10 +102,10 @@ export function getEnabledLinkApps(
 /**
  * Get the set of unique routes from enabled modules, deduplicating by path.
  */
-export function getEnabledRoutes(): { path: string; component: React.ComponentType }[] {
+export function getEnabledRoutes(): { path: string; component: ElementType }[] {
   const enabled = useSettingsStore.getState().enabledModules
   const seen = new Set<string>()
-  const routes: { path: string; component: React.ComponentType }[] = []
+  const routes: { path: string; component: ElementType }[] = []
   for (const m of ALL_MODULES) {
     if (!enabled.includes(m.id)) continue
     for (const r of m.routes ?? []) {

@@ -15,7 +15,7 @@ import type {
   SavedWorldview,
   WorldbookEntry,
   SimulationState, ContactLifeState, LifeEvent, AiUsageRecord,
-  SocialEvent,
+  SocialEvent, GroupPlan, AdminLogRecord, AdminAiTrace, SaveSlot, SavedPersona,
   Sticker,
   WalletAccount, WalletTransaction, Loan, JobListing, InterviewSession,
 } from '../types'
@@ -46,6 +46,11 @@ export class TalkDB extends Dexie {
   loans!: Table<Loan, string>
   jobListings!: Table<JobListing, string>
   interviews!: Table<InterviewSession, string>
+  groupPlans!: Table<GroupPlan, string>
+  adminLogs!: Table<AdminLogRecord, string>
+  adminAiTraces!: Table<AdminAiTrace, string>
+  saveSlots!: Table<SaveSlot, string>
+  savedPersonas!: Table<SavedPersona, string>
 
   constructor() {
     super('talk-db')
@@ -187,6 +192,17 @@ export class TalkDB extends Dexie {
       contactLifeStates: '&contactId, updatedAt',
       lifeEvents: 'id, contactId, occurredAt, visibility, importance, *participantContactIds',
       aiUsageRecords: 'id, purpose, automatic, success, createdAt',
+    })
+    this.version(21).stores({
+      groupPlans: 'id, groupId, status, scheduledAt, createdAt',
+    })
+    this.version(22).stores({
+      adminLogs: 'id, level, createdAt',
+      adminAiTraces: 'id, purpose, model, createdAt',
+      saveSlots: 'id, &slot, updatedAt',
+    })
+    this.version(23).stores({
+      savedPersonas: 'id, nickname, realName, updatedAt',
     })
   }
 }

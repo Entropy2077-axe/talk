@@ -18,6 +18,7 @@ import { downloadDataUrl, generateChatCaptureImage, shareDataUrl } from '../lib/
 import type { Contact, Message } from '../types'
 import { v4 as uuid } from 'uuid'
 import { claimRedPacket, transferFunds, USER_WALLET_ID } from '../lib/finance'
+import { draftReply } from '../lib/aiReplyAssist'
 
 const EMPTY_MESSAGES: Message[] = []
 
@@ -30,6 +31,7 @@ export function ChatPage() {
   const setActiveConversation = useChatUiStore((s) => s.setActiveConversation)
   const mindReadingEnabled = useModuleEnabled('mindReading')
   const careerEnabled = useModuleEnabled('career')
+  const replyAssistEnabled = useModuleEnabled('aiReplyAssist')
 
   const conversation = useLiveQuery(
     () => (conversationId ? db.conversations.get(conversationId) : undefined),
@@ -102,6 +104,9 @@ export function ChatPage() {
   const [financeMode, setFinanceMode] = useState<'transfer'|'redPacket'|'loan'|null>(null)
   const [financeAmount,setFinanceAmount]=useState('')
   const [financeNote,setFinanceNote]=useState('')
+  const [assistBusy, setAssistBusy] = useState(false)
+  const isPageMounted = useRef(true)
+  const currentConversationRef = useRef<string | undefined>(conversationId)
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const bubbleRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -134,6 +139,17 @@ export function ChatPage() {
     setActiveConversation(conversationId)
     return () => setActiveConversation(null)
   }, [conversationId, setActiveConversation])
+
+  useEffect(() => {
+    isPageMounted.current = true
+    return () => {
+      isPageMounted.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    currentConversationRef.current = conversationId
+  }, [conversationId])
 
   // Marks everything as read whenever this chat is open — runs on mount
   // (clears existing unread) and again each time a new message streams in
@@ -248,6 +264,31 @@ export function ChatPage() {
       await regenerateAiTurn(conversationId, contact, settings, stickers, message.debugAiTurnId)
     }
     setToast('已重新生成这一轮')
+  }
+
+  async function generateAssist() {
+    if (!settings.apiKey || assistBusy || !conversationId) return
+    const capturedGroup = group
+    const capturedContact = contact
+    const capturedMentionIds = [...selectedMentionIds]
+    const capturedReplyToId = replyToId ?? undefined
+    setAssistBusy(true)
+    try {
+      const draft = await draftReply(settings, messages, capturedContact, capturedGroup)
+      if (isPageMounted.current && currentConversationRef.current === conversationId) {
+        setInput(draft)
+        return
+      }
+      if (isGroupConv && capturedGroup) {
+        await sendGroupMessage(conversationId, capturedGroup, groupMembers, settings, stickers, draft, capturedMentionIds, capturedReplyToId)
+      } else if (capturedContact) {
+        await sendMessage(conversationId, capturedContact, settings, stickers, draft)
+      }
+    } catch (e) {
+      if (isPageMounted.current) setToast(e instanceof Error ? e.message : String(e))
+    } finally {
+      if (isPageMounted.current) setAssistBusy(false)
+    }
   }
 
   async function submitFinance() {
@@ -428,15 +469,18 @@ export function ChatPage() {
       )}
 
       <div ref={scrollContainerRef} data-testid="chat-scroll" className="flex-1 overflow-y-auto pt-2" style={chatBackgroundStyle}>
-        {messages.map((m) => {
+        {messages.map((m, index) => {
           const speaker =
             isGroupConv && m.role === 'assistant' && m.speakerContactId ? memberById.get(m.speakerContactId) : undefined
           const bubbleName = isGroupConv ? (speaker ? displayName(speaker) : group!.name) : displayName(contact!)
           const bubbleAvatar = isGroupConv ? (speaker ? speaker.avatar : group!.avatar) : contact!.avatar
           const bubbleAvatarColor = isGroupConv ? (speaker ? speaker.avatarColor : group!.avatarColor) : contact!.avatarColor
+          const previousMessage = messages[index - 1]
+          const showConversationTime = !previousMessage || m.createdAt - previousMessage.createdAt > 10 * 60 * 1000
           const msgBubble = (
-            <MessageBubble
-              key={m.id}
+            <div key={m.id} className="animate-[message-in_180ms_ease-out]">
+              {showConversationTime && <p className="my-4 text-center text-[11px] text-gray-400">{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>}
+              <MessageBubble
               ref={(el) => {
                 if (el) bubbleRefs.current.set(m.id, el)
               }}
@@ -456,7 +500,9 @@ export function ChatPage() {
               onLongPress={() => setMenuMessageId(m.id)}
               onLinkClick={selectingMessages ? undefined : () => { const routes:Record<string,string>={work:'/work',shop:'/shop',warehouse:'/warehouse'}; const path=m.link?.app?routes[m.link.app]:undefined; if(path)navigate(path);else setToast('暂不支持这个小程序') }}
               onFinanceClick={selectingMessages ? undefined : handleFinanceCard}
-            />
+              showName={isGroupConv && m.role === 'assistant'}
+              />
+            </div>
           )
           const showThought = mindReadingEnabled && m.thought && m.role === 'assistant'
           if (showThought) {
@@ -532,22 +578,24 @@ export function ChatPage() {
             )}
             <div className="flex items-end gap-2">
               <button onClick={()=>setAppsOpen(true)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-2xl text-gray-600">＋</button>
+              {replyAssistEnabled && <button type="button" onClick={() => void generateAssist()} disabled={assistBusy} aria-label="AI代写" aria-busy={assistBusy} className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-lg transition duration-150 active:scale-90 disabled:cursor-wait ${assistBusy ? 'animate-pulse bg-purple-600 text-white shadow-inner' : 'bg-purple-100 text-purple-600 active:bg-purple-200'}`}>{assistBusy ? '✦' : '✨'}</button>}
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
+                  if (!assistBusy && e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
                     handleSend()
                   }
                 }}
-                placeholder={aiTyping ? '对方正在输入 你可以直接插话打断' : '发消息…'}
+                disabled={assistBusy}
+                placeholder={assistBusy ? 'AI代写中...' : aiTyping ? '对方正在输入 你可以直接插话打断' : '发消息…'}
                 rows={1}
-                className="max-h-24 flex-1 resize-none rounded-xl border border-gray-200 px-3 py-2 text-[14.5px] outline-none"
+                className="max-h-24 flex-1 resize-none rounded-xl border border-gray-200 px-3 py-2 text-[14.5px] outline-none disabled:cursor-wait disabled:bg-gray-50 disabled:text-gray-400"
               />
               <button
                 onClick={handleSend}
-                disabled={!input.trim()}
+                disabled={assistBusy || !input.trim()}
                 className="shrink-0 rounded-xl bg-gray-900 px-4 py-2 text-sm text-white disabled:opacity-40"
               >
                 发送

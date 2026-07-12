@@ -5,6 +5,7 @@ import { momentReactionProbability, uniqueRelationPairs } from './contactRelatio
 import { describeCurrentSchedule, isPhoneAvailable } from './schedule'
 import { searchPexelsPhoto } from './photoSearch'
 import { recordSocialEvent } from './socialEvents'
+import { displayName } from './contact'
 import { customPersonalityTraitsLine, formatSpeechSamplesForScene, personalityTraitLine } from './prompt'
 import { isModuleEnabled } from '../features'
 import { retrieveWorldbookContext } from './worldbook'
@@ -203,6 +204,31 @@ function parseMomentsResponse(raw: string, expected: number[]): ParsedMoment[] |
   }
 }
 
+/** Moments need their own review pass: broad feed context makes repeated hooks easy to miss. */
+async function reviewMomentPayload(settings: AppSettings, raw: string, expectedShape: string): Promise<string> {
+  try {
+    const recent = await db.moments.orderBy('createdAt').reverse().limit(18).toArray()
+    const history = recent.map((moment) => moment.content).join('\n').slice(0, 2200)
+    const judged = await chatCompletion({
+      apiKey: settings.apiKey,
+      baseUrl: settings.baseUrl,
+      model: settings.utilityModel || settings.model,
+      jsonMode: true,
+      maxTokens: 1800,
+      purpose: 'quality',
+      automatic: true,
+      messages: [
+        { role: 'system', content: `You review AI-generated Moments JSON. Output JSON only: {"valid":true|false,"fixedRaw":"optional complete replacement JSON"}. Reject content that repeats, escalates, or keeps circling the same request, object, joke, wording, or topic from the recent feed or within one generated batch. Also reject copy-paste-like comments where several people merely repeat the same point. Preserve the required JSON shape exactly: ${expectedShape}. If invalid, return a complete replacement JSON in fixedRaw with fresh, natural everyday content; do not add explanations.` },
+        { role: 'user', content: `Recent feed:\n${history || '(empty)'}\n\nCandidate JSON:\n${raw.slice(0, 6000)}` },
+      ],
+    })
+    const parsed = JSON.parse(judged) as { valid?: unknown; fixedRaw?: unknown }
+    return parsed.valid === false && typeof parsed.fixedRaw === 'string' && parsed.fixedRaw.trim() ? parsed.fixedRaw.trim() : raw
+  } catch {
+    return raw
+  }
+}
+
 export interface RefreshMomentsResult {
   postedCount: number
   message?: string
@@ -239,7 +265,7 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
     const [privateMemories, socialMemories, events] = await Promise.all([
       recentMemoriesText(contact.id, 4),
       socialMemoriesText(contact.id, 4),
-      recentSocialEventsText([contact.id], 3),
+      recentSocialEventsText([contact.id], 3, false),
     ])
     return [contact.id, [privateMemories, socialMemories, events].filter(Boolean).join('\n').slice(0, 1100)] as const
   }))
@@ -258,7 +284,8 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
   })
 
   const expectedCommentCounts = entries.map((e) => e.commenters.filter((c) => c.willComment).length)
-  const parsed = parseMomentsResponse(raw, expectedCommentCounts)
+  const reviewedRaw = await reviewMomentPayload(settings, raw, '{"moments":[{"content":"...","imageKeyword":"...","comments":["..."]}]}')
+  const parsed = parseMomentsResponse(reviewedRaw, expectedCommentCounts)
   if (!parsed) return { postedCount: 0, message: '生成失败 请再刷新试试' }
 
   for (let i = 0; i < entries.length; i++) {
@@ -429,7 +456,7 @@ export async function postUserMoment(content: string, settings: AppSettings): Pr
       const stickerNames = (await db.stickers.toArray()).map((s) => s.name)
       const contextRows = await Promise.all(commenterPlans.map(async ({ contact }) => {
         const [memories, social, events] = await Promise.all([
-          recentMemoriesText(contact.id, 4), socialMemoriesText(contact.id, 4), recentSocialEventsText([contact.id], 2),
+          recentMemoriesText(contact.id, 4), socialMemoriesText(contact.id, 4), recentSocialEventsText([contact.id], 2, false),
         ])
         return [contact.id, [memories, social, events].filter(Boolean).join('\n').slice(0, 900)] as const
       }))
@@ -453,7 +480,8 @@ export async function postUserMoment(content: string, settings: AppSettings): Pr
         jsonMode: true,
         purpose: 'moments',
       })
-      comments = parseCommentsResponse(raw, commenterPlans.length) ?? []
+      const reviewedRaw = await reviewMomentPayload(settings, raw, '{"comments":["..."]}')
+      comments = parseCommentsResponse(reviewedRaw, commenterPlans.length) ?? []
     } catch {
       // reactions are a nice-to-have; the moment itself already posted successfully
     }
@@ -558,7 +586,7 @@ export async function generateMomentReply(
       db.stickers.toArray(),
       recentMemoriesText(poster.id, 4),
       socialMemoriesText(poster.id, 4),
-      recentSocialEventsText([poster.id], 3),
+      recentSocialEventsText([poster.id], 3, false),
     ])
     const contactById = new Map(allContacts.map((c) => [c.id, c]))
     const labelFor = (authorContactId: string) =>
@@ -603,6 +631,65 @@ export async function generateMomentReply(
   } catch {
     // best-effort background reply; failing silently is fine, same as the other moments background jobs
   }
+}
+
+/**
+ * One user interaction can open a small, bounded social thread. The model
+ * receives only public moment material and a fixed candidate list; generated
+ * comments never recursively call this function, so the thread cannot loop.
+ */
+export async function generateMomentDiscussion(
+  momentId: string,
+  posterContactId: string | undefined,
+  triggeringCommentId: string,
+  settings: AppSettings,
+): Promise<void> {
+  try {
+    if (!settings.apiKey) return
+    const [moment, contacts, comments] = await Promise.all([
+      db.moments.get(momentId), db.contacts.toArray(), db.momentComments.where('momentId').equals(momentId).sortBy('createdAt'),
+    ])
+    if (!moment) return
+    const byId = new Map(contacts.map((contact) => [contact.id, contact]))
+    const trigger = comments.find((comment) => comment.id === triggeringCommentId)
+    const directId = trigger?.replyToCommentId ? comments.find((comment) => comment.id === trigger.replyToCommentId)?.authorContactId : posterContactId
+    const candidateIds = Array.from(new Set([
+      directId,
+      posterContactId,
+      ...comments.slice(-8).map((comment) => comment.authorContactId),
+    ].filter((id): id is string => !!id && id !== 'user' && byId.has(id)))).slice(0, 3)
+    if (candidateIds.length === 0) return
+    const candidates = candidateIds.map((id) => byId.get(id)!).filter(Boolean)
+    const names = new Map(candidates.map((contact) => [contact.id, displayName(contact)]))
+    const thread = comments.slice(-12).map((comment) => ({ id: comment.id, author: comment.authorContactId === 'user' ? settings.userNickname || '用户' : names.get(comment.authorContactId) || byId.get(comment.authorContactId)?.name || '某人', content: comment.content, replyTo: comment.replyToCommentId }))
+    const prompt = `You create a short, natural public social-media discussion. Output JSON only: {"comments":[{"authorId":"candidate id","replyToCommentId":"optional existing comment id","content":"..."}]}.
+Moment: ${moment.content}
+    Newest user comment id: ${commentIdMarker(triggeringCommentId)}
+Thread: ${JSON.stringify(thread)}
+Candidates (only these ids may author; the direct recipient must reply if present): ${JSON.stringify(candidates.map((contact) => ({ id: contact.id, name: displayName(contact), persona: contact.systemPrompt, mood: contact.mood?.text || '', relationToUser: contact.relationshipBase || '朋友' })))}
+Rules: generate 1 to 3 comments total; keep it public and conversational; do not reveal private chat; do not create a chain longer than one reply; do not include any other author; direct recipient id is ${directId && directId !== 'user' ? directId : 'none'}; most comments should reply to the newest user comment or a real existing comment.`
+    const raw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, jsonMode: true, maxTokens: 500, purpose: 'moments', messages: [{ role: 'system', content: prompt }, { role: 'user', content: 'Generate the discussion.' }] })
+    const parsed = JSON.parse(raw) as { comments?: Array<{ authorId?: unknown; replyToCommentId?: unknown; content?: unknown }> }
+    const allowedReplyIds = new Set(comments.map((comment) => comment.id))
+    const output = (parsed.comments ?? []).flatMap((item) => {
+      const authorId = typeof item.authorId === 'string' ? item.authorId : ''
+      const content = typeof item.content === 'string' ? item.content.trim().slice(0, 180) : ''
+      const replyToCommentId = typeof item.replyToCommentId === 'string' && allowedReplyIds.has(item.replyToCommentId) ? item.replyToCommentId : triggeringCommentId
+      return candidateIds.includes(authorId) && content ? [{ authorId, content, replyToCommentId }] : []
+    }).slice(0, 3)
+    if (directId && directId !== 'user' && candidateIds.includes(directId) && !output.some((item) => item.authorId === directId)) return
+    for (const item of output) {
+      const id = uuid()
+      await db.momentComments.add({ id, momentId, authorContactId: item.authorId, content: item.content, replyToCommentId: item.replyToCommentId, createdAt: Date.now() })
+      await recordSocialEvent({ type: 'moment_commented', actorId: item.authorId, targetId: posterContactId, relatedContactIds: Array.from(new Set([item.authorId, ...(posterContactId ? [posterContactId] : [])])), momentId, messageId: id, summary: `${names.get(item.authorId) || '某人'}参与了朋友圈讨论: ${item.content}`, importance: 2 })
+    }
+  } catch {
+    // A discussion is a best-effort enhancement; the user's own comment is already persisted.
+  }
+}
+
+function commentIdMarker(id: string | undefined): string {
+  return id || 'unknown'
 }
 
 /**

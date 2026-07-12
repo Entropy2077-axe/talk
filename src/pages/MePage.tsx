@@ -8,6 +8,7 @@ import { checkForUpdate } from '../lib/updateCheck'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/db'
 import { USER_WALLET_ID } from '../lib/finance'
+import { useModuleEnabled } from '../features'
 
 export function MePage() {
   const navigate = useNavigate()
@@ -17,6 +18,7 @@ export function MePage() {
   const [checking, setChecking] = useState(false)
   const [updateMessage, setUpdateMessage] = useState('')
   const [updateUrl, setUpdateUrl] = useState('')
+  const saveLoadEnabled = useModuleEnabled('saveLoad')
 
   async function handleCheckUpdate() {
     setChecking(true)
@@ -80,6 +82,7 @@ export function MePage() {
             <path d="M9 5l7 7-7 7" stroke="#c7c7cc" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
+        {saveLoadEnabled && <button onClick={() => navigate('/save-load')} className="flex w-full items-center justify-between border-b border-gray-100 bg-white px-4 py-3.5 text-left active:bg-gray-50"><span className="text-[15px] text-gray-900">存档与回档</span><span>›</span></button>}
         <button
           onClick={updateUrl ? () => window.open(updateUrl, '_blank') : handleCheckUpdate}
           disabled={checking}

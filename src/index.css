@@ -61,6 +61,33 @@
   color-scheme: dark;
 }
 
+@keyframes message-in {
+  from { opacity: 0; transform: translateY(6px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes notice-in {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes page-in {
+  from { opacity: .72; }
+  to { opacity: 1; }
+}
+
+.page-transition { animation: page-in 180ms ease-out; }
+
+/* A single global switch keeps visual feedback optional without branching every component. */
+:root[data-animations='off'] *,
+:root[data-animations='off'] *::before,
+:root[data-animations='off'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
 * {
   -webkit-tap-highlight-color: transparent;
 }
@@ -104,6 +131,7 @@ body {
   flex-direction: column;
   position: relative;
   overflow: hidden;
+  filter: grayscale(1);
 }
 
 .theme-dark {

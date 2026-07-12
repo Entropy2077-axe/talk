@@ -1,7 +1,6 @@
 import { forwardRef } from 'react'
 import type React from 'react'
 import { Avatar } from './Avatar'
-import { formatBubbleTime } from '../lib/time'
 import { useLongPress } from '../hooks/useLongPress'
 import type { Message } from '../types'
 
@@ -22,6 +21,7 @@ interface MessageBubbleProps {
   onSelect?: () => void
   onLinkClick?: (label: string) => void
   onFinanceClick?: (message: Message) => void
+  showName?: boolean
 }
 
 export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(function MessageBubble(
@@ -41,6 +41,7 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
     onLongPress,
     onSelect,
     onLinkClick, onFinanceClick,
+    showName = false,
   },
   ref,
 ) {
@@ -65,7 +66,7 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
           ✓
         </span>
       )}
-      {!isUser && <p className="mb-1 text-[11px] text-gray-400">{contactName}</p>}
+      {!isUser && showName && <p className="mb-1 pl-10 text-[11px] text-gray-400">{contactName}</p>}
       <div className={`flex items-start gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
         {isUser ? (
           <Avatar avatar={userAvatar} size={32} />
@@ -133,6 +134,13 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
               </p>
             </div>
           )}
+          {message.type === 'groupPlan' && (
+            <div className="w-56 rounded-xl border border-[#07c160]/30 bg-[#f0fff5] p-3">
+              <p className="text-xs text-[#07a651]">📅 共同计划 · 待确认</p>
+              <p className="mt-1 text-[14px] font-medium text-gray-900">{message.content}</p>
+              <p className="mt-1 text-[11px] text-gray-500">可在群聊信息中确认、取消或标记成行</p>
+            </div>
+          )}
           {message.type === 'image' && message.image && <div className="max-w-[240px] overflow-hidden rounded-xl bg-white"><img src={message.image.url} alt={message.image.caption||'聊天图片'} className="max-h-72 w-full object-cover"/>{message.image.caption&&<p className="px-3 py-2 text-xs text-gray-600">{message.image.caption}</p>}{message.image.photographer&&<p className="px-3 pb-2 text-[10px] text-gray-300">Photo: {message.image.photographer}</p>}</div>}
           {['transfer','redPacket','loanRequest','loanResult','repayment'].includes(message.type) && message.finance && (
             <button onClick={()=>onFinanceClick?.(message)} className="w-56 rounded-xl border border-orange-200 bg-gradient-to-br from-orange-400 to-red-500 p-3 text-left text-white">
@@ -143,7 +151,6 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
           )}
 
           <div className={`mt-0.5 flex items-center gap-2 px-1 ${isUser ? 'flex-row-reverse' : ''}`}>
-            <span className="text-[10px] text-gray-300">{formatBubbleTime(message.createdAt)}</span>
             {onReply && (
               <button onClick={onReply} className="text-[10px] text-gray-400">
                 回复

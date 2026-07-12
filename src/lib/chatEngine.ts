@@ -305,7 +305,7 @@ async function runAiTurn(
 ): Promise<void> {
   const engine = useChatEngineStore.getState()
   const now = Date.now()
-  const activeMood = isModuleEnabled('mood') ? getActiveMood(contact, now) : undefined
+  const activeMood = getActiveMood(contact, now)
   engine.patch(conversationId, { aiTyping: true, error: '', typingLabel: displayName(contact) })
   console.log(`[chat] 开始生成回复 对方=${displayName(contact)} conversationId=${conversationId}`)
   try {
@@ -564,9 +564,12 @@ function revealBubbles(
           location: bubble.location,
           activity: bubble.activity,
           summary: bubble.summary,
+          priority: 'special',
           createdAt: Date.now(),
         }
-        await db.contacts.update(contact.id, { scheduleOverrides: [...pruned, override] })
+        // A new special arrangement replaces the previous one for that day;
+        // the generated weekly schedule remains the low-priority fallback.
+        await db.contacts.update(contact.id, { scheduleOverrides: [...pruned.filter((item) => item.date !== override.date), override] })
       }
       let imagePayload: Message['image']
       let imageFailed = false

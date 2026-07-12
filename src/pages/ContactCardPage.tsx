@@ -12,6 +12,7 @@ import { activeUpcomingPlans, activeUpcomingPlansText, resetMemory } from '../li
 import { cascadeDeleteContactSocialData } from '../lib/moments'
 import { removeContactFromAllGroups } from '../lib/groupChat'
 import { pruneExpiredOverrides, describeCurrentSchedule, describeUpcomingScheduleText, isPhoneAvailable } from '../lib/schedule'
+import { normalizeMood } from '../lib/mood'
 import { WEEKDAYS, describeCurrentTime } from '../lib/time'
 import { RELATIONSHIP_OPTIONS, formatSpeechSamplesForScene, buildRawChatPromptParts, buildJsonConversionPrompt } from '../lib/prompt'
 import { useModuleEnabled, isModuleEnabled } from '../features'
@@ -66,7 +67,7 @@ export function ContactCardPage() {
   const relEnabled = useModuleEnabled('relationship')
   const personalityEnabled = useModuleEnabled('personalityTraits')
   const adminEnabled = useSettingsStore((s) => s.adminModeEnabled)
-  const moodEnabled = useModuleEnabled('mood')
+  const moodEnabled = true
   const careerEnabled = useModuleEnabled('career')
   const lifeSimulationEnabled = useModuleEnabled('lifeSimulation')
   const [assigningCareer, setAssigningCareer] = useState(false)
@@ -79,6 +80,12 @@ export function ContactCardPage() {
   const contactWallet = useLiveQuery(() => contactId ? db.walletAccounts.get(contactId) : undefined, [contactId])
   const lifeEvents = useLiveQuery(() => contactId ? db.lifeEvents.where('contactId').equals(contactId).reverse().sortBy('occurredAt') : [], [contactId]) ?? []
   const lifeState = useLiveQuery(() => contactId ? db.contactLifeStates.get(contactId) : undefined, [contactId])
+  const socialTimeline = useLiveQuery(async () => {
+    if (!contactId) return []
+    return (await db.socialEvents.orderBy('createdAt').reverse().limit(80).toArray())
+      .filter((event) => event.relatedContactIds.includes(contactId) || event.actorId === contactId || event.targetId === contactId)
+      .slice(0, 6)
+  }, [contactId]) ?? []
   const structuredMemories = useLiveQuery(
     () => (contactId ? db.contactMemories.where('contactId').equals(contactId).reverse().sortBy('updatedAt') : []),
     [contactId],
@@ -240,6 +247,7 @@ export function ContactCardPage() {
       {lifeSimulationEnabled && <section className="mt-3 bg-white px-4 py-4"><h3 className="mb-2 text-xs font-medium text-gray-400">🌙 生活回顾</h3>{lifeState && <p className="mb-2 text-xs text-gray-500">此刻：{lifeState.location} · {lifeState.activity} · 精力 {lifeState.energy}</p>}{lifeEvents.filter((event) => event.visibility !== 'private').length === 0 ? <p className="text-sm text-gray-400">最近没有适合分享的生活动态</p> : <div className="space-y-2">{lifeEvents.filter((event) => event.visibility !== 'private').slice(0, 10).map((event) => <div key={event.id} className="rounded-lg bg-gray-50 px-3 py-2"><p className="text-sm text-gray-700">{event.summary}</p><p className="mt-0.5 text-[10px] text-gray-400">{new Date(event.occurredAt).toLocaleString()} · {event.type === 'summary' ? '阶段回顾' : '生活事件'}</p></div>)}</div>}</section>}
 
       <div className="mt-3 bg-white">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2 border-b border-gray-100 px-4 py-3 text-xs text-gray-500"><p>性别：{contact.gender || contact.creatorProfile?.gender || '未填写'}</p><p>真名：{contact.realName || contact.name}</p><p>网名：{contact.nickname || contact.name}</p><p>生日：{contact.birthday || '未填写'}</p></div>
         <button
           onClick={() => {
             setRemarkDraft(contact.remark ?? '')
@@ -270,16 +278,14 @@ export function ContactCardPage() {
           <div className="flex w-full items-center justify-between px-4 py-3.5">
             <span className="text-[15px] text-gray-900">心情</span>
             <span className="text-sm text-gray-400">
-              {contact.mood?.text && Date.now() < contact.mood.expiresAt ? contact.mood.text : '暂无'}
+              {contact.mood?.text && Date.now() < contact.mood.expiresAt ? normalizeMood(contact.mood.text) : '暂无'}
             </span>
           </div>
         )}
         <div className="flex w-full items-center justify-between px-4 py-3.5">
           <span className="text-[15px] text-gray-900">状态</span>
           <span className="text-sm text-gray-400">
-            {isPhoneAvailable(contact, new Date())
-              ? '📱 可聊天 · 可发朋友圈'
-              : '📵 正在忙 · 暂不可联系'}
+            {(isPhoneAvailable(contact, new Date()) ? '📱 ' : '🔕 ') + (describeCurrentSchedule(contact, new Date()).replace(/^现在在/, '') || '空闲')}
           </span>
         </div>
         {relEnabled && (
@@ -295,6 +301,11 @@ export function ContactCardPage() {
         {careerEnabled && <button onClick={assignCareer} disabled={assigningCareer} className="flex w-full items-center justify-between px-4 py-3.5 text-left active:bg-gray-50 disabled:opacity-50"><span className="text-[15px] text-gray-900">职业</span><span className="text-sm text-gray-400">{assigningCareer?'生成中…':contact.occupation?`${contact.occupation} · 月薪 ${formatCurrency(contact.monthlySalary??0,settings)}`:'赋予职业'}</span></button>}
         {careerEnabled && <button onClick={adminEnabled ? async()=>{const raw=prompt('设定该AI的钱包余额',String(contactWallet?.balance??0));if(raw!==null&&Number.isFinite(Number(raw))&&Number(raw)>=0)await setWalletBalance(contact.id,Number(raw))}:undefined} className="flex w-full items-center justify-between px-4 py-3.5 text-left"><span className="text-[15px] text-gray-900">钱包</span><span className="text-sm text-gray-400">{formatCurrency(contactWallet?.balance??0,settings)}{adminEnabled?' · 点击设定':''}</span></button>}
       </div>
+
+      <section className="mt-3 bg-white px-4 py-4">
+        <h3 className="mb-2 text-xs font-medium text-gray-400">最近社交动态</h3>
+        {socialTimeline.length === 0 ? <p className="text-sm text-gray-400">暂时还没有公开互动。</p> : <div className="space-y-2">{socialTimeline.map((event) => <button key={event.id} type="button" onClick={() => event.groupId ? navigate(`/group/${event.groupId}`) : event.momentId ? navigate(`/moments?focus=${event.momentId}`) : event.conversationId ? navigate(`/chat/${event.conversationId}`) : undefined} className="block w-full border-l-2 border-[#07c160] pl-2 text-left"><p className="text-sm text-gray-700">{event.summary}</p><p className="mt-0.5 text-[10px] text-gray-400">{new Date(event.createdAt).toLocaleString()}</p></button>)}</div>}
+      </section>
 
       <section className="mt-3 bg-white px-4 py-4">
         <div className="mb-2 flex items-center justify-between">

@@ -1,5 +1,7 @@
-import { ProactiveSettingsPage } from '../pages/ProactiveSettingsPage'
+import { lazy } from 'react'
 import type { FeatureModule } from './types'
+
+const ProactiveSettingsPage = lazy(() => import('../pages/ProactiveSettingsPage').then(({ ProactiveSettingsPage }) => ({ default: ProactiveSettingsPage })))
 
 export const proactiveChatModule: FeatureModule = {
   id: 'proactiveChat',

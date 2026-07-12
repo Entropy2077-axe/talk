@@ -6,6 +6,7 @@ import { describeCurrentSchedule } from './schedule'
 import { isModuleEnabled } from '../features'
 import type { Contact, GroupAiBubble, GroupAiResponse, GroupEnergyLevel, GroupSpeakerLimit } from '../types'
 import { dynamicRelationScore } from './contactRelations'
+import { normalizeMood } from './mood'
 
 /** Group chats can cap how many members answer per turn; see pickSpeakers. */
 const DEFAULT_GROUP_SPEAKER_LIMIT: GroupSpeakerLimit = 3
@@ -267,6 +268,7 @@ ${samplesText ? `- 说话样例:\n${samplesText}` : ''}`
 - 括号必须使用中文全角圆括号（），心情必须使用半角方括号[]，消息必须使用中文弯引号“”。
 - 每一行都必须同时有非空“想法”和非空[心情]；想法不要写进消息内容，心情5字以内。
 - 消息内容里不能残留人名冒号、<人名>、（想法）、[心情]、外层引号。`
+  const moodEmojiContract = `心情规则：每条 [心情] 只能填一个 emoji，且只能从 😀 😊 🥰 😌 😶 😴 🤔 😳 🥺 😟 😠 😤 😞 😭 😈 中选择；禁止文字心情。`
   const interactionContract = `发言编排契约:
 - 先在心里决定“谁说几句、谁接谁的话”，但不要把计划输出。
 - 本轮发言人只能来自: ${speakerNames}。
@@ -296,6 +298,7 @@ ${rosterText}
 
 【必须先满足的硬约束】
 ${formatContract}
+${moodEmojiContract}
 
 ${interactionContract}
 
@@ -444,10 +447,11 @@ ${rawText}
 - 如果草稿里自然提到不懂的新词/热梗/作品名，可在knowledgeQueries里放最多2个查询；没有就给空数组。
 - 必须把[knowledge:关键词]从消息正文删除并写入顶层knowledgeQueries；不能把标记展示给用户。
 - turnSummary 用一句话概括这一轮群聊发生了什么。
+- planCandidates 只在本轮出现至少两位成员明确同意的共同计划时填写；participantIndexes 使用发言人索引，不能凭空创建计划。
 - groupVibe 必填，用20到60字概括本轮之后最新的群聊氛围，会直接替换旧群聊氛围。
 
 只输出JSON，格式:
-{"messages":[{"speakerIndex":1,"speakerName":"...","type":"text","content":"...","thought":"...","mood":"..."},{"speakerIndex":1,"speakerName":"...","type":"image","query":"city night neon","caption":"刚看到的","thought":"...","mood":"..."}],"turnSummary":"...","groupVibe":"...","knowledgeQueries":[]}`
+{"messages":[{"speakerIndex":1,"speakerName":"...","type":"text","content":"...","thought":"...","mood":"..."}],"turnSummary":"...","groupVibe":"...","knowledgeQueries":[],"planCandidates":[{"title":"看电影","summary":"周末一起看电影","participantIndexes":[1,2],"location":"待定"}]}`
 }
 
 function parseSpeakerIndex(v: unknown): number | null {
@@ -467,11 +471,12 @@ export interface ParsedGroupTurn {
   knowledgeQueries: string[]
   turnSummary: string
   groupVibe: string
+  planCandidates: Array<{ title: string; summary: string; participantIndexes: number[]; location?: string }>
 }
 
 export function parseGroupAiResponse(raw: string, speakerCount: number): ParsedGroupTurn {
   const trimmed = raw.trim()
-  if (!trimmed) return { bubbles: [], knowledgeQueries: [], turnSummary: '', groupVibe: '' }
+  if (!trimmed) return { bubbles: [], knowledgeQueries: [], turnSummary: '', groupVibe: '', planCandidates: [] }
 
   const jsonResult = tryParseGroupJson(trimmed, speakerCount)
   if (jsonResult && jsonResult.bubbles.length > 0) return jsonResult
@@ -481,7 +486,7 @@ export function parseGroupAiResponse(raw: string, speakerCount: number): ParsedG
     .map((line) => line.trim())
     .filter(Boolean)
     .map((content, i) => ({ speakerIndex: (i % speakerCount) + 1, type: 'text' as const, content }))
-  return { bubbles: fallbackBubbles, knowledgeQueries: [], turnSummary: fallbackBubbles.map((b) => b.content).join(' ').slice(0, 160), groupVibe: '群聊氛围暂未更新。' }
+  return { bubbles: fallbackBubbles, knowledgeQueries: [], turnSummary: fallbackBubbles.map((b) => b.content).join(' ').slice(0, 160), groupVibe: '群聊氛围暂未更新。', planCandidates: [] }
 }
 
 function tryParseGroupJson(trimmedRaw: string, speakerCount: number): ParsedGroupTurn | null {
@@ -511,7 +516,7 @@ function tryParseGroupJson(trimmedRaw: string, speakerCount: number): ParsedGrou
     if (speakerIndex === null || speakerIndex > speakerCount) continue
     const speakerName = typeof (m as { speakerName?: unknown }).speakerName === 'string' ? (m as { speakerName: string }).speakerName.trim() : undefined
     const thought = typeof (m as { thought?: unknown }).thought === 'string' ? (m as { thought: string }).thought.trim() : undefined
-    const mood = typeof (m as { mood?: unknown }).mood === 'string' ? (m as { mood: string }).mood.trim() : undefined
+    const mood = typeof (m as { mood?: unknown }).mood === 'string' ? normalizeMood((m as { mood: string }).mood) : undefined
     if (m.type === 'text' && typeof m.content === 'string' && m.content.trim()) {
       bubbles.push({ speakerIndex, speakerName, type: 'text', content: m.content.trim(), thought, mood })
     } else if (m.type === 'sticker' && typeof m.name === 'string' && m.name.trim()) {
@@ -525,6 +530,16 @@ function tryParseGroupJson(trimmedRaw: string, speakerCount: number): ParsedGrou
     knowledgeQueries: parseKnowledgeQueriesField(parsed.knowledgeQueries),
     turnSummary: typeof parsed.turnSummary === 'string' ? parsed.turnSummary.trim() : '',
     groupVibe: typeof parsed.groupVibe === 'string' ? parsed.groupVibe.trim() : '',
+    planCandidates: Array.isArray(parsed.planCandidates) ? parsed.planCandidates.flatMap((item: unknown) => {
+      if (!item || typeof item !== 'object') return []
+      const value = item as { title?: unknown; summary?: unknown; participantIndexes?: unknown; location?: unknown }
+      const participantIndexes = Array.isArray(value.participantIndexes)
+        ? value.participantIndexes.filter((index): index is number => Number.isInteger(index) && index >= 1 && index <= speakerCount)
+        : []
+      return typeof value.title === 'string' && value.title.trim() && participantIndexes.length >= 2
+        ? [{ title: value.title.trim().slice(0, 80), summary: typeof value.summary === 'string' ? value.summary.trim().slice(0, 180) : value.title.trim(), participantIndexes: Array.from(new Set(participantIndexes)), location: typeof value.location === 'string' ? value.location.trim().slice(0, 80) : undefined }]
+        : []
+    }).slice(0, 1) : [],
   }
 }
 

@@ -1,5 +1,7 @@
-import { WorldSettingsPage } from '../pages/WorldSettingsPage'
+import { lazy } from 'react'
 import type { FeatureModule } from './types'
+
+const WorldSettingsPage = lazy(() => import('../pages/WorldSettingsPage').then(({ WorldSettingsPage }) => ({ default: WorldSettingsPage })))
 
 export const worldviewModule: FeatureModule = {
   id: 'worldview',

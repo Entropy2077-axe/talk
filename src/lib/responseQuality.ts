@@ -123,6 +123,7 @@ If invalid, rewrite as fixedRaw. Must include mood and thought: {"messages":[{"t
 - If the user asks "why/what/are you X/did X happen", the reply must directly resolve that logical question before adding emotion or banter.
 - Pragmatic/humor failure: if context asks for a specific answer and the user gives an over-broad, tautological, deliberately literal, or absurd answer, treat it as likely humor unless the user sounds distressed. Example: assistant asks "what do you want to eat?", user says "I want to eat rice/food" instead of a dish; a good reply catches the joke or teases lightly, not a literal nutrition/meal-planning response.
 - If the user is joking, the reply should acknowledge the joke first, then optionally continue the topic.
+- Repetition failure: reject a reply that keeps escalating, rephrasing, or re-selling the same request, object, joke, or proposal from the recent conversation (for example repeatedly asking the user to buy ice cream in slightly different quantities) when the user did not explicitly continue that topic. Rewrite by answering the newest message and moving naturally onward.
 When rewriting, answer the latest user message first, keep it short, and admit a mistake naturally if needed.`
   const userPrompt = `Persona name: ${name}
 Persona: ${truncate(opts.contact.systemPrompt || '', 700)}

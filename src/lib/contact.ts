@@ -1,5 +1,6 @@
 import type { Contact } from '../types'
 
 export function displayName(contact: Pick<Contact, 'name' | 'remark'>): string {
-  return contact.remark?.trim() || contact.name
+  const remark = contact.remark?.trim()
+  return remark ? `${contact.name}（${remark}）` : contact.name
 }

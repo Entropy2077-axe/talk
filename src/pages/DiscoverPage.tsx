@@ -11,6 +11,7 @@ import { momentsUnreadCount } from '../lib/momentsUnread'
 
 // Only 朋友圈 is always present — everything else is a toggleable module.
 const BASE_ENTRIES = [
+  { to: '/social-inbox', icon: '🔔', label: '互动收件箱' },
   { to: '/moments', icon: '📸', label: '朋友圈' },
 ]
 

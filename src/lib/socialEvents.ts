@@ -51,11 +51,18 @@ export async function recordSocialEvent(opts: {
   await db.socialEvents.add(event)
 }
 
-export async function recentSocialEventsText(contactIds: string[], limit = 4): Promise<string> {
+export async function recentSocialEventsText(contactIds: string[], limit = 4, includePrivateGroups = true): Promise<string> {
   const ids = new Set(uniqueContactIds(contactIds))
   if (ids.size === 0) return ''
 
-  return (await recentSocialEvents(contactIds, limit))
+  let events = await recentSocialEvents(contactIds, limit + 8)
+  if (!includePrivateGroups) {
+    const groupIds = Array.from(new Set(events.map((event) => event.groupId).filter((id): id is string => !!id)))
+    const groups = new Map((await db.groups.bulkGet(groupIds)).filter((group): group is NonNullable<typeof group> => !!group).map((group) => [group.id, group]))
+    events = events.filter((event) => !event.groupId || (groups.get(event.groupId)?.momentSharing ?? 'enabled') === 'enabled')
+  }
+  return events
+    .slice(0, limit)
     .sort((a, b) => a.createdAt - b.createdAt)
     .map((event) => `- ${event.summary}`)
     .join('\n')

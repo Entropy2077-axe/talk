@@ -12,7 +12,8 @@ import { knowledgeDigestText } from '../lib/knowledgeBase'
 import { describeCurrentTime } from '../lib/time'
 import { isModuleEnabled } from '../features'
 import { useSettingsStore } from '../store/useSettingsStore'
-import type { Contact, Group, GroupEnergyLevel, GroupSpeakerLimit } from '../types'
+import { setGroupPlanStatus } from '../lib/groupPlans'
+import type { Contact, Group, GroupEnergyLevel, GroupPlan, GroupSpeakerLimit } from '../types'
 
 const EMPTY_CONTACTS: Contact[] = []
 const SPEAKER_LIMIT_OPTIONS: GroupSpeakerLimit[] = [2, 3, 4, 5, 'all']
@@ -119,6 +120,7 @@ export function GroupInfoPage() {
   const [selectedToAdd, setSelectedToAdd] = useState<string[]>([])
 
   const group = useLiveQuery(() => (groupId ? db.groups.get(groupId) : undefined), [groupId])
+  const groupPlans = useLiveQuery(() => (groupId ? db.groupPlans.where('groupId').equals(groupId).reverse().sortBy('createdAt') : []), [groupId]) ?? []
   const allContacts = useLiveQuery(() => db.contacts.toArray(), []) ?? EMPTY_CONTACTS
   const membersRaw = useLiveQuery(() => (group ? db.contacts.bulkGet(group.memberContactIds) : []), [group])
   const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? []
@@ -257,6 +259,20 @@ export function GroupInfoPage() {
           <p className="whitespace-pre-wrap rounded-lg bg-gray-50 px-3 py-2 text-sm leading-relaxed text-gray-600">
             {group.vibe || '暂无群聊氛围。后续可由群聊总结自动沉淀。'}
           </p>
+        </section>
+
+        <section className="mt-3 bg-white px-4 py-4">
+          <h3 className="mb-2 text-xs font-medium text-gray-400">朋友圈素材</h3>
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              ['enabled', '允许引用'], ['relationshipOnly', '仅关系'], ['private', '群内私密'],
+            ] as const).map(([value, label]) => <button key={value} type="button" onClick={() => void updateGroup({ momentSharing: value })} className={`rounded-lg border px-2 py-2 text-xs ${(group.momentSharing ?? 'enabled') === value ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 text-gray-600'}`}>{label}</button>)}
+          </div>
+        </section>
+
+        <section className="mt-3 bg-white px-4 py-4">
+          <h3 className="mb-2 text-xs font-medium text-gray-400">共同计划</h3>
+          {groupPlans.length === 0 ? <p className="text-sm text-gray-400">群聊中形成明确约定后，会自动出现在这里。</p> : <div className="space-y-2">{groupPlans.map((plan: GroupPlan) => <div key={plan.id} className="rounded-lg bg-gray-50 p-3"><p className="text-sm font-medium text-gray-900">{plan.title}</p><p className="mt-1 text-xs text-gray-500">{plan.summary}{plan.location ? ` · ${plan.location}` : ''}</p><p className="mt-1 text-[11px] text-gray-400">{plan.status === 'pending' ? '待确认' : plan.status === 'confirmed' ? '已确认' : plan.status === 'completed' ? '已成行' : '已取消'}</p>{plan.status === 'pending' && <div className="mt-2 flex gap-2"><button type="button" onClick={() => void setGroupPlanStatus(plan, group, 'confirmed', settings)} className="rounded-md bg-gray-900 px-2.5 py-1 text-xs text-white">确认成行</button><button type="button" onClick={() => void setGroupPlanStatus(plan, group, 'cancelled', settings)} className="rounded-md bg-white px-2.5 py-1 text-xs text-gray-500">取消</button></div>}{plan.status === 'confirmed' && <div className="mt-2 flex gap-2"><button type="button" onClick={() => void setGroupPlanStatus(plan, group, 'completed', settings)} className="rounded-md bg-green-600 px-2.5 py-1 text-xs text-white">已成行</button><button type="button" onClick={() => void setGroupPlanStatus(plan, group, 'cancelled', settings)} className="rounded-md bg-white px-2.5 py-1 text-xs text-gray-500">取消</button></div>}</div>)}</div>}
         </section>
 
         <section className="mt-3 bg-white px-4 py-4">
