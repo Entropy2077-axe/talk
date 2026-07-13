@@ -6,11 +6,14 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:pages": "cross-env VITE_DEPLOY_TARGET=github-pages vite build",
+    "check:dist-secrets": "node scripts/check-dist-secrets.mjs",
     "lint": "oxlint",
     "test:e2e": "node scripts/run-e2e.mjs",
     "test:unit": "vitest run",
     "preview": "vite preview",
     "icon:android": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-android-icon.ps1",
+    "capture:marketing": "node scripts/capture-marketing.mjs",
     "release:apk": "node scripts/release-apk.mjs"
   },
   "dependencies": {
@@ -27,6 +30,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.1",
+    "cross-env": "^10.1.0",
     "@tailwindcss/vite": "^4.3.2",
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",

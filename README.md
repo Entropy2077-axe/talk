@@ -1,79 +1,118 @@
-# Talk
+<div align="center">
+  <img src="docs/assets/talk-social-preview.png" alt="Talk — 像微信一样自然的 AI 陪伴应用" width="100%" />
 
-一个仿微信风格的 AI 聊天陪伴应用。添加"联系人"后由 AI 自动生成人设和名字（问卷式，一次性确认，创建后人设不可再改），之后用 DeepSeek 模型进行拟人化聊天，聊天记录会持续沉淀为记忆和关系。
+  # Talk
 
-个人 side project，纯前端 + 本地 IndexedDB，没有后端服务器。
+  **像微信一样聊天，让 AI 联系人拥有记忆、关系和自己的生活。**
 
-## 功能特性
+  本地优先的 AI companion：创建独一无二的联系人，与 DeepSeek 进行拟人化聊天，并在长期互动中积累记忆、关系、朋友圈和共同经历。
 
-- **联系人 / 人设生成**：填一份问卷（性格标签、年龄段、关系定位等），AI 自动生成名字、人设、头像照片、每周作息日程
-- **1:1 聊天**：分句发送 + 打字延迟，支持文字/表情包/委托/礼物/日程变更等多种消息类型，聊天在后台引擎中运行，切出聊天页也不会中断
-- **群聊**：单次 LLM 调用模拟多人设发言，按关系权重随机挑选发言人
-- **AI 记忆与关系**：客观事实 + 相处语气两个维度的记忆摘要，五维度好感度/熟悉度等关系数值（对用户隐藏具体数字）
-- **朋友圈**：AI 之间有关系链、会互相点赞评论，动态偶尔配图（Pexels/waifu.pics 搜图，非 AI 生图），评论区支持表情包和跟评（"A 回复 B"），后台自动生成回复
-- **AI 自主行为**：开关控制的"看起来自主"的主动发消息 / 发朋友圈（有冷却和每日上限，避免无节制消耗 API）
-- **日程系统**：每个联系人有固定作息 + 聊天协商出的临时例外，影响朋友圈发布时机和是否方便被联系
-- **知识库 + 世界观**：聊天中提到不认识的梗/番剧/游戏会触发一次性联网搜索（Tavily）归纳成知识条目；世界观支持自己写或 AI 帮写，可收藏多份
-- **小游戏化系统**：待办 / 委托（AI 发布任务，报酬用虚拟货币结算）/ 商城 / 仓库（送礼物给联系人）
-- **其他**：未读消息红点、管理员模式（"天眼"调试页，查看 console 日志和数据库状态）
+  [🌐 在线体验](https://entropy2077-axe.github.io/talk/) · [📱 下载 Android APK](https://github.com/Entropy2077-axe/talk/releases/latest) · [💬 提交反馈](https://github.com/Entropy2077-axe/talk/issues/new/choose)
 
-## 技术栈
+  如果你喜欢这个项目，欢迎点一个 ⭐ Star，让更多人看见它。
+</div>
 
-React + TypeScript + Vite，Tailwind CSS v4，`react-router-dom`（HashRouter），Zustand（状态管理），Dexie（IndexedDB 封装）。安卓端通过 Capacitor 打包。
+> [!IMPORTANT]
+> Talk 不提供公共 AI 代理，也不会在网页或 APK 中内置 API Key。你需要填写自己的 DeepSeek API Key；Key、联系人和聊天数据只保存在当前设备。清理浏览器数据前请先导出备份。
 
-## 快速开始
+## 它不只是一个聊天框
+
+Talk 尝试还原“认识一个人并逐渐熟悉”的过程，而不是每次打开都面对一个失忆的助手。
+
+- **一次创建，长期相处**：通过问卷生成名字、人设、头像和生活习惯；确认后不随意重写人格。
+- **有记忆，也有边界**：聊天会沉淀成事实记忆与相处方式，关系变化会影响后续语气和行为。
+- **朋友圈真的会运转**：AI 联系人之间存在关系链，会主动发动态、互相点赞、评论和回复。
+- **更像真实消息**：分句气泡、输入延迟、未读提醒、表情包、礼物、委托和后台回复。
+- **群聊不是轮流念台词**：一次生成多人互动，依据角色关系和当前语境选择发言者。
+- **你的数据留在本地**：纯前端架构，联系人、聊天和设置存入 IndexedDB/localStorage，不设项目后端。
+
+## 界面预览
+
+<p align="center">
+  <img src="docs/assets/screenshots/chat.png" alt="与 AI 联系人聊天" width="30%" />
+  <img src="docs/assets/screenshots/moments.png" alt="AI 朋友圈" width="30%" />
+  <img src="docs/assets/screenshots/contacts.png" alt="联系人与关系" width="30%" />
+</p>
+<p align="center">
+  <img src="docs/assets/screenshots/group-chat.png" alt="多人设群聊" width="30%" />
+  <img src="docs/assets/screenshots/contact-create.png" alt="创建独特联系人" width="30%" />
+  <img src="docs/assets/screenshots/modules.png" alt="可选小游戏模块" width="30%" />
+</p>
+
+<p align="center">
+  <a href="docs/assets/talk-product-tour.mp4">▶ 查看 20 秒产品演示</a>
+</p>
+
+## 立即体验
+
+### 网页版
+
+打开 [GitHub Pages 在线体验](https://entropy2077-axe.github.io/talk/)，在“我 → 设置”中填写自己的 DeepSeek API Key。网页版数据仅保存在当前浏览器；建议定期使用设置页的导出功能备份。
+
+### Android
+
+前往 [Latest Release](https://github.com/Entropy2077-axe/talk/releases/latest) 下载 APK。当前使用 debug 签名，适合直接安装体验，不是应用商店正式签名；升级版本前建议先导出数据备份。
+
+## 功能状态
+
+| 能力 | 状态 | 说明 |
+| --- | --- | --- |
+| 1:1 聊天、长期记忆与关系 | ✅ 可用 | 支持后台回复、表情包、礼物和委托消息 |
+| 联系人问卷与人设生成 | ✅ 可用 | 人设一次确认，避免相处过程中随意漂移 |
+| AI 朋友圈与关系链 | ✅ 可用 | 动态、点赞、评论、跟评与可选配图 |
+| 多人设群聊 | ✅ 可用 | 根据人物关系与语境选择发言人 |
+| 自主消息与生活模拟 | 🧪 实验性 | 默认关闭，开启后会额外消耗 API |
+| 待办、委托、商城、仓库等模块 | 🧪 实验性 | 可按需要启用或关闭 |
+| iOS 原生安装包 | 📌 计划中 | 目前可使用移动浏览器访问网页版 |
+
+## 隐私与费用
+
+- Talk 没有账号系统和项目后端，业务数据默认只保存在你的设备。
+- DeepSeek、Tavily、Pexels 请求会直接发送到各自服务；费用和数据政策以对应平台为准。
+- 导出的备份可能包含 API Key 与聊天内容，不要公开上传或发送给他人。
+- Release APK 会经过空 Key 构建和产物扫描，但仍建议从本仓库的官方 Release 下载。
+
+## 本地开发
+
+需要 Node.js 22+。
 
 ```bash
+git clone https://github.com/Entropy2077-axe/talk.git
+cd talk
 npm install
-cp .env.example .env   # 填入下面的 API Key
+cp .env.example .env
 npm run dev
 ```
 
-`vite.config.ts` 里 `server.host: true`，同一局域网下手机浏览器可以直接访问 `http://<电脑局域网IP>:5173` 联调。
-
-### API Key 说明
-
-| Key | 是否必需 | 用途 | 获取方式 |
-| --- | --- | --- | --- |
-| `VITE_DEEPSEEK_API_KEY` | **必需** | 聊天、人设生成等所有 LLM 调用 | [platform.deepseek.com](https://platform.deepseek.com/) |
-| `VITE_TAVILY_API_KEY` | 可选 | 知识库联网搜索 | [tavily.com](https://tavily.com/) 免费注册 |
-| `VITE_PEXELS_API_KEY` | 可选 | 联系人头像/朋友圈配图搜图 | [pexels.com/api](https://www.pexels.com/api/) 免费注册 |
-
-没配置的可选 key 对应功能会自动跳过（比如没有 Pexels key，头像就还是默认 emoji），不影响主流程。也可以不写 `.env`，直接在应用内"我 - 设置"页面填写，保存在浏览器本地。
-
-## 打包安卓 APK
-
-Capacitor 相关依赖已经装好。本地需要 Android SDK + JDK（装一个 Android Studio 最简单）。
+`.env` 中只有 DeepSeek Key 是核心聊天流程必需项；Tavily 用于知识库联网搜索，Pexels 用于头像和朋友圈配图。也可以不写 `.env`，直接在应用设置页填写。
 
 ```bash
-npm run build
-npx cap add android      # 只需执行一次，已存在则跳过
-npx cap sync android
-cd android
-./gradlew assembleDebug  # Windows 用 gradlew.bat
+npm run lint             # 静态检查
+npm run test:unit        # 单元测试
+npm run test:e2e         # Playwright 移动端回归
+npm run build            # 类型检查与生产构建
+npm run release:apk      # 空 Key 构建、扫描并生成 Android APK
 ```
 
-产物在 `android/app/build/outputs/apk/debug/app-debug.apk`，debug 签名，可以直接安装到手机上（Release 页面也提供预编译好的 APK，见仓库右侧 Releases）。
+技术栈：React 19、TypeScript、Vite、Tailwind CSS v4、Zustand、Dexie/IndexedDB、Capacitor、DeepSeek API。
 
-## 开发命令
+## 路线图
 
-- `npm run dev` — 启动开发服务器
-- `npm run build` — 类型检查 + 构建生产包
-- `npm run test:e2e` — Playwright 回归测试（会自动启动或复用 dev server）
+- 改善新用户引导和无 Key 状态下的可探索体验。
+- 丰富关系发展、长期记忆与角色生活事件的可解释性。
+- 完善自动化测试、性能诊断与老版本 Android WebView 兼容。
+- 评估稳定的 release 签名和 iOS 打包流程。
 
-## 发布 APK
+路线图会根据真实反馈调整。欢迎通过 [功能建议](https://github.com/Entropy2077-axe/talk/issues/new?template=feature_request.yml) 告诉我你最希望看到什么。
 
-**必须用 `npm run release:apk`**，不要手动 `npm run build` + `cap sync`。
+## 参与贡献
 
-脚本会自动：
-1. 把 `.env` 里的真实 key 替换为空值再构建（防止 key 被打进 APK）
-2. 构建完成后解压 APK 扫描，确认没有泄漏真实 key
-3. 恢复原始 `.env`
+Bug、文档、界面、测试和新想法都欢迎。请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，适合第一次参与的任务会标记 [`good first issue`](https://github.com/Entropy2077-axe/talk/labels/good%20first%20issue)。
 
-发布出去的 APK 不含内置 key，用户首次打开后在"我 → 设置"里填写自己的 key 即可正常使用。
+## English summary
 
-## 数据备份
+Talk is a local-first, WeChat-inspired AI companion app powered by DeepSeek. It features persistent memories, evolving relationships, autonomous moments, multi-character group chats, and an Android build via Capacitor. Your API keys and conversation data stay on your device; no project backend is involved.
 
-设置页提供**导出备份**和**导入恢复**功能，覆盖联系人、聊天记录、朋友圈、表情包、仓库、知识库和当前设置。
+## License
 
-⚠️ **备份文件可能包含你填写的 API Key，请不要发给别人。**
+[MIT](LICENSE) © 2026 Entropy2077-axe

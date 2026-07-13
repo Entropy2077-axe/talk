@@ -1,0 +1,48 @@
+name: Bug 反馈
+description: 报告可复现的问题
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 请先删除截图、日志或备份中的 API Key 和私人聊天内容。
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述
+      description: 实际发生了什么？你原本期待什么？
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: "1. 打开…\n2. 点击…\n3. 看到…"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Talk 版本
+      placeholder: v0.1.24 / 在线体验
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 运行环境
+      options: [Android APK, Android 浏览器, iOS 浏览器, Windows 浏览器, macOS 浏览器, 其他]
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 截图或日志
+      description: 可选。请务必先移除 API Key 和私人信息。
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: 隐私确认
+      options:
+        - label: 我确认提交内容不包含 API Key、私人聊天或其他敏感信息。
+          required: true

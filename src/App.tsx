@@ -28,6 +28,7 @@ import { ProfileEditPage } from './pages/ProfileEditPage'
 import { ModulesPage } from './pages/ModulesPage'
 import { SkyEyePage } from './pages/SkyEyePage'
 import { SocialInboxPage } from './pages/SocialInboxPage'
+import { WebPrivacyNotice } from './components/WebPrivacyNotice'
 // Runs once at module load, regardless of admin mode — so there's already
 // log history by the time someone opens "天眼".
 installConsoleCapture()
@@ -134,6 +135,7 @@ function App() {
     <AppErrorBoundary key={location.key}>
       <div className={`app-shell ${themeMode === 'dark' ? 'theme-dark' : ''}`}>
         <NotificationBanner />
+        <WebPrivacyNotice />
         <Routes>
         <Route element={<TabLayout />}>
           <Route path="/" element={<MessagesPage />} />
