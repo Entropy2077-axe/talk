@@ -11,6 +11,7 @@ import { isModuleEnabled } from '../features'
 import { retrieveWorldbookContext } from './worldbook'
 import { recentMemoriesText, socialMemoriesText } from './memory'
 import { recentSocialEventsText } from './socialEvents'
+import { recentSharedOriginalContext } from './sharedRecentContext'
 import type { AppSettings, Contact } from '../types'
 
 const ELIGIBLE_WINDOW_MS = 10 * 60 * 1000
@@ -263,12 +264,13 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
   const stickerNames = (await db.stickers.toArray()).map((s) => s.name)
   const involved = Array.from(new Set(entries.flatMap((entry) => [entry.poster, ...entry.commenters.map((commenter) => commenter.contact)])))
   const contextRows = await Promise.all(involved.map(async (contact) => {
-    const [privateMemories, socialMemories, events] = await Promise.all([
+    const [privateMemories, socialMemories, events, originalContext] = await Promise.all([
       recentMemoriesText(contact.id, 4),
       socialMemoriesText(contact.id, 4),
       recentSocialEventsText([contact.id], 3, false),
+      recentSharedOriginalContext([contact.id], settings.userNickname, { maxMessages: 70, maxChars: 9_000 }),
     ])
-    return [contact.id, [privateMemories, socialMemories, events].filter(Boolean).join('\n').slice(0, 1100)] as const
+    return [contact.id, [originalContext, privateMemories, socialMemories, events].filter(Boolean).join('\n\n').slice(0, 10_500)] as const
   }))
   const contexts = new Map(contextRows)
   const raw = await chatCompletion({
@@ -457,10 +459,11 @@ export async function postUserMoment(content: string, settings: AppSettings): Pr
     try {
       const stickerNames = (await db.stickers.toArray()).map((s) => s.name)
       const contextRows = await Promise.all(commenterPlans.map(async ({ contact }) => {
-        const [memories, social, events] = await Promise.all([
+        const [memories, social, events, originalContext] = await Promise.all([
           recentMemoriesText(contact.id, 4), socialMemoriesText(contact.id, 4), recentSocialEventsText([contact.id], 2, false),
+          recentSharedOriginalContext([contact.id], settings.userNickname, { maxMessages: 60, maxChars: 8_000 }),
         ])
-        return [contact.id, [memories, social, events].filter(Boolean).join('\n').slice(0, 900)] as const
+        return [contact.id, [originalContext, memories, social, events].filter(Boolean).join('\n\n').slice(0, 9_000)] as const
       }))
       const raw = await chatCompletion({
         apiKey: settings.apiKey,
@@ -583,13 +586,14 @@ export async function generateMomentReply(
     const moment = await db.moments.get(momentId)
     if (!moment) return
 
-    const [allContacts, existingComments, stickers, privateMemories, socialMemories, events] = await Promise.all([
+    const [allContacts, existingComments, stickers, privateMemories, socialMemories, events, originalContext] = await Promise.all([
       db.contacts.toArray(),
       db.momentComments.where('momentId').equals(momentId).sortBy('createdAt'),
       db.stickers.toArray(),
       recentMemoriesText(poster.id, 4),
       socialMemoriesText(poster.id, 4),
       recentSocialEventsText([poster.id], 3, false),
+      recentSharedOriginalContext([poster.id], settings.userNickname, { maxMessages: 60, maxChars: 8_000 }),
     ])
     const contactById = new Map(allContacts.map((c) => [c.id, c]))
     const labelFor = (authorContactId: string) =>
@@ -605,7 +609,7 @@ export async function generateMomentReply(
       messages: [
         {
           role: 'system',
-          content: buildMomentReplyPrompt(poster, moment.content, threadLines, isModuleEnabled('worldview') ? await retrieveWorldbookContext(`${poster.name}\n${poster.systemPrompt}\n${moment.content}\n${threadLines}`) : '', stickerNames, [privateMemories, socialMemories, events].filter(Boolean).join('\n').slice(0, 1100)),
+          content: buildMomentReplyPrompt(poster, moment.content, threadLines, isModuleEnabled('worldview') ? await retrieveWorldbookContext(`${poster.name}\n${poster.systemPrompt}\n${moment.content}\n${threadLines}`) : '', stickerNames, [originalContext, privateMemories, socialMemories, events].filter(Boolean).join('\n\n').slice(0, 9_500)),
         },
         { role: 'user', content: '请回复' },
       ],

@@ -3,7 +3,7 @@ import { displayName } from './contact'
 import { activeUpcomingPlansText } from './memory'
 import { describeCurrentSchedule, describeUpcomingScheduleText } from './schedule'
 import { formatPersonaProfile, personalityTraitLine } from './prompt'
-import type { AiBubble, AppSettings, Contact, GroupAiBubble, GroupEnergyLevel } from '../types'
+import type { AdminAiTraceStage, AiBubble, AppSettings, Contact, GroupAiBubble, GroupEnergyLevel } from '../types'
 
 interface QualityResult {
   valid: boolean
@@ -61,6 +61,7 @@ async function validateAndMaybeRepair(opts: {
   userPrompt: string
   raw: string
   signal?: AbortSignal
+  trace?: { turnId: string; stage: AdminAiTraceStage; conversationId?: string }
 }): Promise<{ raw: string; repaired: boolean; reason?: string; detectedInvalid?: boolean }> {
   try {
     const judged = await chatCompletion({
@@ -74,6 +75,7 @@ async function validateAndMaybeRepair(opts: {
         { role: 'user', content: opts.userPrompt },
       ],
       purpose: 'quality',
+      trace: opts.trace,
     })
     const result = parseQualityResult(judged)
     if (!result) {
@@ -96,10 +98,12 @@ export async function validatePrivateTurn(opts: {
   contact: Contact
   latestUserText: string
   recentConversationText?: string
+  sharedRecentContext?: string
   raw: string
   bubbles: AiBubble[]
   worldbookText?: string
   signal?: AbortSignal
+  trace?: { turnId: string; stage: AdminAiTraceStage; conversationId?: string }
 }): Promise<{ raw: string; repaired: boolean; reason?: string; detectedInvalid?: boolean }> {
   const name = displayName(opts.contact)
   const now = new Date()
@@ -125,6 +129,7 @@ If invalid, rewrite as fixedRaw. Must include mood and thought: {"messages":[{"t
 - Pragmatic/humor failure: if context asks for a specific answer and the user gives an over-broad, tautological, deliberately literal, or absurd answer, treat it as likely humor unless the user sounds distressed. Example: assistant asks "what do you want to eat?", user says "I want to eat rice/food" instead of a dish; a good reply catches the joke or teases lightly, not a literal nutrition/meal-planning response.
 - If the user is joking, the reply should acknowledge the joke first, then optionally continue the topic.
 - Repetition failure: reject a reply that keeps escalating, rephrasing, or re-selling the same request, object, joke, or proposal from the recent conversation (for example repeatedly asking the user to buy ice cream in slightly different quantities) when the user did not explicitly continue that topic. Rewrite by answering the newest message and moving naturally onward.
+- State-transition confirmation failure: when a later record clearly replaces an earlier state (for example “我要睡了” followed by “我决定不睡了，起来喝咖啡”), treat the later state as settled. Reject a reply that merely repeats it as a confirmation question such as “你不睡了？” or “你起来了？”, unless the records genuinely conflict or the user sounded uncertain. If the newest message is an invitation/question/request, answer that first and weave continuity in naturally instead of proving that you remember it.
 When rewriting, answer the latest user message first, keep it short, and admit a mistake naturally if needed.`
   const userPrompt = `Persona name: ${name}
 Persona: ${truncate(opts.contact.systemPrompt || '', 700)}
@@ -139,6 +144,8 @@ Upcoming schedule: ${upcomingSchedule || '(none)'}
 Plans with user: ${upcomingPlans || '(none)'}
 Recent conversation:
 ${truncate(opts.recentConversationText || '(none)', 1200)}
+Cross-scene recent original records (ground truth; private lines must not be leaked publicly):
+${truncate(opts.sharedRecentContext || '(none)', 5000)}
 Latest user message: ${truncate(opts.latestUserText || '(background event)', 500)}
 Assistant rendered reply:
 ${truncate(privateBubblesText(opts.bubbles), 900)}
@@ -151,6 +158,7 @@ ${truncate(opts.raw, 1200)}${worldbookInfo}`
     userPrompt,
     raw: opts.raw,
     signal: opts.signal,
+    trace: opts.trace,
   })
 }
 
@@ -159,10 +167,12 @@ export async function validateGroupTurn(opts: {
   groupName: string
   speakers: Contact[]
   targetedContext: string
+  sharedRecentContext?: string
   raw: string
   bubbles: GroupAiBubble[]
   worldbookText?: string
   signal?: AbortSignal
+  trace?: { turnId: string; stage: AdminAiTraceStage; conversationId?: string }
 }): Promise<{ raw: string; repaired: boolean; reason?: string; detectedInvalid?: boolean }> {
   const speakerText = opts.speakers
     .map((speaker, i) => `${i + 1}. ${displayName(speaker)}: ${truncate(speaker.systemPrompt || '', 260)}`)
@@ -171,6 +181,7 @@ export async function validateGroupTurn(opts: {
 ${opts.worldbookText}` : ''
   const systemPrompt = `You are a strict group-chat response reviewer. Output JSON only: {"valid":true/false,"reason":"short","fixedRaw":"optional"}.
 Judge whether each speaker follows their persona, the reply handles @mentions/replies, and the scene remains a natural group chat rather than several private replies to the user.
+Treat a later explicit state as replacing an earlier one. A speaker must not repeat an already-settled transition as “你不睡了？”/“你起来了？” merely to show memory; answer the newest invitation, question, or request first unless the timeline is genuinely contradictory or uncertain.
 Persona is a hard logical premise for every speaker: reject a speaker whose response could be factually possible but is generic or contradicts the speaker's stated trait, boundary, habit, MBTI, or behavior anchor. In any plausible alternative, require the response that best reflects that speaker's distinctive personality without inventing facts.
 Also check the protocol: speakerIndex must be one of the listed speakers; content must not contain leaked <name>, speaker-name prefixes, parenthesized thoughts, bracketed moods, or wrapping quotes; every message must include non-empty thought and mood, and they must not leak into content; groupVibe must be present and non-empty.${opts.worldbookText ? ' Content grounded in an active worldbook entry is NOT "invented facts" — worldbook defines canon world rules.' : ''}
 If valid, return valid=true and omit fixedRaw.
@@ -180,6 +191,8 @@ Speakers:
 ${speakerText}
 Target context:
 ${truncate(opts.targetedContext || '(none)', 500)}
+Cross-scene recent original records (ground truth; private lines must not be leaked publicly):
+${truncate(opts.sharedRecentContext || '(none)', 5000)}
 Assistant rendered reply:
 ${truncate(groupBubblesText(opts.bubbles, opts.speakers), 900)}
 Raw assistant protocol:
@@ -191,6 +204,7 @@ ${truncate(opts.raw, 1200)}${worldbookInfo}`
     userPrompt,
     raw: opts.raw,
     signal: opts.signal,
+    trace: opts.trace,
   })
 }
 
@@ -202,8 +216,10 @@ export async function validateGroupDraft(opts: {
   allowAiChatter: boolean
   energyLevel: GroupEnergyLevel
   targetedContext: string
+  sharedRecentContext?: string
   worldbookText?: string
   signal?: AbortSignal
+  trace?: { turnId: string; stage: AdminAiTraceStage; conversationId?: string }
 }): Promise<{ valid: boolean; reason?: string }> {
   const speakerText = opts.speakers.map((speaker, i) => `${i + 1}. ${displayName(speaker)}`).join('\n')
   const energyRule =
@@ -255,11 +271,15 @@ ${speakerText}
 定向上下文:
 ${truncate(opts.targetedContext || '(none)', 600)}
 
+近期跨场景原文（事实依据；私聊内容不得在群聊泄露）:
+${truncate(opts.sharedRecentContext || '(none)', 5000)}
+
 草稿:
 ${truncate(opts.rawText, 3000)}`,
         },
       ],
       purpose: 'quality',
+      trace: opts.trace,
     })
     const result = parseQualityResult(judged)
     if (!result) return { valid: true }

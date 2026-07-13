@@ -22,6 +22,7 @@ import { buildUserProfileText, useChatEngineStore } from './chatEngine'
 import { validateGroupDraft, validateGroupTurn } from './responseQuality'
 import { searchPexelsPhoto } from './photoSearch'
 import { recentSocialEventsText, recordSocialEvent } from './socialEvents'
+import { recentSharedOriginalContext } from './sharedRecentContext'
 import { createGroupPlan, planCardMessage } from './groupPlans'
 import { useChatUiStore } from '../store/useChatUiStore'
 import { retrieveWorldbookContext } from './worldbook'
@@ -341,6 +342,7 @@ async function runGroupAiTurn(
     const knowledgeEntries = await db.knowledgeEntries.toArray()
     const targetContext = targetedContextText(latestUserMessage, contactById, messageById, settings.userNickname)
     const recentEventsText = await recentSocialEventsText(members.map((m) => m.id), 4)
+    const sharedOriginalContext = await recentSharedOriginalContext(members.map((m) => m.id), settings.userNickname, { maxMessages: 120, maxChars: 20_000 })
     const worldbookText = isModuleEnabled('worldview') ? await retrieveWorldbookContext([group.name, group.vibe, targetContext, history.slice(-10).map((m) => m.content).join(' '), members.map((m) => `${m.name} ${m.systemPrompt}`).join(' ')].filter(Boolean).join('\n')) : ''
 
     const speakerMemoriesMap = await loadSpeakerMemories(speakers)
@@ -422,7 +424,7 @@ async function runGroupAiTurn(
     // prompt, a group turn's assistant block can contain several different
     // people, and role:"assistant" alone can't distinguish them across turns.
     const chatMessages: ChatMessage[] = coalesceConsecutiveRoles([
-      { role: 'system', content: outlineSection ? `${systemPrompt}\n\n${outlineSection}` : systemPrompt },
+      { role: 'system', content: [systemPrompt, sharedOriginalContext, outlineSection].filter(Boolean).join('\n\n') },
       ...recentHistory.map((m): ChatMessage => formatGroupHistoryMessage(m, contactById, messageById, settings.userNickname)),
     ])
     let rawText = await chatCompletion({
@@ -432,6 +434,7 @@ async function runGroupAiTurn(
       messages: chatMessages,
       signal: controller.signal,
       purpose: 'chat',
+      trace: { turnId: streamId, stage: 'first_chat', conversationId },
     })
 
     if (streamByConversation.get(conversationId) !== streamId) return
@@ -445,8 +448,10 @@ async function runGroupAiTurn(
       allowAiChatter: group.allowAiChatter ?? true,
       energyLevel: group.energyLevel ?? 'normal',
       targetedContext: targetContext,
+      sharedRecentContext: sharedOriginalContext,
       worldbookText: worldbookText || undefined,
       signal: controller.signal,
+      trace: { turnId: streamId, stage: 'first_quality', conversationId },
     })
     if (streamByConversation.get(conversationId) !== streamId) return
     if (!draftCheck.valid) {
@@ -477,6 +482,7 @@ ${rawText}
         ]),
         signal: controller.signal,
         purpose: 'chat',
+        trace: { turnId: streamId, stage: 'second_chat', conversationId },
       })
       if (streamByConversation.get(conversationId) !== streamId) return
       console.log(`[group] 主模型重写草稿(${rawText.length}字): ${rawText.slice(0, 160)}...`)
@@ -494,6 +500,7 @@ ${rawText}
       ],
       jsonMode: true,
       signal: controller.signal,
+      trace: { turnId: streamId, stage: 'other', conversationId },
     })
 
     if (streamByConversation.get(conversationId) !== streamId) return
@@ -507,10 +514,12 @@ ${rawText}
         groupName: group.name,
         speakers,
         targetedContext: targetContext,
+        sharedRecentContext: sharedOriginalContext,
         raw: finalRaw,
         bubbles,
         worldbookText: worldbookText || undefined,
-      signal: controller.signal,
+        signal: controller.signal,
+        trace: { turnId: streamId, stage: 'second_quality', conversationId },
       })
       if (streamByConversation.get(conversationId) !== streamId) return
       if (checked.repaired) {
@@ -527,8 +536,8 @@ ${rawText}
     if (isModuleEnabled('knowledgeBase') && knowledgeQueries.length > 0) {
       const knowledge = await resolveKnowledgeQueries(knowledgeQueries, settings)
       if (knowledge.text) {
-        rawText = await chatCompletion({ apiKey:settings.apiKey,baseUrl:settings.baseUrl,model:settings.model,messages:[...chatMessages,{role:'user',content:`刚才出现了你们不了解的词。搜索结果如下：\n${knowledge.text}${reviewFailure?`\n\n上一版审查问题：${reviewFailure}，重写时同时修正。`:''}\n请基于结果重新生成群聊草稿，保持原群聊格式，像刚查明白后自然接话，不要写成报告。`}],signal:controller.signal })
-        jsonRaw = await chatCompletion({apiKey:settings.apiKey,baseUrl:settings.baseUrl,model:settings.utilityModel,messages:[{role:'system',content:buildGroupJsonConversionPrompt(rawText,speakers,stickers.map(s=>s.name))}],jsonMode:true,signal:controller.signal})
+        rawText = await chatCompletion({ apiKey:settings.apiKey,baseUrl:settings.baseUrl,model:settings.model,messages:[...chatMessages,{role:'user',content:`刚才出现了你们不了解的词。搜索结果如下：\n${knowledge.text}${reviewFailure?`\n\n上一版审查问题：${reviewFailure}，重写时同时修正。`:''}\n请基于结果重新生成群聊草稿，保持原群聊格式，像刚查明白后自然接话，不要写成报告。`}],signal:controller.signal, trace:{turnId:streamId,stage:'second_chat',conversationId} })
+        jsonRaw = await chatCompletion({apiKey:settings.apiKey,baseUrl:settings.baseUrl,model:settings.utilityModel,messages:[{role:'system',content:buildGroupJsonConversionPrompt(rawText,speakers,stickers.map(s=>s.name))}],jsonMode:true,signal:controller.signal,trace:{turnId:streamId,stage:'other',conversationId}})
         finalRaw=jsonRaw
         ;({bubbles,knowledgeQueries,turnSummary,groupVibe,planCandidates}=parseGroupAiResponse(finalRaw,speakers.length))
       }

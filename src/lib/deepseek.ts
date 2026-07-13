@@ -5,7 +5,7 @@ export interface ChatMessage {
 import { assertAutomaticAiBudget, estimateTokens, recordAiUsage } from './aiUsage'
 import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
-import type { AiUsagePurpose } from '../types'
+import type { AdminAiTraceStage, AiUsagePurpose } from '../types'
 
 /**
  * Merges consecutive same-role messages into one. Each AI turn is stored as
@@ -33,7 +33,7 @@ function normalizeBaseUrl(baseUrl: string) {
   return baseUrl.replace(/\/+$/, '')
 }
 
-async function traceAiCall(opts: { purpose: AiUsagePurpose; model: string; messages: ChatMessage[]; output?: string; error?: string; inputTokens: number; outputTokens: number }) {
+async function traceAiCall(opts: { purpose: AiUsagePurpose; model: string; messages: ChatMessage[]; output?: string; error?: string; inputTokens: number; outputTokens: number; turnId?: string; stage?: AdminAiTraceStage; conversationId?: string }) {
   try {
     await db.adminAiTraces.add({ id: uuid(), ...opts, createdAt: Date.now() })
     const overflow = (await db.adminAiTraces.orderBy('createdAt').toArray()).slice(0, -500)
@@ -99,6 +99,7 @@ export async function chatCompletion(opts: {
   purpose?: AiUsagePurpose
   automatic?: boolean
   maxTokens?: number
+  trace?: { turnId: string; stage: AdminAiTraceStage; conversationId?: string }
 }): Promise<string> {
   const purpose = opts.purpose ?? 'other'
   const automatic = opts.automatic ?? false
@@ -132,11 +133,11 @@ export async function chatCompletion(opts: {
   const promptTokens = Number(json?.usage?.prompt_tokens)
   const completionTokens = Number(json?.usage?.completion_tokens)
   await recordAiUsage({ purpose, model: opts.model, automatic, success: true, inputTokens: Number.isFinite(promptTokens) ? promptTokens : inputTokens, outputTokens: Number.isFinite(completionTokens) ? completionTokens : estimateTokens(content), estimated: !Number.isFinite(promptTokens) || !Number.isFinite(completionTokens) })
-  await traceAiCall({ purpose, model: opts.model, messages: opts.messages, output: content, inputTokens: Number.isFinite(promptTokens) ? promptTokens : inputTokens, outputTokens: Number.isFinite(completionTokens) ? completionTokens : estimateTokens(content) })
+  await traceAiCall({ purpose, model: opts.model, messages: opts.messages, output: content, inputTokens: Number.isFinite(promptTokens) ? promptTokens : inputTokens, outputTokens: Number.isFinite(completionTokens) ? completionTokens : estimateTokens(content), ...opts.trace })
   return content
   } catch (error) {
   await recordAiUsage({ purpose, model: opts.model, automatic, success: false, inputTokens, outputTokens: 0, estimated: true, error: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200) })
-    await traceAiCall({ purpose, model: opts.model, messages: opts.messages, error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500), inputTokens, outputTokens: 0 })
+    await traceAiCall({ purpose, model: opts.model, messages: opts.messages, error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500), inputTokens, outputTokens: 0, ...opts.trace })
     throw error
   }
 }
@@ -158,6 +159,6 @@ export async function chatCompletionStream(opts: Omit<Parameters<typeof chatComp
     }
   }
   await recordAiUsage({ purpose, model: opts.model, automatic: opts.automatic ?? false, success: true, inputTokens, outputTokens: estimateTokens(output), estimated: true })
-  await traceAiCall({ purpose, model: opts.model, messages: opts.messages, output, inputTokens, outputTokens: estimateTokens(output) })
+  await traceAiCall({ purpose, model: opts.model, messages: opts.messages, output, inputTokens, outputTokens: estimateTokens(output), ...opts.trace })
   return output
 }

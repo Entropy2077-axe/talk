@@ -16,6 +16,7 @@ import { displayName } from './contact'
 import { previewForMessage } from './messagePreview'
 import { validatePrivateTurn } from './responseQuality'
 import { recentSocialEventsText } from './socialEvents'
+import { recentSharedOriginalContext } from './sharedRecentContext'
 import { useChatUiStore } from '../store/useChatUiStore'
 import { enqueueSelfIterationTask } from './selfIteration'
 import { USER_WALLET_ID, balanceOf, reserveRedPacket, transferFunds } from './finance'
@@ -337,6 +338,7 @@ async function runAiTurn(
       ? `\n【经济状况】你的可用余额：${await balanceOf(contact.id)}；对方可用余额：${await balanceOf(USER_WALLET_ID)}。未结清借款：${(await db.loans.filter(l => l.status === 'active' && (l.lenderId === contact.id || l.borrowerId === contact.id)).toArray()).map(l => `${l.borrowerId === contact.id ? '你欠对方' : '对方欠你'}${l.outstanding}`).join('；') || '无'}。所有金钱动作必须量力而行，不得凭空造钱。`
       : ''
     const socialMemories = await socialMemoriesText(contact.id)
+    const sharedOriginalContext = await recentSharedOriginalContext([contact.id], settings.userNickname, { maxMessages: 90, maxChars: 16_000 })
     const lifeEventText = isModuleEnabled('lifeSimulation')
       ? (await db.lifeEvents.where('contactId').equals(contact.id).reverse().sortBy('occurredAt')).slice(0, 4).map((event) => event.summary).join('；')
       : ''
@@ -385,7 +387,7 @@ async function runAiTurn(
     const controller = new AbortController()
     abortByConversation.set(conversationId, controller)
     const chatMessages: ChatMessage[] = coalesceConsecutiveRoles([
-      { role: 'system', content: [contextSections, socialMemories].filter(Boolean).join('\n\n') },
+      { role: 'system', content: [contextSections, socialMemories, sharedOriginalContext].filter(Boolean).join('\n\n') },
       ...recentHistory.map((m): ChatMessage => {
         if (m.type === 'sticker') return formatStructuredHistoryEvent(m, 'sticker')
         if (m.type === 'link') return formatStructuredHistoryEvent(m, 'link')
@@ -405,6 +407,7 @@ async function runAiTurn(
       signal: controller.signal,
       purpose: proactiveContext ? 'proactive' : 'chat',
       automatic: !!proactiveContext,
+      trace: { turnId: streamId, stage: 'first_chat', conversationId },
     })
 
     if (streamByConversation.get(conversationId) !== streamId) return
@@ -423,6 +426,7 @@ async function runAiTurn(
       signal: controller.signal,
       purpose: proactiveContext ? 'proactive' : 'chat',
       automatic: !!proactiveContext,
+      trace: { turnId: streamId, stage: 'other', conversationId },
     })
 
     if (streamByConversation.get(conversationId) !== streamId) return
@@ -444,10 +448,12 @@ async function runAiTurn(
         contact,
         latestUserText: _triggeringUserText,
         recentConversationText: formatRecentConversationForReview(recentHistory, contact),
+        sharedRecentContext: sharedOriginalContext,
         raw: finalRaw,
         bubbles,
         worldbookText: worldbookText || undefined,
         signal: controller.signal,
+        trace: { turnId: streamId, stage: 'second_quality', conversationId },
       })
       if (streamByConversation.get(conversationId) !== streamId) return
       qualityCheckDebug.reason = checked.reason
@@ -471,9 +477,9 @@ async function runAiTurn(
         const enrichedMessages = chatMessages.map((message, index) => index === 0
           ? { ...message, content: `${message.content}\n\n【针对陌生词汇的搜索结果】\n${knowledge.text}${review}\n你刚才对陌生词汇自然表示了疑问。现在根据可靠搜索结果重新回答用户，语气要自然，不要写成搜索报告，也不要提审查流程。` }
           : message)
-        rawText = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, messages: enrichedMessages, signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext })
+        rawText = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, messages: enrichedMessages, signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext, trace: { turnId: streamId, stage: 'second_chat', conversationId } })
         conversionPrompt = buildJsonConversionPrompt(rawText)
-        jsonRaw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, messages: [{ role: 'system', content: conversionPrompt }], jsonMode: true, signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext })
+        jsonRaw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, messages: [{ role: 'system', content: conversionPrompt }], jsonMode: true, signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext, trace: { turnId: streamId, stage: 'other', conversationId } })
         finalRaw = jsonRaw
         ;({ bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw))
       }
