@@ -33,11 +33,18 @@ function normalizeBaseUrl(baseUrl: string) {
   return baseUrl.replace(/\/+$/, '')
 }
 
+function supportsThinkingOption(model: string): boolean {
+  return /^deepseek-v4(?:-|$)/i.test(model)
+}
+
 async function traceAiCall(opts: { purpose: AiUsagePurpose; model: string; messages: ChatMessage[]; output?: string; error?: string; inputTokens: number; outputTokens: number; turnId?: string; stage?: AdminAiTraceStage; conversationId?: string }) {
   try {
     await db.adminAiTraces.add({ id: uuid(), ...opts, createdAt: Date.now() })
-    const overflow = (await db.adminAiTraces.orderBy('createdAt').toArray()).slice(0, -500)
-    if (overflow.length) await db.adminAiTraces.bulkDelete(overflow.map((item) => item.id))
+    const count = await db.adminAiTraces.count()
+    if (count > 500) {
+      const staleIds = await db.adminAiTraces.orderBy('createdAt').limit(count - 500).primaryKeys()
+      if (staleIds.length) await db.adminAiTraces.bulkDelete(staleIds)
+    }
   } catch {}
 }
 
@@ -99,6 +106,8 @@ export async function chatCompletion(opts: {
   purpose?: AiUsagePurpose
   automatic?: boolean
   maxTokens?: number
+  temperature?: number
+  thinking?: 'enabled' | 'disabled'
   trace?: { turnId: string; stage: AdminAiTraceStage; conversationId?: string }
 }): Promise<string> {
   const purpose = opts.purpose ?? 'other'
@@ -117,7 +126,10 @@ export async function chatCompletion(opts: {
       model: opts.model,
       messages: opts.messages,
       ...(opts.jsonMode ? { response_format: { type: 'json_object' } } : {}),
-      temperature: 1.1,
+      ...(supportsThinkingOption(opts.model)
+        ? { thinking: { type: opts.thinking ?? 'disabled' } }
+        : {}),
+      temperature: opts.temperature ?? 1.1,
       ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
     }),
   })
@@ -132,12 +144,16 @@ export async function chatCompletion(opts: {
   }
   const promptTokens = Number(json?.usage?.prompt_tokens)
   const completionTokens = Number(json?.usage?.completion_tokens)
-  await recordAiUsage({ purpose, model: opts.model, automatic, success: true, inputTokens: Number.isFinite(promptTokens) ? promptTokens : inputTokens, outputTokens: Number.isFinite(completionTokens) ? completionTokens : estimateTokens(content), estimated: !Number.isFinite(promptTokens) || !Number.isFinite(completionTokens) })
-  await traceAiCall({ purpose, model: opts.model, messages: opts.messages, output: content, inputTokens: Number.isFinite(promptTokens) ? promptTokens : inputTokens, outputTokens: Number.isFinite(completionTokens) ? completionTokens : estimateTokens(content), ...opts.trace })
+  const usageWrite = recordAiUsage({ purpose, model: opts.model, automatic, success: true, inputTokens: Number.isFinite(promptTokens) ? promptTokens : inputTokens, outputTokens: Number.isFinite(completionTokens) ? completionTokens : estimateTokens(content), estimated: !Number.isFinite(promptTokens) || !Number.isFinite(completionTokens) })
+  if (automatic) await usageWrite
+  else void usageWrite.catch(() => undefined)
+  void traceAiCall({ purpose, model: opts.model, messages: opts.messages, output: content, inputTokens: Number.isFinite(promptTokens) ? promptTokens : inputTokens, outputTokens: Number.isFinite(completionTokens) ? completionTokens : estimateTokens(content), ...opts.trace })
   return content
   } catch (error) {
-  await recordAiUsage({ purpose, model: opts.model, automatic, success: false, inputTokens, outputTokens: 0, estimated: true, error: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200) })
-    await traceAiCall({ purpose, model: opts.model, messages: opts.messages, error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500), inputTokens, outputTokens: 0, ...opts.trace })
+    const usageWrite = recordAiUsage({ purpose, model: opts.model, automatic, success: false, inputTokens, outputTokens: 0, estimated: true, error: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200) })
+    if (automatic) await usageWrite
+    else void usageWrite.catch(() => undefined)
+    void traceAiCall({ purpose, model: opts.model, messages: opts.messages, error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500), inputTokens, outputTokens: 0, ...opts.trace })
     throw error
   }
 }

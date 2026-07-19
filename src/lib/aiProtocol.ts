@@ -43,6 +43,114 @@ export function parseKnowledgeQueriesField(raw: unknown): string[] {
   return result
 }
 
+function parseFinanceMarker(line: string): AiBubble | null {
+  let match = line.match(/^\[transfer:(\d+):([^\]]+)\]$/i)
+  if (match) return { type: 'transfer', amount: Number(match[1]), note: match[2].trim().slice(0, 80) }
+  match = line.match(/^\[redPacket:(\d+):([^\]]+)\]$/i)
+  if (match) return { type: 'redPacket', amount: Number(match[1]), note: match[2].trim().slice(0, 80) }
+  match = line.match(/^\[loanRequest:(\d+):([^\]]+)\]$/i)
+  if (match) return { type: 'loanRequest', amount: Number(match[1]), note: match[2].trim().slice(0, 80) }
+  match = line.match(/^\[loanDecision:([^:\]]+):(accept|reject):(\d+)\]$/i)
+  if (match) {
+    return {
+      type: 'loanDecision',
+      loanId: match[1].trim(),
+      decision: match[2].toLowerCase() as 'accept' | 'reject',
+      amount: Number(match[3]),
+    }
+  }
+  match = line.match(/^\[giftPurchase:(\d+):([^:\]]+):([^:\]]+):([^\]]+)\]$/i)
+  if (match) {
+    return {
+      type: 'giftPurchase',
+      amount: Number(match[1]),
+      name: match[2].trim().slice(0, 30),
+      icon: match[3].trim().slice(0, 8),
+      description: match[4].trim().slice(0, 80),
+    }
+  }
+  return null
+}
+
+/**
+ * Fast path for the main model's line-oriented draft. Ordinary text and the
+ * explicit protocol markers are mechanical, so converting them locally avoids
+ * a second model request while preserving the main model's exact wording.
+ */
+export function parseRawPrivateDraft(raw: string, fallbackMood?: string): ParsedAiTurn {
+  const moodMatch = raw.match(/<mood>\s*([^<]+?)\s*<\/mood>/i)
+  const body = raw.replace(/<mood>[\s\S]*?<\/mood>/gi, '').trim()
+  const bubbles: AiBubble[] = []
+  const knowledgeQueries: string[] = []
+  let turnThought: string | undefined
+
+  for (const sourceLine of body.split(/\r?\n/)) {
+    let line = sourceLine.trim().replace(/^[-•]\s*/, '')
+    if (!line) continue
+
+    const thoughtMatch = line.match(/<thought>\s*([\s\S]*?)\s*<\/thought>/i)
+    if (thoughtMatch?.[1]?.trim() && !turnThought) turnThought = thoughtMatch[1].trim().slice(0, 100)
+    line = line.replace(/<thought>[\s\S]*?<\/thought>/gi, '').trim()
+    if (!line) continue
+
+    const knowledge = line.match(/^\[knowledge:([^\]]+)\]$/i)
+    if (knowledge) {
+      if (knowledgeQueries.length < 2) knowledgeQueries.push(knowledge[1].trim())
+      continue
+    }
+    const sticker = line.match(/^\[sticker:([^\]]+)\]$/i)
+    if (sticker) {
+      bubbles.push({ type: 'sticker', name: sticker[1].trim() })
+      continue
+    }
+    const image = line.match(/^\[image:([^:\]]+):([^\]]*)\]$/i)
+    if (image) {
+      bubbles.push({
+        type: 'image',
+        query: image[1].trim().slice(0, 100),
+        caption: image[2].trim().slice(0, 100) || undefined,
+      })
+      continue
+    }
+    const finance = parseFinanceMarker(line)
+    if (finance) {
+      bubbles.push(finance)
+      continue
+    }
+    bubbles.push({ type: 'text', content: line })
+  }
+
+  const mood = moodMatch?.[1]?.trim()
+    ? normalizeMood(moodMatch[1])
+    : fallbackMood
+      ? normalizeMood(fallbackMood)
+      : undefined
+  return { bubbles, knowledgeQueries, mood, thought: turnThought }
+}
+
+/** Use the utility model only when the draft did not follow the local format. */
+export function rawPrivateDraftNeedsUtility(raw: string, parsed: ParsedAiTurn): boolean {
+  if (parsed.bubbles.length === 0) return true
+  if (!/<mood>[\s\S]*?<\/mood>/i.test(raw)) return true
+  const visibleLines = raw
+    .replace(/<mood>[\s\S]*?<\/mood>/gi, '')
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[-•]\s*/, ''))
+    .filter(Boolean)
+    .filter((line) => !/^\[knowledge:[^\]]+\]$/i.test(line))
+  if (visibleLines.some((line) => !/<thought>[\s\S]*?<\/thought>/i.test(line))) return true
+  return parsed.bubbles.some((bubble) => bubble.type === 'text' && /^\[[A-Za-z]+:/.test(bubble.content))
+}
+
+export function serializePrivateTurn(parsed: ParsedAiTurn): string {
+  return JSON.stringify({
+    messages: parsed.bubbles,
+    mood: parsed.mood,
+    thought: parsed.thought,
+    knowledgeQueries: parsed.knowledgeQueries,
+  })
+}
+
 function tryParseJson(trimmedRaw: string): ParsedAiTurn | null {
   let text = trimmedRaw
   const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i)

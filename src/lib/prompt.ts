@@ -631,12 +631,13 @@ ${opts.recentContext}${memoriesLine}${latestUserLine}${pragmaticRules}${selfIter
 ${stylePrompt}${speechSamplesLine}${stickerHint}
 
   回复要求:
-  - 用换行把长回复拆成短句 每句占一行
-  - 如果你需要表达内心想法，用一处括号()自然写出即可；没有合适想法时不要为了格式硬编
+  - 用换行把长回复拆成短句 每句占一行；每一行严格写成：<thought>这句话对应的第一人称真实想法</thought>真正发出的消息正文
+  - 每条消息都必须有自己独立的thought，10到50字，符合人设且不能写“用户/对方”；不同消息的想法不能机械重复
   - 需要真实执行金钱互动时可单独写标记：[transfer:金额:备注]、[redPacket:金额:祝福]、[loanRequest:金额:理由]、[giftPurchase:价格:礼物名:emoji:描述]。看到借款申请历史事件时，可写[loanDecision:loanId:accept或reject:金额]
   - 想发送一张真实图片时单独写[image:英文Pexels搜索词:配文]，搜索词要具体、适合搜图；只有真的适合发图时才用
   - 用户提到你确实不了解的新词、梗、作品或专业名词时，先像真人一样自然追问一句，再单独写[knowledge:需要搜索的关键词]。不要假装知道，也不要对普通词滥用搜索
   - 金钱标记会真实扣除你的余额，必须结合关系、理由和余额慎重决定，不能虚构余额或无理由频繁送钱
+  - 最后一行单独写<mood>你此刻15字以内的情绪</mood>
   - 不要输出JSON 就正常打字聊天`
 
   return {
@@ -650,17 +651,17 @@ ${stylePrompt}${speechSamplesLine}${stickerHint}
  * Step 2: Prompt the utility model to convert raw chat text into JSON.
  */
 export function buildJsonConversionPrompt(rawText: string): string {
-  return `将以下聊天回复解析为JSON。消息正文只做机械提取，不要修改原文；mood/thought是内部元数据，可根据语气补全。
+  return `将以下聊天回复解析为JSON。消息正文只做机械提取，不要修改原文；mood/thought是内部元数据。
 
 ${rawText}
 
 规则:
-- 按换行拆成多条text消息，去除每行末尾的括号内容(即(...)部分)
+- 按换行拆成多条text消息，去除每行的<thought>...</thought>和最后的<mood>...</mood>标签
 - 如果原文有[sticker:名字]则输出sticker类型
 - 将[image:英文搜索词:配文]转换为{"type":"image","query":"英文搜索词","caption":"配文"}，标记不能留在text正文
 - 将所有[knowledge:关键词]从正文删除，并把关键词放进顶层knowledgeQueries数组，最多2个；没有标记则输出空数组
 - 必须将资金标记转换为结构化消息，绝不能当作text或丢弃：[transfer:金额:备注]→{"type":"transfer","amount":金额,"note":"备注"}；[redPacket:金额:备注]→redPacket；[loanRequest:金额:理由]→loanRequest；[loanDecision:loanId:accept或reject:金额]→loanDecision；[giftPurchase:价格:礼物名:emoji:描述]→{"type":"giftPurchase","amount":价格,"name":"礼物名","icon":"emoji","description":"描述"}。标记本身不能出现在text正文
-- thought优先取原文中第一条括号内容；若没有括号，则根据整段回复推断一句简短、第一人称的真实想法，不能写进messages正文
-- mood根据语气判断，15字以内，不能为空
+- thought优先取原文第一条<thought>...</thought>；若缺失，再根据整段回复推断一句简短、第一人称的真实想法，不能写进messages正文
+- mood取原文<mood>...</mood>内容；若缺失再根据语气判断，15字以内，不能为空
 - messages允许的完整类型示例：{"messages":[{"type":"text","content":"..."},{"type":"image","query":"orange cat sunlight","caption":"你看这个"},{"type":"transfer","amount":100,"note":"拿去买奶茶"},{"type":"giftPurchase","amount":299,"name":"围巾","icon":"🧣","description":"给你挑的"}],"mood":"...","thought":"...","knowledgeQueries":[]}。只输出JSON对象`
 }

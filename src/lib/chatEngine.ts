@@ -2,7 +2,14 @@ import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { chatCompletion, coalesceConsecutiveRoles, type ChatMessage } from './deepseek'
-import { extractJsonObject, parseAiResponse, typingDelayMs } from './aiProtocol'
+import {
+  extractJsonObject,
+  parseAiResponse,
+  parseRawPrivateDraft,
+  rawPrivateDraftNeedsUtility,
+  serializePrivateTurn,
+  typingDelayMs,
+} from './aiProtocol'
 import { formatSpeechSamplesForScene, buildRawChatPrompt, buildJsonConversionPrompt, customPersonalityTraitsLine } from './prompt'
 import { retrieveWorldbookTrace } from './worldbook'
 import { isModuleEnabled } from '../features'
@@ -407,32 +414,47 @@ async function runAiTurn(
       signal: controller.signal,
       purpose: proactiveContext ? 'proactive' : 'chat',
       automatic: !!proactiveContext,
+      thinking: 'disabled',
+      temperature: 0.9,
+      maxTokens: proactiveContext ? 900 : 1200,
       trace: { turnId: streamId, stage: 'first_chat', conversationId },
     })
 
     if (streamByConversation.get(conversationId) !== streamId) return
     console.log(`[chat] 主模型回复(${rawText.length}字): ${rawText.slice(0, 100)}...`)
 
-    // ---- Step 2: utility model converts raw text to JSON ----
-    let conversionPrompt = buildJsonConversionPrompt(rawText)
-    let jsonRaw = await chatCompletion({
-      apiKey: settings.apiKey,
-      baseUrl: settings.baseUrl,
-      model: settings.utilityModel,
-      messages: [
-        { role: 'system', content: conversionPrompt },
-      ],
-      jsonMode: true,
-      signal: controller.signal,
-      purpose: proactiveContext ? 'proactive' : 'chat',
-      automatic: !!proactiveContext,
-      trace: { turnId: streamId, stage: 'other', conversationId },
-    })
-
-    if (streamByConversation.get(conversationId) !== streamId) return
-    console.log(`[chat] 多功能模型转换JSON: ${jsonRaw.slice(0, 200)}`)
+    // ---- Step 2: parse ordinary drafts locally; use the utility model only
+    // when the main model did not follow the explicit line protocol. ----
+    const localTurn = parseRawPrivateDraft(rawText, activeMood)
+    let conversionPrompt = '本轮使用本地草稿解析，无额外模型调用。'
+    let jsonRaw = serializePrivateTurn(localTurn)
+    let parsedTurn = localTurn
+    if (rawPrivateDraftNeedsUtility(rawText, localTurn)) {
+      conversionPrompt = buildJsonConversionPrompt(rawText)
+      jsonRaw = await chatCompletion({
+        apiKey: settings.apiKey,
+        baseUrl: settings.baseUrl,
+        model: settings.utilityModel,
+        messages: [{ role: 'system', content: conversionPrompt }],
+        jsonMode: true,
+        signal: controller.signal,
+        purpose: proactiveContext ? 'proactive' : 'chat',
+        automatic: !!proactiveContext,
+        thinking: 'disabled',
+        temperature: 0.1,
+        maxTokens: 900,
+        trace: { turnId: streamId, stage: 'other', conversationId },
+      })
+      if (streamByConversation.get(conversationId) !== streamId) return
+      const converted = parseAiResponse(jsonRaw)
+      if (converted.bubbles.length > 0) parsedTurn = converted
+      else jsonRaw = serializePrivateTurn(localTurn)
+      console.log(`[chat] 草稿格式不完整，已用多功能模型转换JSON: ${jsonRaw.slice(0, 200)}`)
+    } else {
+      console.log(`[chat] 本地解析完成，跳过多功能模型转换`)
+    }
     let finalRaw = jsonRaw
-    let { bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw)
+    let { bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parsedTurn
     const initiallyRequestedKnowledge = [...knowledgeQueries]
     const qualityCheckDebug = {
       enabled: true,
@@ -477,11 +499,19 @@ async function runAiTurn(
         const enrichedMessages = chatMessages.map((message, index) => index === 0
           ? { ...message, content: `${message.content}\n\n【针对陌生词汇的搜索结果】\n${knowledge.text}${review}\n你刚才对陌生词汇自然表示了疑问。现在根据可靠搜索结果重新回答用户，语气要自然，不要写成搜索报告，也不要提审查流程。` }
           : message)
-        rawText = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, messages: enrichedMessages, signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext, trace: { turnId: streamId, stage: 'second_chat', conversationId } })
-        conversionPrompt = buildJsonConversionPrompt(rawText)
-        jsonRaw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, messages: [{ role: 'system', content: conversionPrompt }], jsonMode: true, signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext, trace: { turnId: streamId, stage: 'other', conversationId } })
-        finalRaw = jsonRaw
-        ;({ bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw))
+        rawText = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, messages: enrichedMessages, signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext, thinking: 'disabled', temperature: 0.9, maxTokens: proactiveContext ? 900 : 1200, trace: { turnId: streamId, stage: 'second_chat', conversationId } })
+        const enrichedLocalTurn = parseRawPrivateDraft(rawText, turnMood || activeMood)
+        if (rawPrivateDraftNeedsUtility(rawText, enrichedLocalTurn)) {
+          conversionPrompt = buildJsonConversionPrompt(rawText)
+          jsonRaw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, messages: [{ role: 'system', content: conversionPrompt }], jsonMode: true, signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext, thinking: 'disabled', temperature: 0.1, maxTokens: 900, trace: { turnId: streamId, stage: 'other', conversationId } })
+          finalRaw = jsonRaw
+          ;({ bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw))
+        } else {
+          conversionPrompt = '联网补全后的回复使用本地草稿解析，无额外模型调用。'
+          jsonRaw = serializePrivateTurn(enrichedLocalTurn)
+          finalRaw = jsonRaw
+          ;({ bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = enrichedLocalTurn)
+        }
       }
     }
     console.log(`[chat] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 mood=${turnMood || '无'} thought=${turnThought ? '有(' + turnThought.length + '字)' : '无'} 对方=${displayName(contact)}`)
@@ -550,7 +580,9 @@ function revealBubbles(
   const timers: ReturnType<typeof setTimeout>[] = []
   let cumulative = 0
   bubbles.forEach((bubble, i) => {
-    cumulative += typingDelayMs(bubble)
+    // Generation and quality review already made the user wait. Show the first
+    // completed bubble immediately; human-like pacing only separates the rest.
+    if (i > 0) cumulative += typingDelayMs(bubble)
     const timer = setTimeout(async () => {
       if (streamByConversation.get(conversationId) !== streamId) return
 
