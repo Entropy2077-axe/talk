@@ -135,7 +135,7 @@ function buildMomentsPrompt(
               .filter((c) => c.willComment)
               .map(
                 (c, j) =>
-                  `  评论者${j + 1}: ${c.contact.name}\n  人设: ${c.contact.systemPrompt}\n  ${personalityTraitLine(c.contact.personalityTrait, c.contact.warmth ?? 0) || '性格特质: 无'}\n  说话样例: ${formatSpeechSamplesForScene(c.contact.speechSamples, 'moment', 1) || '无'}\n  与发布者的关系: ${c.relationLabel || '普通朋友'}；${c.relationContext}\n  最近可用素材: ${contexts.get(c.contact.id) || '无'}`,
+                  `  评论者${j + 1}: ${c.contact.name}\n  人设: ${c.contact.systemPrompt}\n  ${personalityTraitLine(c.contact.personalityTrait, c.contact.warmth ?? 0) || '性格特质: 无'}\n  说话样例: ${formatSpeechSamplesForScene(c.contact.speechSamples, 'moment', 1) || '无'}\n  与发布者的关系: ${c.relationLabel || '普通朋友'}；${c.relationContext}\n  与用户的共同过往（只作关系底色，不公开复述）: ${c.contact.sharedHistory || '无具体记录'}\n  最近可用素材: ${contexts.get(c.contact.id) || '无'}`,
               )
               .join('\n')
           : '  （这条没有人评论）'
@@ -144,7 +144,7 @@ function buildMomentsPrompt(
       const photoLine = e.willHavePhoto
         ? `这条动态会配一张照片 你还需要为它写一个"imageKeyword"(简短英文搜图短语 贴合你写的这条朋友圈内容 用来找一张对应的照片)\n`
         : ''
-      return `人物${i + 1}: ${e.poster.name}\n人设: ${e.poster.systemPrompt}\n${personalityTraitLine(e.poster.personalityTrait, e.poster.warmth ?? 0) || '性格特质: 无'}\n说话样例: ${formatSpeechSamplesForScene(e.poster.speechSamples, 'moment', 2) || '无'}\n当前心情: ${e.poster.mood?.text || '平静'}\n最近可用素材: ${contexts.get(e.poster.id) || '无'}\n${statusLine}${photoLine}这条朋友圈下会评论的人(按顺序):\n${commenterLines}`
+      return `人物${i + 1}: ${e.poster.name}\n人设: ${e.poster.systemPrompt}\n${personalityTraitLine(e.poster.personalityTrait, e.poster.warmth ?? 0) || '性格特质: 无'}\n说话样例: ${formatSpeechSamplesForScene(e.poster.speechSamples, 'moment', 2) || '无'}\n与用户的共同过往（只作关系底色，不公开复述）: ${e.poster.sharedHistory || '无具体记录'}\n当前心情: ${e.poster.mood?.text || '平静'}\n最近可用素材: ${contexts.get(e.poster.id) || '无'}\n${statusLine}${photoLine}这条朋友圈下会评论的人(按顺序):\n${commenterLines}`
     })
     .join('\n\n')
 
@@ -152,7 +152,7 @@ function buildMomentsPrompt(
 
   return `${worldviewSection}【场景】
 你是一个朋友圈内容生成器。下面有几个人准备发朋友圈，请你扮演他们每个人写出符合各自人设的内容。
-人设、特色人格、说话样例、关系和当前心情是角色选择主题、情绪、措辞与互动方式的逻辑前提，不是可忽略的文风装饰。事实不冲突时，必须写出这个角色才会发的内容；不得把不同角色写成泛化的同一种朋友圈，也不得为了表现特殊人格编造不存在的经历。
+人设、特色人格、说话样例、关系、共同过往和当前心情是角色选择主题、情绪、措辞与互动方式的逻辑前提，不是可忽略的文风装饰。事实不冲突时，必须写出这个角色才会发的内容；不得把不同角色写成泛化的同一种朋友圈，也不得为了表现特殊人格编造不存在的经历。共同过往只能使用角色资料中明确写出的事实。
 这不是私聊——朋友圈是公开广播，不能写成"我跟你说""咱们"这种对着特定人的语气。
 先判断每个人此刻为什么会想发，再写正文。最近素材只是可选来源，最多自然使用两项；不要逐条复述，更不能公开私聊秘密、用户隐私或未经同意的关系细节。素材不足时就发普通日常，不要硬造大事。避免与近期内容重复同一情绪、句式或主题。
 
@@ -311,7 +311,7 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
   console.info(`[moments-perf] 主模型完成=${Math.round(performance.now() - startedAt)}ms 条数=${entries.length}`)
 
   const expectedCommentCounts = entries.map((e) => e.commenters.filter((c) => c.willComment).length)
-  const personaContext = entries.map((entry) => `Poster ${entry.poster.name}: ${entry.poster.systemPrompt}\nTrait: ${entry.poster.personalityTrait || 'none'}\nCommenters: ${entry.commenters.filter((commenter) => commenter.willComment).map((commenter) => `${commenter.contact.name}: ${commenter.contact.systemPrompt}`).join(' | ') || 'none'}`).join('\n\n')
+  const personaContext = entries.map((entry) => `Poster ${entry.poster.name}: ${entry.poster.systemPrompt}\nTrait: ${entry.poster.personalityTrait || 'none'}\nShared history anchor (do not expose verbatim): ${entry.poster.sharedHistory || 'none'}\nCommenters: ${entry.commenters.filter((commenter) => commenter.willComment).map((commenter) => `${commenter.contact.name}: ${commenter.contact.systemPrompt}; history=${commenter.contact.sharedHistory || 'none'}`).join(' | ') || 'none'}`).join('\n\n')
   const reviewedRaw = await reviewMomentPayload(settings, raw, '{"moments":[{"content":"...","imageKeyword":"...","comments":["..."]}]}', personaContext)
   console.info(`[moments-perf] 自检完成=${Math.round(performance.now() - startedAt)}ms 条数=${entries.length}`)
   const parsed = parseMomentsResponse(reviewedRaw, expectedCommentCounts)
@@ -425,7 +425,7 @@ function buildUserMomentCommentPrompt(content: string, commenters: Contact[], wo
     .map((c, i) => {
       const scheduleLine = describeCurrentSchedule(c, now)
       const samples = formatSpeechSamplesForScene(c.speechSamples, 'moment', 1)
-      return `评论者${i + 1}: ${c.name} 人设: ${c.systemPrompt}\n${personalityTraitLine(c.personalityTrait, c.warmth ?? 0) || '性格特质: 无'}${samples ? `\n说话样例: ${samples}` : ''}${scheduleLine ? ` ${scheduleLine}` : ''}\n和用户的关系: ${c.relationshipBase || '朋友'} ${c.relationshipDynamic || ''} 好感度:${c.warmth ?? 0} 当前心情:${c.mood?.text || '平静'}\n最近素材: ${contexts.get(c.id) || '无'}`
+      return `评论者${i + 1}: ${c.name} 人设: ${c.systemPrompt}\n${personalityTraitLine(c.personalityTrait, c.warmth ?? 0) || '性格特质: 无'}${samples ? `\n说话样例: ${samples}` : ''}${scheduleLine ? ` ${scheduleLine}` : ''}\n和用户的关系: ${c.relationshipBase || '朋友'} ${c.relationshipDynamic || ''} 好感度:${c.warmth ?? 0} 当前心情:${c.mood?.text || '平静'}\n与用户的共同过往（只作关系底色，不公开复述）: ${c.sharedHistory || '无具体记录'}\n最近素材: ${contexts.get(c.id) || '无'}`
     })
     .join('\n')
   const worldviewSection = worldviewText ? `【这个世界的设定】\n${worldviewText}\n\n` : ''
@@ -510,7 +510,7 @@ export async function postUserMoment(content: string, settings: AppSettings): Pr
         jsonMode: true,
         purpose: 'moments',
       })
-      const personaContext = commenterPlans.map(({ contact }) => `${contact.name}: ${contact.systemPrompt}\nTrait: ${contact.personalityTrait || 'none'}\nRelationship: ${contact.relationshipBase || 'friend'}`).join('\n\n')
+      const personaContext = commenterPlans.map(({ contact }) => `${contact.name}: ${contact.systemPrompt}\nTrait: ${contact.personalityTrait || 'none'}\nRelationship: ${contact.relationshipBase || 'friend'}\nShared history anchor (do not expose verbatim): ${contact.sharedHistory || 'none'}`).join('\n\n')
       const reviewedRaw = await reviewMomentPayload(settings, raw, '{"comments":["..."]}', personaContext)
       comments = parseCommentsResponse(reviewedRaw, commenterPlans.length) ?? []
     } catch {
@@ -580,6 +580,7 @@ function buildMomentReplyPrompt(
   return `${worldviewSection}你是${poster.name} 人设: ${poster.systemPrompt}\n${personalityTraitLine(poster.personalityTrait, poster.warmth ?? 0) || '性格特质: 无'}${customPersonalityTraitsLine(poster.customPersonalityTraits, poster.warmth ?? 0)}${samples ? `\n说话样例:\n${samples}` : ''}
 ${scheduleSection}
 你和用户的关系: ${poster.relationshipBase || '朋友'} ${poster.relationshipDynamic || ''} 好感度:${poster.warmth ?? 0} 当前心情:${poster.mood?.text || '平静'}
+与用户的共同过往（只作关系底色，不公开复述）: ${poster.sharedHistory || '无具体记录'}
 最近可用素材: ${context || '无'}
 你发的这条朋友圈: "${momentContent}"
 

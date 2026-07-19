@@ -213,6 +213,7 @@ export function ContactCardPage() {
         stickerNames: stickers.map((s) => s.name),
         mbti: contact.mbti || undefined,
         speechSamplesText: formatSpeechSamplesForScene(contact.speechSamples, 'private', 3) || undefined,
+        sharedHistory: contact.sharedHistory,
       })
     : null
   const conversionPrompt = adminEnabled

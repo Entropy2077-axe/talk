@@ -13,6 +13,8 @@ export interface Contact {
   systemPrompt: string // persona description generated at creation time — never shown to the user, never edited after creation
   /** User-authored requirements, preserved verbatim as a higher-priority persona source. */
   personaConstraints?: string
+  /** The concrete shared past that anchors how this character treats the user from the first turn. */
+  sharedHistory?: string
   /** Structured anchors generated alongside the narrative persona. */
   personaProfile?: PersonaProfile
   speechSamples?: string[] // short scene-labeled examples generated at creation time, used sparingly to stabilize voice
@@ -657,6 +659,7 @@ export interface ContactCreatorProfile {
   occupation: string
   hobbies: string[]
   notes: string
+  sharedHistory?: string
 }
 
 export interface SavedPersona {
@@ -669,6 +672,7 @@ export interface SavedPersona {
   updatedAt: number
   profile: ContactCreatorProfile
   personaConstraints?: string
+  sharedHistory?: string
   customPersonalityTraits?: CustomPersonalityTrait[]
 }
 

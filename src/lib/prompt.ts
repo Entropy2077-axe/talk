@@ -356,6 +356,10 @@ export interface PersonaAnswers {
   personalityTrait: string
   hobbies: string[]
   extra: string
+  /** Concrete shared history with the user; a relationship anchor rather than a generic bio. */
+  sharedHistory?: string
+  /** When true, unspecified identity fields are intentionally delegated to the model. */
+  minimalNuwa?: boolean
   occupation?: string
 }
 
@@ -372,9 +376,19 @@ export interface PersonaGenerationResult {
   mbti: string
   personaProfile?: PersonaProfile
   monthlySalary?: number
+  relationship?: string
+  gender?: string
+  ageRange?: string
+  occupation?: string
 }
 
 export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCategory: AvatarCategory): string {
+  const sharedHistoryLine = answers.sharedHistory?.trim()
+    ? `- 与用户的过往/共同经历（关系锚点，必须在 persona、speechSamples 和首次互动里自然体现，不能改写事实）：${answers.sharedHistory.trim()}`
+    : '- 与用户的过往/共同经历：未提供。不要凭空编造具体共同事件；但要根据关系定位设计自然的熟悉程度。'
+  const autoFillLine = answers.minimalNuwa
+    ? '- 这是极简女娲模式：用户只给了一段说明。请你自行补全年龄、性别、关系定位、职业、兴趣、性格特质和身份资料，但必须让所有补全彼此一致，并把说明当作最高优先级约束。'
+    : ''
   const avatarInstruction =
     avatarCategory === 'anime'
       ? ''
@@ -398,10 +412,16 @@ export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCate
 - 兴趣爱好: ${answers.hobbies.length > 0 ? answers.hobbies.join('、') : '不限 AI自由发挥'}
 - 补充要求: ${answers.extra || '无'}
 - 职业: ${answers.occupation || '自由决定一个现实职业'}
+${sharedHistoryLine}
+${autoFillLine}
 
 请你设计一个具体的人 输出如下JSON:
 {
   "name": "这个人的名字或者网名",
+  "gender": "自然的性别描述",
+  "ageRange": "角色年龄或年龄段",
+  "relationship": "与用户的关系定位",
+  "occupation": "现实职业",
   "realName": "真实姓名",
   "nickname": "网名/昵称",
   "birthday": "YYYY-MM-DD",
@@ -456,6 +476,10 @@ export function parsePersonaGeneration(raw: string): PersonaGenerationResult | n
         realName: typeof parsed.realName === 'string' ? parsed.realName.trim().slice(0, 40) : undefined,
         nickname: typeof parsed.nickname === 'string' ? parsed.nickname.trim().slice(0, 40) : undefined,
         birthday: typeof parsed.birthday === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(parsed.birthday.trim()) ? parsed.birthday.trim() : undefined,
+        gender: typeof parsed.gender === 'string' ? parsed.gender.trim().slice(0, 30) : undefined,
+        ageRange: typeof parsed.ageRange === 'string' ? parsed.ageRange.trim().slice(0, 30) : undefined,
+        relationship: typeof parsed.relationship === 'string' ? parsed.relationship.trim().slice(0, 40) : undefined,
+        occupation: typeof parsed.occupation === 'string' ? parsed.occupation.trim().slice(0, 60) : undefined,
         persona: parsed.persona.trim(),
         schedule: validateScheduleBlocks(parsed.schedule),
         personalityTrait: PERSONALITY_TRAIT_OPTIONS.some((opt) => opt.value === trait) ? trait : '无',
@@ -557,6 +581,7 @@ export function buildRawChatPrompt(opts: {
   speechSamplesText?: string
   personaConstraints?: string
   personaProfile?: PersonaProfile
+  sharedHistory?: string
 }): string {
   return buildRawChatPromptParts(opts).full
 }
@@ -580,6 +605,7 @@ export function buildRawChatPromptParts(opts: {
   speechSamplesText?: string
   personaConstraints?: string
   personaProfile?: PersonaProfile
+  sharedHistory?: string
 }): RawChatPromptParts {
   const worldviewLine = opts.worldviewText ? `这个世界: ${opts.worldviewText}。` : ''
   const traitLine = personalityTraitLine(opts.personalityTrait, opts.personalityWarmth)
@@ -587,6 +613,9 @@ export function buildRawChatPromptParts(opts: {
     opts.personaConstraints?.trim() ? `用户补充说明（原文，不可遗忘或违背）: ${opts.personaConstraints.trim()}` : '',
     formatPersonaProfile(opts.personaProfile),
   ].filter(Boolean).join('\n')
+  const sharedHistoryLine = opts.sharedHistory?.trim()
+    ? `\n\n【与用户的共同过往 — 关系硬锚点】\n${opts.sharedHistory.trim().slice(0, 1800)}\n这些是已经发生过的事实。首轮或短历史回复必须自然露出至少一个关系/熟悉度信号，但不能机械复述，也不能把没有写出的细节补成事实。`
+    : '\n\n【与用户的共同过往】\n暂无具体共同经历；仍必须按关系定位说话，不能用陌生人开场。'
   const stickerHint = opts.stickerNames.length > 0
     ? `\n可用的表情包: ${opts.stickerNames.join('、')}。如果你想发某个表情包 在对应位置写 [sticker:表情名]`
     : ''
@@ -608,6 +637,11 @@ export function buildRawChatPromptParts(opts: {
 - Watch for pragmatic humor: if you asked for a specific answer and the user gives an over-broad, tautological, deliberately literal, or absurd answer, treat it as likely a joke. Example: you ask what they want to eat, they say "I want to eat food/rice"; catch the joke or tease lightly before continuing.`
   const memoriesLine = opts.recentMemoriesText ? `\n\n【最近的记忆碎片】\n${opts.recentMemoriesText}` : ''
   const speechSamplesLine = opts.speechSamplesText ? `\n\n【说话样例】\n${opts.speechSamplesText}` : ''
+  const adherenceRules = `\n\n【关系与特质遵从验收】
+- 关系定位不是标签装饰：如果是恋人或暧昧对象，第一句就要有亲密、熟悉或专属称呼/语气，不能像普通客服或刚认识的人；家人、朋友、同事也要保持对应距离和称谓。
+- 性格特质必须落到可观察的措辞、主动性、反应和情绪，不要只在心里说“我是某某特质”。例如“雌小鬼”要在自然场景里出现带优越感的逗弄/反问/嘴硬，再保留可爱的反差或撒娇收尾；不能退化成普通温柔朋友。
+- 共同过往只允许使用已给出的事实；首轮优先用一个轻微细节体现熟悉度，后续再展开，不要每句复述。
+`
 
   const logic = `【逻辑 — 第一优先级】
 先判断“前提 → 回复”的逻辑关系，再考虑文笔。身份、记忆、地点、日程、心情、关系、最近事件、用户本轮话语都属于硬前提；如果这些前提和感觉/文风冲突，必须服从逻辑。
@@ -619,6 +653,7 @@ export function buildRawChatPromptParts(opts: {
 你是${opts.name}。${mbtiLine}${worldviewLine}
 ${opts.persona || '（自由发挥 扮演一个普通朋友）'}${hardPersona ? `\n\n【人设硬约束 — 优先于记忆、氛围和自由发挥】\n${hardPersona}` : ''}${traitLine}
 
+${sharedHistoryLine}
 ${opts.recentContext}${memoriesLine}${latestUserLine}${pragmaticRules}${selfIterationText ? `\n\n${selfIterationText}` : ''}${opts.activeIntentText ? `\n\n${opts.activeIntentText}` : ''}
 
 一致性要求:
@@ -628,7 +663,7 @@ ${opts.recentContext}${memoriesLine}${latestUserLine}${pragmaticRules}${selfIter
   const feeling = `【感觉 — 第二优先级】
 只在【逻辑】已经成立的前提下优化文笔、节奏、情绪和聊天感。不要为了好听、有戏剧性、撒娇、吐槽或搞笑而改变事实前提。
 
-${stylePrompt}${speechSamplesLine}${stickerHint}
+${adherenceRules}${stylePrompt}${speechSamplesLine}${stickerHint}
 
   回复要求:
   - 用换行把长回复拆成短句 每句占一行；每一行严格写成：<thought>这句话对应的第一人称真实想法</thought>真正发出的消息正文

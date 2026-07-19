@@ -1,7 +1,7 @@
 {
   "name": "talk",
   "private": true,
-  "version": "0.1.27",
+  "version": "0.1.28",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,6 +12,7 @@
     "test:e2e": "node scripts/run-e2e.mjs",
     "test:unit": "vitest run",
     "benchmark:ai": "node scripts/benchmark-ai.mjs",
+    "benchmark:adherence": "node scripts/benchmark-adherence.mjs",
     "preview": "vite preview",
     "icon:android": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sync-android-icon.ps1",
     "capture:marketing": "node scripts/capture-marketing.mjs",

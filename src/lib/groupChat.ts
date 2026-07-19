@@ -128,6 +128,9 @@ export function buildGroupSystemPrompt(opts: {
           ? `${personalityTraitLine(trait, c.warmth ?? 0)}${customPersonalityTraitsLine(c.customPersonalityTraits, c.warmth ?? 0)}`
           : ''
       const samplesLine = formatSpeechSamplesForScene(c.speechSamples, 'group', 2)
+      const sharedHistoryLine = c.sharedHistory?.trim()
+        ? `\n【与用户的共同过往】${c.sharedHistory.trim().slice(0, 1200)}（只能引用这段已知事实）`
+        : '\n【与用户的共同过往】暂无具体记录，但关系不是陌生人。'
       const recentMemoText = opts.speakerMemoriesMap?.get(c.id)
       const recentMemoBlock = recentMemoText ? `\n【最近的记忆碎片】\n${recentMemoText}` : ''
       return `发言人${i + 1}: ${c.name}
@@ -136,7 +139,7 @@ export function buildGroupSystemPrompt(opts: {
 ${samplesLine ? `【说话样例】\n${samplesLine}\n` : ''}
 【当前状态】${scheduleText || '没有特别安排'}
 【对用户的了解】${c.memoryFacts || factsFallback}
-【和用户相处的习惯】${c.memoryStyle || styleFallback}${plansLine}${recentMemoBlock}${selfIterationLine}`
+【和用户相处的习惯】${c.memoryStyle || styleFallback}${sharedHistoryLine}${plansLine}${recentMemoBlock}${selfIterationLine}`
     })
     .join('\n\n')
 
@@ -165,6 +168,8 @@ ${samplesLine ? `【说话样例】\n${samplesLine}\n` : ''}
 - 你可以看到群里所有人发的消息（包括其他发言人说的），也应该对其他人说的话做出反应——搭话、接梗、吐槽、附和、反驳，而不是每个人都只对着用户说话。
 - 不要每个人都回复用户的每一条消息。真实群聊里，有人话多有人话少，有人甚至会完全潜水一轮不吭声。
 - 严格按照你的人设说话。你的人设决定了你的性格、说话风格、兴趣范围——不要让一个内向文静的人主动约人去打篮球，不要让一个高冷的人突然热情洋溢。
+- 首轮或短历史时，每个实际发言人的第一条有效消息必须露出自己的关系距离；如果是恋人或暧昧对象，不能写成普通群友。特色性格也要在措辞或反应中出现可识别的行为锚点，例如雌小鬼的优越感逗弄、嘴硬和反差，而不是只写普通温柔口吻。
+- 共同过往只能由对应角色引用，其他成员不能代述或泄露；只使用该角色资料中明确给出的事实。
 
 ${opts.stylePrompt}
 
@@ -189,6 +194,7 @@ ${speakerBlocks}
 - 这是一个群聊 你的发言要像在群里聊天一样自然 可以接别人的话 也可以主动开启新话题
 - 不是每个人都必须说话 有人多说有人少说甚至不说 更像真实群聊
 - 每个人的记忆/约定只有本人能提 别人不能代提
+- 关系定位、共同过往和核心性格特质必须能从实际消息中辨认，不能只存在于隐藏思考里
 - knowledgeQueries可选 平级字段 不了解的梗/番剧/游戏 最多2个
 
 【表情包】
@@ -223,6 +229,9 @@ export function buildGroupRawChatPrompt(opts: {
       const plansText = activeUpcomingPlansText(c, new Date())
       const scheduleText = describeCurrentSchedule(c, new Date())
       const samplesText = formatSpeechSamplesForScene(c.speechSamples, 'group', 2)
+      const sharedHistoryText = c.sharedHistory?.trim()
+        ? `- 与用户的共同过往（只能使用这些事实）: ${c.sharedHistory.trim().slice(0, 1200)}。首轮自然露出一个熟悉度信号。\n`
+        : '- 与用户的共同过往: 暂无具体记录，但不能用陌生人开场。\n'
       const recentMemoText = opts.speakerMemoriesMap?.get(c.id)
       return `【发言人${i + 1}: ${c.name}】
 逻辑:
@@ -231,7 +240,7 @@ export function buildGroupRawChatPrompt(opts: {
 - 当前状态: ${scheduleText || '没有特别安排'}。
 - 对用户的了解: ${c.memoryFacts || '还没有具体聊天记忆，但不是陌生人'}。
 - 相处习惯: ${c.memoryStyle || `语气要符合${base}关系，不要生疏客气`}。
-${plansText ? `- 和用户的约定: ${plansText}。\n` : ''}${recentMemoText ? `- 最近记忆碎片:\n${recentMemoText}\n` : ''}${c.selfIterationPrompt ? `- 关系协商记录:\n${c.selfIterationPrompt}\n` : ''}
+ ${sharedHistoryText}${plansText ? `- 和用户的约定: ${plansText}。\n` : ''}${recentMemoText ? `- 最近记忆碎片:\n${recentMemoText}\n` : ''}${c.selfIterationPrompt ? `- 关系协商记录:\n${c.selfIterationPrompt}\n` : ''}
 感觉:
 - 人设必须严格遵守: ${c.systemPrompt || '自由发挥成一个普通朋友'}。${isModuleEnabled('career') && c.occupation ? `职业：${c.occupation}，月薪${c.monthlySalary ?? 0}。` : ''}${c.personaConstraints ? `\n- 用户补充说明（不可违背）: ${c.personaConstraints}` : ''}${c.personaProfile ? `\n- 人设硬约束:\n${formatPersonaProfile(c.personaProfile)}` : ''}
 ${c.mbti ? `- MBTI: ${c.mbti}。` : ''}${personalityTraitLine(c.personalityTrait, c.warmth ?? 0)}${customPersonalityTraitsLine(c.customPersonalityTraits, c.warmth ?? 0)}
@@ -288,6 +297,7 @@ ${samplesText ? `- 说话样例:\n${samplesText}` : ''}`
 - 不要让多名AI围绕同一个词轮流解释、吐槽、复述；一人接梗后，下一人应补充新信息、转弯或收束。
 - 用户说“普通点/别演/别紧张/正常说话/换个话题”时，立刻降温：少提旧梗，短句回应，主动回到普通聊天。`
   const personaLogicContract = `人格逻辑契约：每位发言人的人设、用户补充约束、结构化人设、MBTI 和特色人格都是与身份、记忆同等级的逻辑前提，不是可选修辞。事实不冲突时，必须选择最符合该角色特殊人格的反应、动机、语气和主动性；不得为了群聊顺滑把不同角色写成同一种普通口吻，也不得编造事实来硬演人设。`
+  const adherenceContract = `关系与特质验收：首轮或短历史中，若角色是恋人/暧昧对象，至少用称呼、亲密语气或共同过往细节体现熟悉度；若角色有核心性格特质，至少用一个可观察的措辞或反应体现，不得只写在想法里。共同过往只能由拥有它的角色使用，不能补造未提供的具体事件。`
 
   return `【场景】
 这是一个微信群，群名是"${opts.groupName}"。用户也是群成员之一，不是私聊里的"对方"。
@@ -306,6 +316,8 @@ ${interactionContract}
 ${topicContract}
 
 ${personaLogicContract}
+
+${adherenceContract}
 
 【感觉 - 最低优先级】
 只在逻辑成立后优化文采、节奏和聊天感。感觉要求不能覆盖身份、记忆、@/回复、输出格式。

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Contact } from '../types'
-import { parseGroupRawDraft, serializeGroupTurn } from './groupChat'
+import { buildGroupRawChatPrompt, buildGroupSystemPrompt, parseGroupRawDraft, serializeGroupTurn } from './groupChat'
 
 const speakers = [
   { id: 'a', name: '林夏' },
@@ -68,5 +68,29 @@ describe('group chat local draft parser', () => {
     expect(greeting.needsUtility).toBe(false)
     expect(plan.valid).toBe(true)
     expect(plan.needsUtility).toBe(true)
+  })
+})
+
+describe('group chat persona prompt anchors', () => {
+  it('includes each speaker shared history and visible first-turn adherence rules', () => {
+    const lover = { id: 'lover', name: '小满', systemPrompt: '嘴硬但很在乎用户', relationshipBase: '恋人', personalityTrait: '雌小鬼', sharedHistory: '大学社团认识，曾陪用户熬夜备考。' } as Contact
+    const friend = { id: 'friend', name: '阿野', systemPrompt: '直率的朋友', relationshipBase: '朋友' } as Contact
+    const common = {
+      stylePrompt: '自然短句',
+      groupName: '周末群',
+      allMembers: [lover, friend],
+      speakers: [lover, friend],
+      stickerNames: [],
+      currentTimeText: '周六上午',
+      userProfileText: '昵称：我',
+    }
+    const systemPrompt = buildGroupSystemPrompt(common)
+    const rawPrompt = buildGroupRawChatPrompt(common)
+    for (const prompt of [systemPrompt, rawPrompt]) {
+      expect(prompt).toContain('大学社团认识')
+      expect(prompt).toContain('首轮')
+      expect(prompt).toContain('恋人')
+      expect(prompt).toContain('雌小鬼')
+    }
   })
 })

@@ -393,6 +393,7 @@ async function runAiTurn(
       mbti: contact.mbti || undefined,
       recentMemoriesText: recentMemories || undefined,
       speechSamplesText: formatSpeechSamplesForScene(contact.speechSamples, 'private', 3) || undefined,
+      sharedHistory: contact.sharedHistory,
     })
 
     const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
@@ -479,6 +480,7 @@ async function runAiTurn(
         `人设=${contact.systemPrompt.slice(0, 1400)}`,
         contact.personaConstraints ? `硬约束=${contact.personaConstraints.slice(0, 700)}` : '',
         contact.personalityTrait ? `人格特质=${contact.personalityTrait}` : '',
+        contact.sharedHistory ? `与用户共同过往（关系硬锚点）=${contact.sharedHistory.slice(0, 900)}` : '',
         worldbookText ? `本轮命中世界书=${worldbookText.slice(0, 1000)}` : '',
         sharedOriginalContext ? `相关跨场景事实=${sharedOriginalContext.slice(-1000)}` : '',
       ].filter(Boolean).join('\n'),

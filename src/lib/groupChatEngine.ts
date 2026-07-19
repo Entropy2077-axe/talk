@@ -448,7 +448,7 @@ async function runGroupAiTurn(
       latestUserText: latestUserMessage?.content ?? '',
       draftText: rawText,
       personaFacts: [
-        ...speakers.map((speaker) => `${displayName(speaker)}：${speaker.systemPrompt.slice(0, 700)}${speaker.personaConstraints ? `；硬约束=${speaker.personaConstraints.slice(0, 350)}` : ''}`),
+        ...speakers.map((speaker) => `${displayName(speaker)}：${speaker.systemPrompt.slice(0, 700)}${speaker.personaConstraints ? `；硬约束=${speaker.personaConstraints.slice(0, 350)}` : ''}${speaker.personalityTrait ? `；人格特质=${speaker.personalityTrait}` : ''}${speaker.sharedHistory ? `；共同过往锚点=${speaker.sharedHistory.slice(0, 500)}` : ''}`),
         `群聊设置：热闹程度=${group.energyLevel ?? 'normal'}；AI互聊=${group.allowAiChatter === false ? '关闭' : '开启'}`,
         targetContext ? `本轮定向上下文=${targetContext.slice(0, 600)}` : '',
         worldbookText ? `命中世界书=${worldbookText.slice(0, 800)}` : '',

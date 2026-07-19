@@ -484,6 +484,24 @@ test('nuwa mode replaces preset creator fields with free-form fields', async ({ 
   await expect(page.getByRole('button', { name: '恋人', exact: true })).toHaveCount(0)
 })
 
+test('minimal Nuwa mode leaves only one AI-filled role description', async ({ page }) => {
+  await page.goto('/#/contact/new')
+  await page.evaluate(async () => {
+    const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
+    const state = useSettingsStore.getState()
+    state.setSettings({ enabledModules: [...new Set([...state.enabledModules, 'nuwaMode'])] })
+  })
+  await page.reload()
+  const toggle = page.locator('label').filter({ hasText: '极简女娲模式' }).getByRole('checkbox')
+  await toggle.check()
+  await expect(page.getByPlaceholder('例如：慢热、敏感、有主见（顿号分隔）')).toHaveCount(0)
+  await expect(page.getByPlaceholder('例如：24岁')).toHaveCount(0)
+  await expect(page.getByPlaceholder('例如：想要一个嘴硬但很在乎我的雌小鬼恋人，我们小时候就认识。其余让 AI 自己补全。')).toBeVisible()
+  await expect(page.getByText('保存当前人设')).toBeVisible()
+  await expect(page.getByText('与用户的过往 / 共同经历（强烈建议填写）')).toHaveCount(0)
+  await expect(page.getByText('头像', { exact: true })).toHaveCount(0)
+})
+
 test('life simulation catches up local state after elapsed time without an API key', async ({ page }) => {
   await page.goto('/#/')
   const result = await page.evaluate(async () => {
