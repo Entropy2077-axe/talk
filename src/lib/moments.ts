@@ -12,6 +12,7 @@ import { retrieveWorldbookContext } from './worldbook'
 import { recentMemoriesText, socialMemoriesText } from './memory'
 import { recentSocialEventsText } from './socialEvents'
 import { recentSharedOriginalContext } from './sharedRecentContext'
+import { parseTurnLogicReview } from './turnLogicReviewer'
 import type { AppSettings, Contact } from '../types'
 
 const ELIGIBLE_WINDOW_MS = 10 * 60 * 1000
@@ -216,16 +217,37 @@ async function reviewMomentPayload(settings: AppSettings, raw: string, expectedS
       baseUrl: settings.baseUrl,
       model: settings.utilityModel || settings.model,
       jsonMode: true,
-      maxTokens: 1800,
+      thinking: 'disabled',
+      temperature: 0,
+      maxTokens: 220,
       purpose: 'quality',
       automatic: true,
       messages: [
-        { role: 'system', content: `You review AI-generated Moments JSON. Output JSON only: {"valid":true|false,"fixedRaw":"optional complete replacement JSON"}. Reject content that repeats, escalates, or keeps circling the same request, object, joke, wording, or topic from the recent feed or within one generated batch. Also reject copy-paste-like comments where several people merely repeat the same point. Persona adherence is a logical requirement: reject content that is generic or contradicts a listed persona, trait, boundary, habit, MBTI, relationship, or speaking sample when those should affect the post/comment. Preserve the required JSON shape exactly: ${expectedShape}. If invalid, return a complete replacement JSON in fixedRaw with fresh, natural everyday content; do not add explanations.` },
-        { role: 'user', content: `Persona context:\n${personaContext || '(none provided)'}\n\nRecent feed:\n${history || '(empty)'}\n\nCandidate JSON:\n${raw.slice(0, 6000)}` },
+        { role: 'system', content: `你是朋友圈内容的快速逻辑审查器。只检查客观错误，不润色、不重写。检查：JSON是否符合形状 ${expectedShape}；是否缺少必需条目；内容/评论是否明显重复近期动态或同批内容；评论是否像复制粘贴；是否违反给出的人设硬事实、关系边界或说话样例。普通、简短、不同意见不是错误。只有明确问题才valid=false。只输出JSON：{"valid":true,"reason":""}` },
+        { role: 'user', content: `人物事实：${personaContext || '(无)'}\n近期动态：${history || '(空)'}\n候选JSON：${raw.slice(0, 5000)}` },
       ],
     })
-    const parsed = JSON.parse(judged) as { valid?: unknown; fixedRaw?: unknown }
-    return parsed.valid === false && typeof parsed.fixedRaw === 'string' && parsed.fixedRaw.trim() ? parsed.fixedRaw.trim() : raw
+    const verdict = parseTurnLogicReview(judged)
+    if (verdict.valid) return raw
+
+    // The common path stays one small Flash call. Only a failed review pays
+    // for a second call that mechanically repairs the required JSON shape.
+    const repaired = await chatCompletion({
+      apiKey: settings.apiKey,
+      baseUrl: settings.baseUrl,
+      model: settings.utilityModel || settings.model,
+      jsonMode: true,
+      thinking: 'disabled',
+      temperature: 0.15,
+      maxTokens: 900,
+      purpose: 'quality',
+      automatic: true,
+      messages: [
+        { role: 'system', content: `修复朋友圈候选JSON。只输出符合这个形状的JSON：${expectedShape}。保持人物身份、关系和事实，不要解释；只修复审查指出的客观问题（重复、缺项、越界或格式）。` },
+        { role: 'user', content: `问题：${verdict.reason || '候选内容不符合要求'}\n人物事实：${personaContext || '(无)'}\n候选JSON：${raw.slice(0, 5000)}` },
+      ],
+    })
+    return repaired.trim() || raw
   } catch {
     return raw
   }
@@ -243,6 +265,7 @@ export interface RefreshMomentsResult {
  * comment text for whichever posters/reactors were already chosen.
  */
 export async function refreshMoments(settings: AppSettings): Promise<RefreshMomentsResult> {
+  const startedAt = performance.now()
   const contacts = await db.contacts.toArray()
   if (contacts.length === 0) return { postedCount: 0, message: '还没有联系人' }
   if (!settings.apiKey) return { postedCount: 0, message: '还没有配置API Key' }
@@ -268,7 +291,7 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
       recentMemoriesText(contact.id, 4),
       socialMemoriesText(contact.id, 4),
       recentSocialEventsText([contact.id], 3, false),
-      recentSharedOriginalContext([contact.id], settings.userNickname, { maxMessages: 70, maxChars: 9_000 }),
+      recentSharedOriginalContext([contact.id], settings.userNickname, { maxMessages: 45, maxChars: 6_500 }),
     ])
     return [contact.id, [originalContext, privateMemories, socialMemories, events].filter(Boolean).join('\n\n').slice(0, 10_500)] as const
   }))
@@ -285,10 +308,12 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
     purpose: 'moments',
     automatic: true,
   })
+  console.info(`[moments-perf] 主模型完成=${Math.round(performance.now() - startedAt)}ms 条数=${entries.length}`)
 
   const expectedCommentCounts = entries.map((e) => e.commenters.filter((c) => c.willComment).length)
   const personaContext = entries.map((entry) => `Poster ${entry.poster.name}: ${entry.poster.systemPrompt}\nTrait: ${entry.poster.personalityTrait || 'none'}\nCommenters: ${entry.commenters.filter((commenter) => commenter.willComment).map((commenter) => `${commenter.contact.name}: ${commenter.contact.systemPrompt}`).join(' | ') || 'none'}`).join('\n\n')
   const reviewedRaw = await reviewMomentPayload(settings, raw, '{"moments":[{"content":"...","imageKeyword":"...","comments":["..."]}]}', personaContext)
+  console.info(`[moments-perf] 自检完成=${Math.round(performance.now() - startedAt)}ms 条数=${entries.length}`)
   const parsed = parseMomentsResponse(reviewedRaw, expectedCommentCounts)
   if (!parsed) return { postedCount: 0, message: '生成失败 请再刷新试试' }
 
@@ -461,7 +486,7 @@ export async function postUserMoment(content: string, settings: AppSettings): Pr
       const contextRows = await Promise.all(commenterPlans.map(async ({ contact }) => {
         const [memories, social, events, originalContext] = await Promise.all([
           recentMemoriesText(contact.id, 4), socialMemoriesText(contact.id, 4), recentSocialEventsText([contact.id], 2, false),
-          recentSharedOriginalContext([contact.id], settings.userNickname, { maxMessages: 60, maxChars: 8_000 }),
+          recentSharedOriginalContext([contact.id], settings.userNickname, { maxMessages: 45, maxChars: 6_500 }),
         ])
         return [contact.id, [originalContext, memories, social, events].filter(Boolean).join('\n\n').slice(0, 9_000)] as const
       }))

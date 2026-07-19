@@ -15,7 +15,7 @@ function messageContent(message: Message): string {
 export async function recentSharedOriginalContext(
   contactIds: string[],
   userNickname: string,
-  options: { lookbackMs?: number; maxMessages?: number; maxMoments?: number; maxChars?: number } = {},
+  options: { lookbackMs?: number; maxMessages?: number; maxMoments?: number; maxChars?: number; excludeConversationId?: string } = {},
 ): Promise<string> {
   const ids = new Set(contactIds)
   if (ids.size === 0) return ''
@@ -34,7 +34,11 @@ export async function recentSharedOriginalContext(
   // current contact belongs to caused global user state (e.g. “I am going to
   // sleep”) to disappear merely because the next contact was not in that
   // group. Privacy is handled as a response rule, not by deleting continuity.
-  const conversationIds = new Set(conversations.map((conversation) => conversation.id))
+  const conversationIds = new Set(
+    conversations
+      .filter((conversation) => conversation.id !== options.excludeConversationId)
+      .map((conversation) => conversation.id),
+  )
   const conversationById = new Map(conversations.map((conversation) => [conversation.id, conversation]))
   const messages = (await db.messages.where('createdAt').aboveOrEqual(since).sortBy('createdAt'))
     .filter((message) => conversationIds.has(message.conversationId) && !message.pending)

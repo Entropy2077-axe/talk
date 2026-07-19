@@ -163,6 +163,7 @@ export function ContactAddPage() {
       if (relationRows.some((row) => !row.targetContactId || !row.label.trim())) { setError('联系人关系不能留空'); return }
     }
     setGenerating(true)
+    const generationStartedAt = performance.now()
     setError('')
     setProgressStep('persona')
     try {
@@ -193,8 +194,12 @@ export function ContactAddPage() {
           { role: 'user', content: '请生成' },
         ],
         jsonMode: true,
+        thinking: 'disabled',
+        temperature: 0.7,
+        maxTokens: 2200,
         purpose: 'persona',
       })
+      console.info(`[persona-perf] 主模型完成=${Math.round(performance.now() - generationStartedAt)}ms`)
       const parsed = parsePersonaGeneration(raw)
       if (!parsed) throw new Error('生成结果解析失败 请重试一次')
 
@@ -276,6 +281,7 @@ export function ContactAddPage() {
         })
       }
       navigate('/contacts')
+      console.info(`[persona-perf] 创建完成=${Math.round(performance.now() - generationStartedAt)}ms`)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {

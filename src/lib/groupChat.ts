@@ -478,6 +478,120 @@ export interface ParsedGroupTurn {
   planCandidates: Array<{ title: string; summary: string; participantIndexes: number[]; location?: string }>
 }
 
+export interface ParsedGroupRawDraft extends ParsedGroupTurn {
+  valid: boolean
+  reason?: string
+  needsUtility: boolean
+}
+
+/**
+ * Deterministically parses the strict line protocol emitted by the main group
+ * model. Normal text/sticker/image/knowledge turns no longer need a second
+ * model merely to copy fields into JSON.
+ */
+export function parseGroupRawDraft(
+  raw: string,
+  speakers: Contact[],
+  stickerNames: string[] = [],
+): ParsedGroupRawDraft {
+  const empty: ParsedGroupRawDraft = {
+    valid: false,
+    reason: '草稿为空',
+    needsUtility: false,
+    bubbles: [],
+    knowledgeQueries: [],
+    turnSummary: '',
+    groupVibe: '',
+    planCandidates: [],
+  }
+  if (!raw.trim() || speakers.length === 0) return empty
+
+  const speakerIndexByName = new Map(speakers.map((speaker, index) => [speaker.name, index + 1]))
+  const bubbles: GroupAiBubble[] = []
+  const knowledgeQueries: string[] = []
+  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+
+  for (const [index, line] of lines.entries()) {
+    const match = line.match(/^<([^>]+)>（([^）]+)）\[([^\]]+)\]“([\s\S]+)”[。.]?$/)
+    if (!match) return { ...empty, reason: `第${index + 1}行格式不完整` }
+    const speakerIndex = speakerIndexByName.get(match[1].trim())
+    if (!speakerIndex) return { ...empty, reason: `第${index + 1}行使用了非本轮发言人` }
+
+    const thought = match[2].trim().slice(0, 100)
+    const mood = match[3].trim().slice(0, 10)
+    const content = match[4].trim()
+    const common = {
+      speakerIndex,
+      speakerName: speakers[speakerIndex - 1].name,
+      thought,
+      mood,
+    }
+    const knowledge = content.match(/^\[knowledge:([^\]]+)\]$/i)
+    if (knowledge) {
+      if (knowledgeQueries.length < 2) knowledgeQueries.push(knowledge[1].trim())
+      continue
+    }
+    const sticker = content.match(/^\[sticker:([^\]]+)\]$/i)
+    if (sticker) {
+      const name = sticker[1].trim()
+      if (!stickerNames.includes(name)) {
+        return { ...empty, reason: `第${index + 1}行使用了不存在的表情包` }
+      }
+      bubbles.push({ ...common, type: 'sticker', name })
+      continue
+    }
+    const image = content.match(/^\[image:([^:\]]+):([^\]]*)\]$/i)
+    if (image) {
+      bubbles.push({
+        ...common,
+        type: 'image',
+        query: image[1].trim().slice(0, 100),
+        caption: image[2].trim().slice(0, 100) || undefined,
+      })
+      continue
+    }
+    bubbles.push({ ...common, type: 'text', content })
+  }
+
+  const turnSummary = bubbles
+    .map((bubble) => `${bubble.speakerName || speakers[bubble.speakerIndex - 1]?.name || '群成员'}：${
+      bubble.type === 'text' ? bubble.content : bubble.type === 'sticker' ? `[表情包:${bubble.name}]` : `[图片:${bubble.caption || bubble.query}]`
+    }`)
+    .join('；')
+    .slice(0, 180)
+  // Joint plans need participant extraction and agreement checks, so retain
+  // the utility model only for turns that may contain a structured plan.
+  const planText = bubbles
+    .filter((bubble) => bubble.type === 'text')
+    .map((bubble) => bubble.content)
+    .join('\n')
+  const hasJointAction = /(一起|碰面|见面|约好|改期|定在|计划|安排)/
+  const hasConcreteTime = /(明天|后天|大后天|周[一二三四五六日天]|星期[一二三四五六日天]|几点|上午|下午|晚上|今晚|\d{1,2}[点:：])/
+  const needsUtility =
+    (hasJointAction.test(planText) && hasConcreteTime.test(planText))
+    || /(大家都同意|都答应了|就这么定|说好了)/.test(planText)
+
+  return {
+    valid: bubbles.length > 0,
+    needsUtility,
+    bubbles,
+    knowledgeQueries,
+    turnSummary,
+    groupVibe: '',
+    planCandidates: [],
+  }
+}
+
+export function serializeGroupTurn(parsed: ParsedGroupTurn): string {
+  return JSON.stringify({
+    messages: parsed.bubbles,
+    turnSummary: parsed.turnSummary,
+    groupVibe: parsed.groupVibe,
+    knowledgeQueries: parsed.knowledgeQueries,
+    planCandidates: parsed.planCandidates,
+  })
+}
+
 export function parseGroupAiResponse(raw: string, speakerCount: number): ParsedGroupTurn {
   const trimmed = raw.trim()
   if (!trimmed) return { bubbles: [], knowledgeQueries: [], turnSummary: '', groupVibe: '', planCandidates: [] }
