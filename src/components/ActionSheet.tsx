@@ -16,20 +16,22 @@ export function ActionSheet({ options, onClose }: ActionSheetProps) {
         className="w-full rounded-t-2xl bg-white pb-[env(safe-area-inset-bottom)]"
         onClick={(e) => e.stopPropagation()}
       >
-        {options.map((opt, i) => (
-          <button
-            key={i}
-            onClick={() => {
-              opt.onSelect()
-              onClose()
-            }}
-            className={`block w-full border-b border-gray-100 py-3.5 text-center text-[15px] last:border-b-0 ${
-              opt.danger ? 'text-red-500' : 'text-gray-900'
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
+        <div className="max-h-[65vh] overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]">
+          {options.map((opt, i) => (
+            <button
+              key={i}
+              onClick={() => {
+                opt.onSelect()
+                onClose()
+              }}
+              className={`block w-full border-b border-gray-100 py-3.5 text-center text-[15px] last:border-b-0 ${
+                opt.danger ? 'text-red-500' : 'text-gray-900'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
         <button onClick={onClose} className="mt-2 block w-full py-3.5 text-center text-[15px] text-gray-500">
           取消
         </button>

@@ -10,7 +10,7 @@ import { useSettingsStore } from '../store/useSettingsStore'
 import { useModuleEnabled } from '../features'
 import { useChatUiStore } from '../store/useChatUiStore'
 import { DEFAULT_RUNTIME_STATE, regenerateAiTurn, sendMessage, triggerAiTurn, useChatEngineStore } from '../lib/chatEngine'
-import { regenerateGroupAiTurn, sendGroupMessage } from '../lib/groupChatEngine'
+import { regenerateGroupAiTurn, sendGroupMessage, triggerGroupAiTurn } from '../lib/groupChatEngine'
 import { displayName } from '../lib/contact'
 import { applyMessageFeedback } from '../lib/messageFeedback'
 import { buildPrivateStatusLine } from '../lib/contactStatus'
@@ -19,6 +19,8 @@ import type { Contact, Message } from '../types'
 import { v4 as uuid } from 'uuid'
 import { claimRedPacket, transferFunds, USER_WALLET_ID } from '../lib/finance'
 import { draftReply } from '../lib/aiReplyAssist'
+import { searchRemoteStickers, trackRemoteStickerSend, type RemoteStickerResult } from '../lib/remoteMedia'
+import { isStickerProviderReady, stickerProviderName } from '../lib/mediaProviders'
 
 const EMPTY_MESSAGES: Message[] = []
 
@@ -101,6 +103,10 @@ export function ChatPage() {
   const [captureImageUrl, setCaptureImageUrl] = useState('')
   const [captureBusy, setCaptureBusy] = useState(false)
   const [appsOpen, setAppsOpen] = useState(false)
+  const [stickerPickerOpen, setStickerPickerOpen] = useState(false)
+  const [stickerQuery, setStickerQuery] = useState('')
+  const [stickerResults, setStickerResults] = useState<RemoteStickerResult[]>([])
+  const [stickerBusy, setStickerBusy] = useState(false)
   const [financeMode, setFinanceMode] = useState<'transfer'|'redPacket'|'loan'|null>(null)
   const [financeAmount,setFinanceAmount]=useState('')
   const [financeNote,setFinanceNote]=useState('')
@@ -301,6 +307,45 @@ export function ChatPage() {
       await db.messages.add({id:uuid(),conversationId,role:'user',type,content:financeNote||String(amount),finance,createdAt:Date.now()});await db.conversations.update(conversationId,{updatedAt:Date.now()});setFinanceMode(null);setFinanceAmount('');setFinanceNote('');void triggerAiTurn(conversationId,contact,settings,stickers)
     } catch(e){setToast(e instanceof Error?e.message:String(e))}
   }
+
+  async function searchStickers() {
+    const query = stickerQuery.trim()
+    if (!query) return
+    if (!isStickerProviderReady(settings)) {
+      setToast('请先在“我 / 表情包管理 / 远程表情包”里完成配置')
+      return
+    }
+    setStickerBusy(true)
+    try {
+      const results = await searchRemoteStickers(settings, query)
+      setStickerResults(results)
+      if (results.length === 0) setToast('接口没有返回图片')
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : String(err))
+    } finally {
+      setStickerBusy(false)
+    }
+  }
+
+  async function sendRemoteSticker(result: RemoteStickerResult) {
+    if (!conversationId) return
+    const name = result.name?.trim() || stickerQuery.trim() || '远程表情'
+    await db.messages.add({
+      id: uuid(),
+      conversationId,
+      role: 'user',
+      type: 'sticker',
+      content: name,
+      sticker: { url: result.url, provider: result.provider },
+      createdAt: Date.now(),
+    })
+    await db.conversations.update(conversationId, { updatedAt: Date.now() })
+    void trackRemoteStickerSend(result)
+    setStickerPickerOpen(false)
+    setStickerResults([])
+    if (!isGroupConv && contact) void triggerAiTurn(conversationId, contact, settings, stickers)
+    else if (isGroupConv && group) void triggerGroupAiTurn(conversationId, group, groupMembers, settings, stickers)
+  }
   async function handleFinanceCard(message: Message){
     if(message.type==='redPacket'&&message.role==='assistant'&&message.finance?.transactionId&&message.finance.status==='pending'){try{await claimRedPacket(message.finance.transactionId,USER_WALLET_ID);await db.messages.update(message.id,{finance:{...message.finance,status:'claimed'}});setToast('红包已领取')}catch(e){setToast(e instanceof Error?e.message:String(e))}}
     if(message.type==='loanRequest'&&message.role==='assistant'&&message.finance?.loanId&&message.finance.status==='pending'&&contact){const accept=confirm(`${displayName(contact)}想借 ${message.finance.amount}，是否同意？`);if(accept){try{await transferFunds({from:USER_WALLET_ID,to:contact.id,amount:message.finance.amount,kind:'loan',note:message.finance.note,idempotencyKey:`loan:${message.finance.loanId}`});await db.loans.update(message.finance.loanId,{status:'active',resolvedAt:Date.now()});await db.messages.update(message.id,{finance:{...message.finance,status:'accepted'}})}catch(e){setToast(e instanceof Error?e.message:String(e))}}else{await db.loans.update(message.finance.loanId,{status:'rejected',resolvedAt:Date.now()});await db.messages.update(message.id,{finance:{...message.finance,status:'rejected'}})}}
@@ -489,7 +534,7 @@ export function ChatPage() {
               contactAvatar={bubbleAvatar}
               contactAvatarColor={bubbleAvatarColor}
               userAvatar={settings.userAvatar}
-              stickerUrl={m.type === 'sticker' ? stickerByName.get(m.content) : undefined}
+              stickerUrl={m.type === 'sticker' ? (m.sticker?.url ?? stickerByName.get(m.content)) : undefined}
               mentionNames={(m.mentions ?? []).map((id) => memberById.get(id)).filter((c): c is Contact => !!c).map(displayName)}
               replyPreview={m.replyToMessageId ? previewForReply(messageById.get(m.replyToMessageId) ?? m) : undefined}
               highlighted={flashId === m.id}
@@ -655,8 +700,23 @@ export function ChatPage() {
           ]}
         />
       )}
+      {stickerPickerOpen && (
+        <div className="absolute inset-0 z-50 flex items-end bg-black/30" onClick={() => setStickerPickerOpen(false)}>
+          <div className="flex max-h-[78%] w-full flex-col rounded-t-2xl bg-white pb-[env(safe-area-inset-bottom)]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 border-b border-gray-100 p-3">
+              <input autoFocus value={stickerQuery} onChange={(e) => setStickerQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void searchStickers() }} placeholder="搜一个表情包，例如：猫猫、无语" className="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm" />
+              <button type="button" onClick={() => void searchStickers()} disabled={stickerBusy} className="rounded-lg bg-gray-900 px-3 py-2 text-sm text-white disabled:opacity-40">{stickerBusy ? '搜索中' : '搜索'}</button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              {stickerResults.length === 0 ? <p className="py-8 text-center text-xs text-gray-400">输入关键词后搜索，点图片即可发送</p> : <div className="grid grid-cols-3 gap-2">{stickerResults.map((result, index) => <button key={`${result.url}-${index}`} type="button" onClick={() => void sendRemoteSticker(result)} className="aspect-square overflow-hidden rounded-xl bg-gray-100"><img src={result.url} alt={result.name || stickerQuery} loading="lazy" className="h-full w-full object-cover" /></button>)}</div>}
+              {settings.stickerProvider !== 'none' && <p className="mt-3 text-center text-[10px] text-gray-400">Powered by {stickerProviderName(settings.stickerProvider)}</p>}
+            </div>
+          </div>
+        </div>
+      )}
       {appsOpen && (
         <ActionSheet onClose={()=>setAppsOpen(false)} options={[
+          {label:'搜索远程表情包',onSelect:()=>{setAppsOpen(false);setStickerPickerOpen(true);setStickerQuery('');setStickerResults([])}},
           ...(!isGroupConv&&careerEnabled?[{label:'💸 转账',onSelect:()=>{setAppsOpen(false);setFinanceMode('transfer' as const)}},{label:'🧧 红包',onSelect:()=>{setAppsOpen(false);setFinanceMode('redPacket' as const)}},{label:'🤝 借款',onSelect:()=>{setAppsOpen(false);setFinanceMode('loan' as const)}},{label:'💰 归还借款',onSelect:()=>{setAppsOpen(false);void repayLoan()}}]:[]),
           {label:'💼 工作',onSelect:()=>navigate('/work')},{label:'🛍️ 商城',onSelect:()=>navigate('/shop')},{label:'🎒 仓库',onSelect:()=>navigate('/warehouse')}
         ]}/>

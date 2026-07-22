@@ -6,6 +6,7 @@ const root = fileURLToPath(new URL('../dist/', import.meta.url))
 const secretPatterns = [
   /sk-[A-Za-z0-9_-]{20,}/g,
   /tvly-[A-Za-z0-9_-]{20,}/g,
+  /apikey-[A-Za-z0-9_-]{20,}/g,
 ]
 
 async function files(dir) {

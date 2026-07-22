@@ -45,9 +45,18 @@ function syncAppHeight() {
   const appHeight = Math.max(240, height - top)
   document.documentElement.style.setProperty('--app-top-offset', `${top}px`)
   document.documentElement.style.setProperty('--app-height', `${appHeight}px`)
+  const root = document.getElementById('root')
+  if (root) {
+    // Apply the compensation to the actual layout root as well. Older
+    // Android WebViews can keep a descendant's paint stale after only a
+    // custom-property/margin update; an inline root padding change forces the
+    // whole app tree to re-layout, so the manual setting is visibly effective.
+    root.style.boxSizing = 'border-box'
+    root.style.paddingTop = `${top}px`
+  }
   const shell = document.querySelector<HTMLElement>('.app-shell')
   if (shell) {
-    shell.style.marginTop = `${top}px`
+    shell.style.marginTop = '0px'
     shell.style.height = `${appHeight}px`
   }
   void document.body.offsetHeight // force a reflow, in case the property change alone doesn't trigger one

@@ -328,7 +328,9 @@ export interface Message {
   replyToMessageId?: string // group chats: message id this message is replying to
   link?: LinkPayload
   gift?: GiftPayload
-  image?: { url: string; caption?: string; photographer?: string; photographerUrl?: string; query?: string }
+  /** Remote stickers are stored on the message instead of being copied into the user's local sticker library. */
+  sticker?: { url: string; provider?: StickerProviderId }
+  image?: { url: string; caption?: string; photographer?: string; photographerUrl?: string; query?: string; provider?: ImageProviderId | 'pexels' }
   scheduleChange?: ScheduleChangePayload
   groupPlanId?: string
   finance?: FinanceMessagePayload
@@ -366,6 +368,93 @@ export interface Sticker {
   name: string
   dataUrl: string
   createdAt: number
+}
+
+export type StickerProviderId = 'none' | 'giphy' | 'klipy' | 'tenor' | 'custom'
+export type StickerContentRating = 'g' | 'pg' | 'pg-13' | 'r'
+export type ApiAuthMode = 'none' | 'bearer' | 'x-api-key' | 'query'
+
+export interface StickerProvidersSettings {
+  giphy: {
+    apiKey: string
+    rating: StickerContentRating
+    language: string
+  }
+  klipy: {
+    apiKey: string
+    contentFilter: 'off' | 'low' | 'medium' | 'high'
+    locale: string
+  }
+  tenor: {
+    apiKey: string
+    contentFilter: 'off' | 'low' | 'medium' | 'high'
+    locale: string
+  }
+  custom: {
+    endpoint: string
+    apiKey: string
+    authMode: ApiAuthMode
+    responsePath: string
+  }
+}
+
+export type ImageProviderId = 'none' | 'atlas' | 'novelai' | 'comfyui' | 'stable-diffusion' | 'custom'
+
+export interface ImageProvidersSettings {
+  atlas: {
+    apiKey: string
+    baseUrl: string
+    model: string
+    size: string
+    promptPrefix: string
+  }
+  novelai: {
+    apiKey: string
+    baseUrl: string
+    model: string
+    width: number
+    height: number
+    steps: number
+    scale: number
+    sampler: string
+    scheduler: string
+    negativePrompt: string
+    promptPrefix: string
+  }
+  comfyui: {
+    baseUrl: string
+    apiKey: string
+    model: string
+    width: number
+    height: number
+    steps: number
+    cfg: number
+    sampler: string
+    scheduler: string
+    negativePrompt: string
+    promptPrefix: string
+  }
+  stableDiffusion: {
+    baseUrl: string
+    username: string
+    password: string
+    model: string
+    width: number
+    height: number
+    steps: number
+    cfg: number
+    sampler: string
+    negativePrompt: string
+    promptPrefix: string
+  }
+  custom: {
+    endpoint: string
+    apiKey: string
+    method: 'GET' | 'POST'
+    authMode: ApiAuthMode
+    bodyTemplate: string
+    responsePath: string
+  }
 }
 
 /** A purchased shop item sitting in the user's warehouse until used or gifted away. */
@@ -414,6 +503,16 @@ export interface AppSettings {
   tavilyApiKey: string // used only by the knowledge-base refresh job, not live during normal chat
   // ---- photo avatars/moments images (see lib/photoSearch.ts) ----
   pexelsApiKey: string // used for landscape/pet/person-photo categories; anime category uses waifu.pics which needs no key
+  stickerProvider: StickerProviderId
+  stickerProviders: StickerProvidersSettings
+  imageProvider: ImageProviderId
+  imageProviders: ImageProvidersSettings
+  /** Legacy generic settings retained only so version-8 installs can migrate into the new custom providers. */
+  stickerApiUrl?: string
+  stickerApiKey?: string
+  imageApiUrl?: string
+  imageApiKey?: string
+  imageApiResponsePath?: string
   // ---- worldview (see lib/prompt.ts buildWorldviewDraftPrompt) ----
   worldview: string // shared world-setting text injected into every persona's prompt (chat, group chat, moments) once confirmed; empty until the user sets one
   worldbookMigrationCompleted?: boolean

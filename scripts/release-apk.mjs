@@ -10,6 +10,7 @@ const envPath = join(root, '.env')
 const androidDir = join(root, 'android')
 const apkPath = join(androidDir, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk')
 const androidBuildGradlePath = join(androidDir, 'app', 'build.gradle')
+const androidManifestPath = join(androidDir, 'app', 'src', 'main', 'AndroidManifest.xml')
 const defaultJavaHome = 'C:\\Projects\\AndroidStudio\\jbr'
 
 const args = new Set(process.argv.slice(2))
@@ -122,6 +123,18 @@ function syncAndroidVersionFromPackage() {
   log(`Synced Android versionName=${version}, versionCode=${versionCode}.`)
 }
 
+function ensureAndroidLocalHttpSupport() {
+  if (!existsSync(androidManifestPath)) throw new Error(`Missing Android manifest: ${androidManifestPath}`)
+  let manifest = readFileSync(androidManifestPath, 'utf8')
+  if (/android:usesCleartextTraffic=/.test(manifest)) {
+    manifest = manifest.replace(/android:usesCleartextTraffic="[^"]*"/, 'android:usesCleartextTraffic="true"')
+  } else {
+    manifest = manifest.replace(/<application\b/, '<application android:usesCleartextTraffic="true"')
+  }
+  writeFileSync(androidManifestPath, manifest, 'utf8')
+  log('Enabled user-configured LAN HTTP providers for Android.')
+}
+
 function readAndroidSdkDir() {
   const localProperties = join(androidDir, 'local.properties')
   if (!existsSync(localProperties)) return undefined
@@ -193,6 +206,7 @@ function main() {
     run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts/sync-android-icon.ps1'])
     run(command('npm'), ['run', 'build'])
     run(command('npx'), ['cap', 'sync', 'android'])
+    ensureAndroidLocalHttpSupport()
 
     if (!args.has('--skip-apk')) {
       const gradle = process.platform === 'win32' ? 'gradlew.bat' : './gradlew'

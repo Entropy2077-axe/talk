@@ -22,6 +22,8 @@ import { previewForMessage } from './messagePreview'
 import { buildUserProfileText, useChatEngineStore } from './chatEngine'
 import { reviewTurnLogic } from './turnLogicReviewer'
 import { searchPexelsPhoto } from './photoSearch'
+import { generateRemoteImage, searchRemoteStickers, trackRemoteStickerSend, type RemoteStickerResult } from './remoteMedia'
+import { isImageProviderReady, isStickerProviderReady } from './mediaProviders'
 import { recentSocialEventsText, recordSocialEvent } from './socialEvents'
 import { recentSharedOriginalContext } from './sharedRecentContext'
 import { createGroupPlan, planCardMessage } from './groupPlans'
@@ -282,6 +284,25 @@ export async function sendGroupMessage(
   runGroupAiTurn(conversationId, group, members, settings, stickers, streamId)
 }
 
+/** Trigger a group reply after a non-text user action has already been stored. */
+export async function triggerGroupAiTurn(
+  conversationId: string,
+  group: Group,
+  members: Contact[],
+  settings: AppSettings,
+  stickers: Sticker[],
+): Promise<void> {
+  if (!settings.apiKey) {
+    useChatEngineStore.getState().patch(conversationId, { error: '还没有配置 API Key，请先去“我 / 设置”里填写' })
+    return
+  }
+  const streamId = uuid()
+  streamByConversation.set(conversationId, streamId)
+  clearPending(conversationId)
+  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: '群成员' })
+  await runGroupAiTurn(conversationId, group, members, settings, stickers, streamId)
+}
+
 export async function regenerateGroupAiTurn(
   conversationId: string,
   group: Group,
@@ -354,12 +375,18 @@ async function runGroupAiTurn(
 
     const speakerMemoriesMap = await loadSpeakerMemories(speakers)
     const aiRelationshipText = await aiRelationshipPrompt(members)
+    const remoteStickerSearchEnabled = isStickerProviderReady(settings)
+    const imageGenerationEnabled = isImageProviderReady(settings)
+    const mediaPromptOptions = { remoteStickerSearchEnabled, imageGenerationEnabled }
     const systemPrompt = buildGroupRawChatPrompt({
       stylePrompt: settings.globalSystemPrompt,
       groupName: group.name,
       allMembers: members,
       speakers,
       stickerNames: stickers.map((s) => s.name),
+      remoteStickerSearchEnabled,
+      imageGenerationEnabled,
+      imageSearchEnabled: !!settings.pexelsApiKey,
       groupMemoryText: group.memory,
       groupVibeText: group.vibe,
       allowAiChatter: group.allowAiChatter ?? true,
@@ -407,7 +434,7 @@ async function runGroupAiTurn(
     if (streamByConversation.get(conversationId) !== streamId) return
     console.log(`[group] 主模型群聊草稿(${rawText.length}字): ${rawText.slice(0, 160)}...`)
     let draftFeedback: string | undefined
-    let localDraft = parseGroupRawDraft(rawText, speakers, stickers.map((sticker) => sticker.name))
+    let localDraft = parseGroupRawDraft(rawText, speakers, stickers.map((sticker) => sticker.name), remoteStickerSearchEnabled)
     localDraft.groupVibe = group.vibe || '自然、轻松的日常群聊。'
     let parsedTurn = localDraft
     let jsonRaw = serializeGroupTurn(localDraft)
@@ -421,7 +448,7 @@ async function runGroupAiTurn(
         model: settings.utilityModel,
         messages: [{
           role: 'system',
-          content: buildGroupJsonConversionPrompt(rawText, speakers, stickers.map((s) => s.name)),
+          content: buildGroupJsonConversionPrompt(rawText, speakers, stickers.map((s) => s.name), mediaPromptOptions),
         }],
         jsonMode: true,
         signal: controller.signal,
@@ -487,7 +514,7 @@ async function runGroupAiTurn(
         trace: { turnId: streamId, stage: 'second_chat', conversationId },
       })
       if (streamByConversation.get(conversationId) !== streamId) return
-      localDraft = parseGroupRawDraft(rawText, speakers, stickers.map((sticker) => sticker.name))
+      localDraft = parseGroupRawDraft(rawText, speakers, stickers.map((sticker) => sticker.name), remoteStickerSearchEnabled)
       localDraft.groupVibe = group.vibe || '自然、轻松的日常群聊。'
       if (!localDraft.valid || localDraft.needsUtility) {
         jsonRaw = await chatCompletion({
@@ -496,7 +523,7 @@ async function runGroupAiTurn(
           model: settings.utilityModel,
           messages: [{
             role: 'system',
-            content: buildGroupJsonConversionPrompt(rawText, speakers, stickers.map((sticker) => sticker.name)),
+            content: buildGroupJsonConversionPrompt(rawText, speakers, stickers.map((sticker) => sticker.name), mediaPromptOptions),
           }],
           jsonMode: true,
           signal: controller.signal,
@@ -521,10 +548,10 @@ async function runGroupAiTurn(
       const knowledge = await resolveKnowledgeQueries(knowledgeQueries, settings)
       if (knowledge.text) {
         rawText = await chatCompletion({ apiKey:settings.apiKey,baseUrl:settings.baseUrl,model:settings.model,messages:[...chatMessages,{role:'user',content:`刚才出现了你们不了解的词。搜索结果如下：\n${knowledge.text}${reviewFailure?`\n\n上一版审查问题：${reviewFailure}，重写时同时修正。`:''}\n请基于结果重新生成群聊草稿，保持原群聊格式，像刚查明白后自然接话，不要写成报告。`}],signal:controller.signal, thinking:'disabled',temperature:0.9,maxTokens:1800,trace:{turnId:streamId,stage:'second_chat',conversationId} })
-        localDraft = parseGroupRawDraft(rawText, speakers, stickers.map((sticker) => sticker.name))
+        localDraft = parseGroupRawDraft(rawText, speakers, stickers.map((sticker) => sticker.name), remoteStickerSearchEnabled)
         localDraft.groupVibe = group.vibe || '自然、轻松的日常群聊。'
         if (!localDraft.valid || localDraft.needsUtility) {
-          jsonRaw = await chatCompletion({apiKey:settings.apiKey,baseUrl:settings.baseUrl,model:settings.utilityModel,messages:[{role:'system',content:buildGroupJsonConversionPrompt(rawText,speakers,stickers.map(s=>s.name))}],jsonMode:true,signal:controller.signal,thinking:'disabled',temperature:0.1,maxTokens:1400,trace:{turnId:streamId,stage:'other',conversationId}})
+          jsonRaw = await chatCompletion({apiKey:settings.apiKey,baseUrl:settings.baseUrl,model:settings.utilityModel,messages:[{role:'system',content:buildGroupJsonConversionPrompt(rawText,speakers,stickers.map(s=>s.name),mediaPromptOptions)}],jsonMode:true,signal:controller.signal,thinking:'disabled',temperature:0.1,maxTokens:1400,trace:{turnId:streamId,stage:'other',conversationId}})
           finalRaw=jsonRaw
           ;({bubbles,knowledgeQueries,turnSummary,groupVibe,planCandidates}=parseGroupAiResponse(finalRaw,speakers.length))
         } else {
@@ -564,7 +591,7 @@ async function runGroupAiTurn(
     for (const plan of createdPlans) await db.messages.add(planCardMessage(plan))
     void updateGroupMemoryAndVibe({ group, aiTurnId, settings, turnSummary, groupVibe })
     console.info(`[group-perf] 模型与自检完成=${Math.round(performance.now() - turnStartedAt)}ms 群=${group.name}`)
-    revealGroupBubbles(conversationId, group, members, speakers, bubbles, streamId, settings, aiTurnId, turnSummary, turnStartedAt)
+    revealGroupBubbles(conversationId, group, members, speakers, bubbles, streamId, settings, stickers, aiTurnId, turnSummary, turnStartedAt)
   } catch (err) {
     if (streamByConversation.get(conversationId) !== streamId) return
     if (err instanceof DOMException && err.name === 'AbortError') return
@@ -582,18 +609,21 @@ function revealGroupBubbles(
   bubbles: GroupAiBubble[],
   streamId: string,
   settings: AppSettings,
+  stickers: Sticker[],
   aiTurnId: string,
   turnSummary: string,
   turnStartedAt = performance.now(),
 ): void {
   const timers: ReturnType<typeof setTimeout>[] = []
-  let cumulative = 0
+  let sequence = Promise.resolve()
   bubbles.forEach((bubble, i) => {
-    // The model and final quality gate already account for the initial wait.
-    // Reveal the first completed message immediately and pace only follow-ups.
-    if (i > 0) cumulative += groupTypingDelayMs(bubble)
-    const timer = setTimeout(async () => {
-      if (streamByConversation.get(conversationId) !== streamId) return
+    sequence = sequence.then(() => new Promise<void>((resolve) => {
+      // Reveal the first completed message immediately. A later message only
+      // starts after the previous one, including image/sticker API work, has
+      // been persisted so mixed media can never overtake its intended slot.
+      const timer = setTimeout(async () => {
+        try {
+          if (streamByConversation.get(conversationId) !== streamId) return
 
       const speaker = speakers[bubble.speakerIndex - 1]
       useChatEngineStore.getState().patch(conversationId, {
@@ -601,29 +631,56 @@ function revealGroupBubbles(
       })
       let imagePayload: Message['image']
       let imageFailed=false
-      if (bubble.type === 'image') { if(!settings.pexelsApiKey)imageFailed=true; else try{const photo=await searchPexelsPhoto(settings.pexelsApiKey,bubble.query,'landscape');if(!photo)imageFailed=true;else imagePayload={url:photo.url,caption:bubble.caption,photographer:photo.photographer,photographerUrl:photo.photographerUrl,query:bubble.query}}catch{imageFailed=true} }
+      if (bubble.type === 'image' && isImageProviderReady(settings)) {
+        try {
+          const generated = await generateRemoteImage(settings, bubble.query)
+          if (generated) imagePayload = { url: generated.url, caption: bubble.caption, query: bubble.query, provider: generated.provider }
+        } catch {
+          imageFailed = true
+        }
+      }
+      if (bubble.type === 'image' && !imagePayload && !imageFailed) {
+        if (!settings.pexelsApiKey) imageFailed=true
+        else try{const photo=await searchPexelsPhoto(settings.pexelsApiKey,bubble.query,'landscape');if(!photo)imageFailed=true;else imagePayload={url:photo.url,caption:bubble.caption,photographer:photo.photographer,photographerUrl:photo.photographerUrl,query:bubble.query}}catch{imageFailed=true}
+      }
+      let remoteSticker: RemoteStickerResult | undefined
+      let stickerFailed = false
+      if (bubble.type === 'sticker' && !stickers.some((sticker) => sticker.name === bubble.name)) {
+        if (!isStickerProviderReady(settings)) {
+          stickerFailed = true
+        } else {
+          try {
+            remoteSticker = (await searchRemoteStickers(settings, bubble.name))[0]
+            if (!remoteSticker) stickerFailed = true
+          } catch {
+            stickerFailed = true
+          }
+        }
+      }
       const content =
         bubble.type === 'text'
           ? stripSpeakerNamePrefix(
               bubble.content,
               members.map((m) => m.name),
             )
-          : bubble.type === 'sticker' ? bubble.name : imageFailed ? '图片没发出来…' : bubble.caption || '[图片]'
+          : bubble.type === 'sticker' ? (stickerFailed ? '表情没找到…' : bubble.name) : imageFailed ? '图片没发出来…' : bubble.caption || '[图片]'
 
       const msg: Message = {
         id: uuid(),
         conversationId,
         role: 'assistant',
-        type: bubble.type === 'image' && imageFailed ? 'text' : bubble.type,
+        type: (bubble.type === 'image' && imageFailed) || (bubble.type === 'sticker' && stickerFailed) ? 'text' : bubble.type,
         content,
         speakerContactId: speaker?.id,
         debugAiTurnId: aiTurnId,
         debugParsedBubble: bubble,
         thought: bubble.thought,
+        sticker: remoteSticker ? { url: remoteSticker.url, provider: remoteSticker.provider } : undefined,
         image: imagePayload,
         createdAt: Date.now(),
       }
       await db.messages.add(msg)
+      if (remoteSticker) void trackRemoteStickerSend(remoteSticker)
       if (i === 0) {
         console.info(`[group-perf] 首条气泡显示=${Math.round(performance.now() - turnStartedAt)}ms 群=${group.name}`)
       }
@@ -645,7 +702,7 @@ function revealGroupBubbles(
         })
       }
 
-      if (i === bubbles.length - 1) {
+          if (i === bubbles.length - 1) {
         useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined })
         maybeUpdateGroupMemory(group.id, conversationId, members, settings)
 
@@ -666,9 +723,16 @@ function revealGroupBubbles(
             importance: 2,
           })
         }
-      }
-    }, cumulative)
-    timers.push(timer)
+          }
+        } catch (error) {
+          console.error('[group] 气泡写入失败', error)
+        } finally {
+          resolve()
+        }
+      }, i > 0 ? groupTypingDelayMs(bubble) : 0)
+      timers.push(timer)
+    }))
   })
   timersByConversation.set(conversationId, timers)
+  void sequence
 }

@@ -1,14 +1,21 @@
 import { useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { useNavigate } from 'react-router-dom'
 import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { TopBar } from '../components/TopBar'
 import { ActionSheet } from '../components/ActionSheet'
 import { resizeImageDataUrl } from '../lib/image'
+import { isStickerProviderReady, stickerProviderName } from '../lib/mediaProviders'
+import { useSettingsStore } from '../store/useSettingsStore'
 import type { Sticker } from '../types'
 
 export function StickersPage() {
+  const navigate = useNavigate()
   const stickers = useLiveQuery(() => db.stickers.orderBy('createdAt').reverse().toArray(), []) ?? []
+  const stickerProvider = useSettingsStore((state) => state.stickerProvider)
+  const stickerProviders = useSettingsStore((state) => state.stickerProviders)
+  const remoteReady = isStickerProviderReady({ stickerProvider, stickerProviders })
   const [pendingImage, setPendingImage] = useState<string | null>(null)
   const [nameDraft, setNameDraft] = useState('')
   const [error, setError] = useState('')
@@ -64,6 +71,19 @@ export function StickersPage() {
     <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
       <TopBar title="表情包管理" showBack />
       <div className="flex-1 overflow-y-auto">
+
+      <section className="mt-3 bg-white">
+        <button type="button" onClick={() => navigate('/stickers/remote')} className="flex w-full items-center gap-3 px-4 py-4 text-left">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-lg">🌐</div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm text-gray-900">远程表情包</p>
+            <p className={`mt-0.5 text-xs ${remoteReady ? 'text-green-600' : 'text-gray-400'}`}>
+              {stickerProviderName(stickerProvider)} · {remoteReady ? 'AI 与用户都可搜索发送' : '选择服务并完成配置'}
+            </p>
+          </div>
+          <span className="text-lg text-gray-300">›</span>
+        </button>
+      </section>
 
       <section className="mt-3 bg-white px-4 py-4">
         <h2 className="mb-2 text-xs font-medium text-gray-400">添加表情包</h2>

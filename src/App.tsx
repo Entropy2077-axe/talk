@@ -24,6 +24,10 @@ import { GroupInfoPage } from './pages/GroupInfoPage'
 import { MomentsPage } from './pages/MomentsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { StickersPage } from './pages/StickersPage'
+import { StickerProviderListPage } from './pages/StickerProviderListPage'
+import { StickerProviderSettingsPage } from './pages/StickerProviderSettingsPage'
+import { ImageProviderListPage } from './pages/ImageProviderListPage'
+import { ImageProviderSettingsPage } from './pages/ImageProviderSettingsPage'
 import { ProfileEditPage } from './pages/ProfileEditPage'
 import { ModulesPage } from './pages/ModulesPage'
 import { SkyEyePage } from './pages/SkyEyePage'
@@ -151,7 +155,11 @@ function App() {
         <Route path="/moments" element={<MomentsPage />} />
         <Route path="/social-inbox" element={<SocialInboxPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/settings/image-generation" element={<ImageProviderListPage />} />
+        <Route path="/settings/image-generation/:providerId" element={<ImageProviderSettingsPage />} />
         <Route path="/stickers" element={<StickersPage />} />
+        <Route path="/stickers/remote" element={<StickerProviderListPage />} />
+        <Route path="/stickers/remote/:providerId" element={<StickerProviderSettingsPage />} />
         <Route path="/profile/edit" element={<ProfileEditPage />} />
         <Route path="/modules" element={<ModulesPage />} />
         {moduleRoutes.map((r) => (

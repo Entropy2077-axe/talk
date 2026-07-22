@@ -8,6 +8,7 @@ import { listModels, testConnection } from '../lib/deepseek'
 import { DEFAULT_STYLE_PROMPT } from '../lib/prompt'
 import { tavilySearch } from '../lib/webSearch'
 import { searchPexelsPhoto } from '../lib/photoSearch'
+import { imageProviderName, isImageProviderReady } from '../lib/mediaProviders'
 import { db } from '../db/db'
 import { assertTalkBackup, backupFileName, createBackup, restoreBackup } from '../lib/backup'
 import type { AppSettings } from '../types'
@@ -25,6 +26,8 @@ export function SettingsPage() {
     globalSystemPrompt,
     tavilyApiKey,
     pexelsApiKey,
+    imageProvider,
+    imageProviders,
     themeMode,
     animationsEnabled,
     chatBackground,
@@ -499,6 +502,19 @@ export function SettingsPage() {
         <p className="mt-2 text-[11px] text-gray-400">
           去 pexels.com/api 免费注册可以拿到一个key 用于创建联系人时自动配一张符合性格的头像照片、以及朋友圈动态偶尔配的插图 动漫风格头像走的是另一个不需要key的免费接口
         </p>
+      </section>
+
+      <section className="mt-3 bg-white">
+        <button type="button" onClick={() => navigate('/settings/image-generation')} className="flex w-full items-center gap-3 px-4 py-4 text-left">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-lg">🎨</div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm text-gray-900">AI 图片生成</p>
+            <p className={`mt-0.5 text-xs ${isImageProviderReady({ imageProvider, imageProviders }) ? 'text-green-600' : 'text-gray-400'}`}>
+              {imageProviderName(imageProvider)} · {isImageProviderReady({ imageProvider, imageProviders }) ? 'AI 联系人可以调用' : '选择 Atlas、NAI、ComfyUI 等服务'}
+            </p>
+          </div>
+          <span className="text-lg text-gray-300">›</span>
+        </button>
       </section>
 
       <section className="mt-3 flex-1 bg-white px-4 py-3">

@@ -28,6 +28,8 @@ import { useChatUiStore } from '../store/useChatUiStore'
 import { enqueueSelfIterationTask } from './selfIteration'
 import { USER_WALLET_ID, balanceOf, reserveRedPacket, transferFunds } from './finance'
 import { searchPexelsPhoto } from './photoSearch'
+import { generateRemoteImage, searchRemoteStickers, trackRemoteStickerSend, type RemoteStickerResult } from './remoteMedia'
+import { isImageProviderReady, isStickerProviderReady } from './mediaProviders'
 import type { AiBubble, AppSettings, Contact, Message, MessageType, ScheduleOverride, Sticker } from '../types'
 
 /**
@@ -390,6 +392,9 @@ async function runAiTurn(
       ].filter(Boolean).join('\n\n'),
       activeIntentText: injectedIntentText,
       stickerNames: stickers.map((s) => s.name),
+      remoteStickerSearchEnabled: isStickerProviderReady(settings),
+      imageGenerationEnabled: isImageProviderReady(settings),
+      imageSearchEnabled: !!settings.pexelsApiKey,
       mbti: contact.mbti || undefined,
       recentMemoriesText: recentMemories || undefined,
       speechSamplesText: formatSpeechSamplesForScene(contact.speechSamples, 'private', 3) || undefined,
@@ -600,6 +605,7 @@ async function runAiTurn(
       conversationId,
       contact,
       settings,
+      stickers,
       bubbles,
       streamId,
       aiTurnId,
@@ -623,6 +629,7 @@ function revealBubbles(
   conversationId: string,
   contact: Contact,
   settings: AppSettings,
+  stickers: Sticker[],
   bubbles: AiBubble[],
   streamId: string,
   aiTurnId: string,
@@ -633,13 +640,15 @@ function revealBubbles(
   injectedIntentIds: string[] = [],
 ): void {
   const timers: ReturnType<typeof setTimeout>[] = []
-  let cumulative = 0
+  let sequence = Promise.resolve()
   bubbles.forEach((bubble, i) => {
-    // Generation and quality review already made the user wait. Show the first
-    // completed bubble immediately; human-like pacing only separates the rest.
-    if (i > 0) cumulative += typingDelayMs(bubble)
-    const timer = setTimeout(async () => {
-      if (streamByConversation.get(conversationId) !== streamId) return
+    sequence = sequence.then(() => new Promise<void>((resolve) => {
+      // Generation and quality review already made the user wait. Show the
+      // first completed bubble immediately; pace follow-ups only after the
+      // previous bubble (including remote media work) has actually landed.
+      const timer = setTimeout(async () => {
+        try {
+          if (streamByConversation.get(conversationId) !== streamId) return
 
       if (bubble.type === 'scheduleChange') {
         // Re-fetch rather than reusing the `contact` this whole turn was
@@ -666,9 +675,34 @@ function revealBubbles(
       }
       let imagePayload: Message['image']
       let imageFailed = false
-      if (bubble.type === 'image') {
+      if (bubble.type === 'image' && isImageProviderReady(settings)) {
+        try {
+          const generated = await generateRemoteImage(settings, bubble.query)
+          if (generated) imagePayload = { url: generated.url, caption: bubble.caption, query: bubble.query, provider: generated.provider }
+        } catch (err) {
+          console.warn('[photo] 图片生成接口失败', err)
+          imageFailed = true
+        }
+      }
+      if (bubble.type === 'image' && !imagePayload && !imageFailed) {
         if (!settings.pexelsApiKey) imageFailed = true
         else try { const photo=await searchPexelsPhoto(settings.pexelsApiKey,bubble.query,'landscape'); if(!photo)imageFailed=true; else imagePayload={url:photo.url,caption:bubble.caption,photographer:photo.photographer,photographerUrl:photo.photographerUrl,query:bubble.query} } catch(err){console.warn('[photo] 聊天图片发送失败',err);imageFailed=true}
+      }
+
+      let remoteSticker: RemoteStickerResult | undefined
+      let stickerFailed = false
+      if (bubble.type === 'sticker' && !stickers.some((sticker) => sticker.name === bubble.name)) {
+        if (!isStickerProviderReady(settings)) {
+          stickerFailed = true
+        } else {
+        try {
+            remoteSticker = (await searchRemoteStickers(settings, bubble.name))[0]
+            if (!remoteSticker) stickerFailed = true
+        } catch (err) {
+          console.warn('[sticker] 远程表情包获取失败', err)
+            stickerFailed = true
+          }
+        }
       }
 
       let finance: Message['finance']
@@ -689,7 +723,7 @@ function revealBubbles(
 
       let content: string
       if (bubble.type === 'text') content = bubble.content
-      else if (bubble.type === 'sticker') content = bubble.name
+      else if (bubble.type === 'sticker') content = stickerFailed ? '表情没找到…' : bubble.name
       else if (bubble.type === 'image') content = imageFailed ? '图片没发出来…' : bubble.caption || '[图片]'
       else if (bubble.type === 'scheduleChange') content = bubble.summary
       else if (bubble.type === 'link') content = bubble.label
@@ -700,7 +734,13 @@ function revealBubbles(
         id: uuid(),
         conversationId,
         role: 'assistant',
-        type: bubble.type === 'loanDecision' ? 'loanResult' : bubble.type === 'giftPurchase' ? 'gift' : bubble.type === 'image' && imageFailed ? 'text' : bubble.type,
+        type: bubble.type === 'loanDecision'
+          ? 'loanResult'
+          : bubble.type === 'giftPurchase'
+            ? 'gift'
+            : (bubble.type === 'image' && imageFailed) || (bubble.type === 'sticker' && stickerFailed)
+              ? 'text'
+              : bubble.type,
         content,
         link: bubble.type === 'link' ? { app: bubble.app, label: bubble.label, data: bubble.data } : undefined,
         scheduleChange:
@@ -717,6 +757,7 @@ function revealBubbles(
             : undefined,
         finance,
         gift: bubble.type === 'giftPurchase' ? { name: bubble.name || '礼物', icon: bubble.icon || '🎁', description: bubble.description } : undefined,
+        sticker: remoteSticker ? { url: remoteSticker.url, provider: remoteSticker.provider } : undefined,
         image: imagePayload,
         debugAiTurnId: aiTurnId,
         debugParsedBubble: bubble,
@@ -728,6 +769,7 @@ function revealBubbles(
         console.log(`[chat] 想法已存入消息: ${turnThought}`)
       }
       await db.messages.add(msg)
+      if (remoteSticker) void trackRemoteStickerSend(remoteSticker)
       await db.conversations.update(conversationId, { updatedAt: Date.now() })
 
       // Only pop a notification if the user isn't already looking at this
@@ -743,7 +785,7 @@ function revealBubbles(
         })
       }
 
-      if (i === bubbles.length - 1) {
+          if (i === bubbles.length - 1) {
         useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined })
         if (injectedIntentIds.length > 0) {
           await markIntentsUsed(contact.id, injectedIntentIds)
@@ -773,11 +815,18 @@ function revealBubbles(
               .join('\n'),
           })
         }
-      }
-    }, cumulative)
-    timers.push(timer)
+          }
+        } catch (error) {
+          console.error('[chat] 气泡写入失败', error)
+        } finally {
+          resolve()
+        }
+      }, i > 0 ? typingDelayMs(bubble) : 0)
+      timers.push(timer)
+    }))
   })
   timersByConversation.set(conversationId, timers)
+  void sequence
 }
 
 

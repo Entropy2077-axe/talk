@@ -44,4 +44,34 @@ describe('relationship and persona adherence prompts', () => {
     expect(prompt).toContain('relationship')
     expect(prompt).toContain('speechSamples')
   })
+
+  it('teaches contacts to use remote sticker search and full image-generation prompts only when configured', () => {
+    const enabled = buildRawChatPrompt({
+      name: '小满',
+      persona: '自然聊天。',
+      stylePrompt: '短句。',
+      recentContext: '正在聊天。',
+      stickerNames: ['点头'],
+      remoteStickerSearchEnabled: true,
+      imageGenerationEnabled: true,
+    })
+    expect(enabled).toContain('[sticker:简短具体的搜索词]')
+    expect(enabled).toContain('表情使用硬偏好')
+    expect(enabled).toContain('原则上必须自然插入1个表情')
+    expect(enabled).toContain('大多数常规轮次会发')
+    expect(enabled).toContain('严肃安慰')
+    expect(enabled).toContain('完整、自包含的英文生图提示词')
+    expect(enabled).toContain('用户明确要求画图/发图/看图')
+    expect(enabled).toContain('任意穿插')
+
+    const disabled = buildRawChatPrompt({
+      name: '小满',
+      persona: '自然聊天。',
+      stylePrompt: '短句。',
+      recentContext: '正在聊天。',
+      stickerNames: [],
+    })
+    expect(disabled).toContain('当前没有可用图片服务')
+    expect(disabled).not.toContain('[sticker:简短具体的搜索词]')
+  })
 })

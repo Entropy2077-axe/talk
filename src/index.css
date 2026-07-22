@@ -147,6 +147,11 @@ body {
   overflow: hidden;
 }
 
+#root {
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
 .theme-dark {
   background: #111827;
   color: #e5e7eb;

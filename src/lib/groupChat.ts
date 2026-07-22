@@ -207,6 +207,9 @@ export function buildGroupRawChatPrompt(opts: {
   allMembers: Contact[]
   speakers: Contact[]
   stickerNames: string[]
+  remoteStickerSearchEnabled?: boolean
+  imageGenerationEnabled?: boolean
+  imageSearchEnabled?: boolean
   groupMemoryText?: string
   groupVibeText?: string
   allowAiChatter?: boolean
@@ -248,7 +251,20 @@ ${samplesText ? `- 说话样例:\n${samplesText}` : ''}`
     })
     .join('\n\n')
 
-  const stickersText = opts.stickerNames.length > 0 ? opts.stickerNames.map((n) => `- ${n}`).join('\n') : '（当前没有可用表情包）'
+  const stickersText = [
+    opts.stickerNames.length > 0 ? `本地表情（名称必须完全一致）:\n${opts.stickerNames.map((n) => `- ${n}`).join('\n')}` : '',
+    opts.remoteStickerSearchEnabled ? '远程表情搜索已启用：也可以使用简短、具体的情绪/动作搜索词，优先用英文。' : '',
+  ].filter(Boolean).join('\n') || '（当前没有可用表情包）'
+  const stickerRule = opts.remoteStickerSearchEnabled
+    ? '- 如果要发表情，消息内容写成[sticker:搜索词]。可以使用上面的本地表情准确名称，也可以给出简短具体的远程搜索词。【表情使用硬偏好】日常闲聊、玩笑、吐槽、惊讶、开心、疲惫或其他明显情绪反应场景，原则上必须由最合适的一位角色自然插入1个表情；只有严肃安慰、危机、争执、敏感话题、纯信息问答，或最近几轮已经连续发过表情时才可以不发。因此总体应是大多数常规轮次会发，但不是每一轮固定发送。'
+    : opts.stickerNames.length > 0
+      ? '- 如果要发表情，消息内容写成[sticker:表情名]，表情名必须来自下面列表。'
+      : '- 当前没有可用表情包，不要输出[sticker:...]标记。'
+  const imageRule = opts.imageGenerationEnabled
+    ? '- 只有用户明确要求画图/发图/看图，或某位角色在当前语境中有明确具体的视觉分享动机且图片确实比纯文字合适时，才把消息内容写成[image:完整自包含的英文生图提示词:配文]；提示词要包含主体、场景、构图、氛围和风格。普通寒暄、情绪回应或为了让群聊丰富都不能擅自生图。'
+    : opts.imageSearchEnabled
+      ? '- 如果真的适合发送一张真实照片，消息内容写成[image:简洁具体的英文 Pexels 搜图词:配文]。'
+      : '- 当前没有可用图片服务，不要输出[image:...]标记。'
   const targetedContext = opts.targetedContextText
     ? `\n【本轮定向上下文】\n${opts.targetedContextText}\n如果用户@某人，那个人必须优先回应；如果用户回复某条消息，先回应被回复内容再自然延展。`
     : ''
@@ -360,8 +376,9 @@ ${energyRule}
 - 想法是角色内心动机，短一点，不能出现在消息内容里。
 - 心情5字以内，不能空。
 - 消息内容只写群里真正发出的文字，不要带人名冒号、括号、方括号。
-- 如果要发表情，消息内容写成[sticker:表情名]，表情名必须来自下面列表。
-- 如果真的适合发送真实图片，消息内容写成[image:英文Pexels搜索词:配文]；搜索词要具体且适合搜图。
+${stickerRule}
+${imageRule}
+- text、sticker、image可以按真实群聊节奏任意穿插，例如文字→图片→文字，或图片→文字→表情→文字；解析器会严格保留输出顺序，不要把媒体统一挪到开头或结尾。
 - 不懂的网络热梗/番剧/游戏名词，可以自然表现为不懂；后续转换器会提取knowledgeQueries。
 - 确实遇到陌生词时先自然追问，并在消息末尾写[knowledge:关键词]；不要假装懂，也不要对普通词滥用。
 
@@ -436,7 +453,12 @@ export async function pickSociallyConnectedSpeakers(
   return picked
 }
 
-export function buildGroupJsonConversionPrompt(rawText: string, speakers: Contact[], stickerNames: string[]): string {
+export function buildGroupJsonConversionPrompt(
+  rawText: string,
+  speakers: Contact[],
+  stickerNames: string[],
+  options: { remoteStickerSearchEnabled?: boolean; imageGenerationEnabled?: boolean } = {},
+): string {
   const speakerLines = speakers.map((speaker, i) => `${i + 1}. ${speaker.name}`).join('\n')
   const stickersText = stickerNames.length > 0 ? stickerNames.join('、') : '（无）'
   return `把下面的群聊纯文本草稿机械转换成JSON。不要润色、不要改写、不要新增消息。
@@ -458,8 +480,8 @@ ${rawText}
 - mood 取方括号里的心情，原样保留。
 - 每条消息都必须有非空 thought 和 mood；草稿缺失时根据该行语境补一个短的。
 - 如果消息内容是 [sticker:名字]，输出 {"speakerIndex":n,"speakerName":"...","type":"sticker","name":"名字","thought":"...","mood":"..."}。
-- 如果消息内容是 [image:英文Pexels搜索词:配文]，输出image类型及query/caption字段；标记不能留在text正文。
-- sticker 名字必须来自可用表情包；不在列表里就改成普通text内容。
+- 如果消息内容是 [image:英文图片请求词:配文]，输出image类型及query/caption字段；标记不能留在text正文。${options.imageGenerationEnabled ? '这里的 query 是完整生图提示词，不要改写或缩短。' : ''}
+- ${options.remoteStickerSearchEnabled ? '远程表情搜索已启用，sticker 的 name 可以是草稿里的搜索词，不要因为它不在本地列表而改成文字。' : 'sticker 名字必须来自可用表情包；不在列表里就改成普通text内容。'}
 - 如果草稿里自然提到不懂的新词/热梗/作品名，可在knowledgeQueries里放最多2个查询；没有就给空数组。
 - 必须把[knowledge:关键词]从消息正文删除并写入顶层knowledgeQueries；不能把标记展示给用户。
 - turnSummary 用一句话概括这一轮群聊发生了什么。
@@ -505,6 +527,7 @@ export function parseGroupRawDraft(
   raw: string,
   speakers: Contact[],
   stickerNames: string[] = [],
+  remoteStickerSearchEnabled = false,
 ): ParsedGroupRawDraft {
   const empty: ParsedGroupRawDraft = {
     valid: false,
@@ -546,7 +569,7 @@ export function parseGroupRawDraft(
     const sticker = content.match(/^\[sticker:([^\]]+)\]$/i)
     if (sticker) {
       const name = sticker[1].trim()
-      if (!stickerNames.includes(name)) {
+      if (!remoteStickerSearchEnabled && !stickerNames.includes(name)) {
         return { ...empty, reason: `第${index + 1}行使用了不存在的表情包` }
       }
       bubbles.push({ ...common, type: 'sticker', name })

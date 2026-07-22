@@ -43,6 +43,22 @@ describe('private chat local draft parser', () => {
     expect(rawPrivateDraftNeedsUtility(raw, parsed)).toBe(false)
   })
 
+  it('preserves arbitrary text, image, sticker, and text ordering', () => {
+    const raw = [
+      '<thought>先回应一句</thought>等我一下',
+      '<thought>先把图发过去</thought>[image:orange cat by a rainy window, cinematic lighting:就是这种感觉]',
+      '<thought>再补充一句</thought>窗外还得有一点霓虹',
+      '<thought>最后用表情收尾</thought>[sticker:excited cat reaction]',
+      '<thought>别让话题断掉</thought>你更喜欢暖色还是冷色',
+      '<mood>很有兴致</mood>',
+    ].join('\n')
+
+    const parsed = parseRawPrivateDraft(raw)
+
+    expect(parsed.bubbles.map((bubble) => bubble.type)).toEqual(['text', 'image', 'text', 'sticker', 'text'])
+    expect(rawPrivateDraftNeedsUtility(raw, parsed)).toBe(false)
+  })
+
   it('falls back when required metadata or a known-looking marker is malformed', () => {
     const missingMood = '<thought>先回一句</thought>好啊'
     const malformedMarker = [
