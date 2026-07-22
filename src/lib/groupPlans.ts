@@ -3,6 +3,7 @@ import { db } from '../db/db'
 import { recordSocialEvent } from './socialEvents'
 import { chatCompletion } from './deepseek'
 import type { AppSettings, Group, GroupPlan, GroupPlanStatus, Message } from '../types'
+import { getPromptTemplate, promptModuleEnabled } from './promptModules'
 
 export async function createGroupPlan(opts: {
   group: Group
@@ -47,10 +48,15 @@ export async function setGroupPlanStatus(plan: GroupPlan, group: Group, status: 
 
 async function generatePlanAftermath(plan: GroupPlan, group: Group, settings: AppSettings): Promise<void> {
   try {
+    if (!promptModuleEnabled(settings, 'moments')) return
     const contacts = (await db.contacts.bulkGet(plan.participantContactIds)).filter((contact): contact is NonNullable<typeof contact> => !!contact)
+    const editable = getPromptTemplate(settings, 'moments', 'planAftermath', {
+      planContext: `${plan.title}；${plan.summary}`,
+      participants: JSON.stringify(contacts.map((contact) => ({ id: contact.id, name: contact.name, persona: contact.systemPrompt }))),
+    }) ?? ''
     const raw = await chatCompletion({
       apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, jsonMode: true, maxTokens: 600, purpose: 'moments',
-      messages: [{ role: 'system', content: `Create a concise, grounded aftermath for a completed shared plan. Output JSON only: {"groupMessage":"...","moments":[{"contactId":"participant id","content":"public moment"}]}. Plan: ${plan.title}; summary: ${plan.summary}; participants: ${JSON.stringify(contacts.map((contact) => ({ id: contact.id, name: contact.name, persona: contact.systemPrompt })))}. Write one group follow-up and 1 or 2 public, non-private moments. Do not invent specifics beyond the plan.` }, { role: 'user', content: 'Generate aftermath.' }],
+      messages: [{ role: 'system', content: `${editable}\n\n固定输出协议：只输出JSON {"groupMessage":"...","moments":[{"contactId":"participant id","content":"public moment"}]}` }, { role: 'user', content: 'Generate aftermath.' }],
     })
     const parsed = JSON.parse(raw) as { groupMessage?: unknown; moments?: Array<{ contactId?: unknown; content?: unknown }> }
     if (typeof parsed.groupMessage === 'string' && parsed.groupMessage.trim()) {

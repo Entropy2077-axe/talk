@@ -5,16 +5,15 @@
  * distinct, single-turn (system+user only) generation task, unrelated to
  * any contact's persona or chat history.
  */
-export function buildShopPrompt(query: string | null): string {
-  const task = query
-    ? `用户在虚拟网购小程序里搜索了"${query}" 请生成6件和这个搜索词相关的商品`
-    : `请为虚拟网购小程序的首页生成6件适合日常浏览、有意思、有点小惊喜的商品 品类尽量不要重复`
+import type { AppSettings } from '../types'
+import { createDefaultPromptModules, getPromptTemplate } from './promptModules'
 
-  return `你是一个虚拟网购小程序的商品生成器 只输出JSON 不要有任何其他文字
+export function buildShopPrompt(query: string | null, settings?: Pick<AppSettings, 'promptModules'>): string {
+  const editable = getPromptTemplate(settings ?? { promptModules: createDefaultPromptModules() }, 'shop', 'catalog', { query: query || '首页随机推荐' })
+  if (!editable) return ''
+  return `${editable}
 
-${task}
-
-输出格式:
+固定输出格式:
 {"products": [{"name": "商品名字", "description": "一句话卖点描述", "price": 39, "icon": "🎁"}]}
 
 要求:
@@ -22,7 +21,6 @@ ${task}
 - description一句话 不超过20个字 突出卖点或者趣味性
 - price是5到100000之间的现实人民币整数价格 符合商品本身的合理定价
 - icon是一个最能代表这个商品的emoji 不要用文字
-- 6件商品尽量不要重复、不要太严肃刻板 可以有点生活气息或者惊喜感
 - 只输出JSON 不要有markdown代码块标记`
 }
 

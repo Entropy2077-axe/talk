@@ -12,10 +12,11 @@ import { intentModule } from './intent'
 import { selfIterationModule } from './selfIteration'
 import { storyOutlineModule } from './storyOutline'
 import { careerModule } from './career'
-import { nuwaModeModule } from './nuwaMode'
 import { lifeSimulationModule } from './lifeSimulation'
 import { saveLoadModule } from './saveLoad'
 import { aiReplyAssistModule } from './aiReplyAssist'
+import { realisticRepliesModule } from './realisticReplies'
+import { promptModuleEditorModule } from './promptModuleEditor'
 import type { FeatureModule, ParentModule } from './types'
 
 // ---- parent modules (accordion groups in the UI) ----
@@ -58,10 +59,11 @@ export const ALL_MODULES: FeatureModule[] = [
   selfIterationModule,
   storyOutlineModule,
   careerModule,
-  nuwaModeModule,
   lifeSimulationModule,
   saveLoadModule,
   aiReplyAssistModule,
+  realisticRepliesModule,
+  promptModuleEditorModule,
 ]
 
 /** Modules that don't belong to any parent — shown as standalone toggles. */
@@ -137,5 +139,5 @@ export function getEnabledDiscoverEntries(): { to: string; icon: string; label: 
 
 /** Every module is on by default except opt-in background/debug modules. */
 export const DEFAULT_ENABLED_MODULES: string[] = ALL_MODULES
-  .filter((m) => m.id !== 'proactiveChat' && m.id !== 'mindReading' && m.id !== 'selfIteration' && m.id !== 'nuwaMode' && m.id !== 'lifeSimulation')
+  .filter((m) => m.id !== 'proactiveChat' && m.id !== 'mindReading' && m.id !== 'selfIteration' && m.id !== 'nuwaMode' && m.id !== 'lifeSimulation' && m.id !== 'realisticReplies' && m.id !== 'promptModuleEditor')
   .map((m) => m.id)

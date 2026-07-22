@@ -94,6 +94,7 @@ export function ModulesPage() {
                           </div>
                           <button
                             onClick={() => toggle(mod.id)}
+                            aria-label={`${on ? '关闭' : '开启'}${mod.name}`}
                             className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors ${
                               on ? 'bg-[#07c160]' : 'bg-gray-200'
                             }`}
@@ -130,6 +131,7 @@ export function ModulesPage() {
                 </div>
                 <button
                   onClick={() => toggle(mod.id)}
+                  aria-label={`${on ? '关闭' : '开启'}${mod.name}`}
                   className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors ${
                     on ? 'bg-[#07c160]' : 'bg-gray-200'
                   }`}

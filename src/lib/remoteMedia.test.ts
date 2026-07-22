@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { zipSync } from 'fflate'
 import { createDefaultImageProviders, createDefaultStickerProviders } from './mediaProviders'
-import { generateRemoteImage, searchRemoteStickers } from './remoteMedia'
+import { generateRemoteImage, loadImageProviderOptions, searchRemoteStickers, testImageProviderConnection } from './remoteMedia'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -61,6 +61,28 @@ describe('remote sticker providers', () => {
 })
 
 describe('image generation providers', () => {
+  it('rejects a ComfyUI HTML fallback instead of reporting a connection', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<!doctype html><html></html>', {
+      status: 200,
+      headers: { 'Content-Type': 'text/html' },
+    })))
+    const providers = createDefaultImageProviders()
+
+    await expect(testImageProviderConnection({ imageProvider: 'comfyui', imageProviders: providers }))
+      .rejects.toThrow('返回了网页')
+  })
+
+  it('rejects a WebUI HTML fallback while loading options', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<!doctype html><html></html>', {
+      status: 200,
+      headers: { 'Content-Type': 'text/html' },
+    })))
+    const providers = createDefaultImageProviders()
+
+    await expect(loadImageProviderOptions({ imageProviders: providers }, 'stable-diffusion'))
+      .rejects.toThrow('返回了网页')
+  })
+
   it('submits an Atlas task and polls the official prediction endpoint', async () => {
     const calls: string[] = []
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -157,4 +179,3 @@ describe('image generation providers', () => {
     })
   })
 })
-

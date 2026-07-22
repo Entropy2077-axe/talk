@@ -7,6 +7,7 @@ import type {
   StickerProviderId,
 } from '../types'
 import { isImageProviderReady, isStickerProviderReady } from './mediaProviders'
+import { httpFailureMessage, requireHttpUrl } from './connectionError'
 
 export interface RemoteStickerResult {
   url: string
@@ -93,14 +94,18 @@ function parseTextPayload(text: string): unknown {
 }
 
 async function mediaRequest(url: string, options: MediaRequestOptions = {}): Promise<MediaResponse> {
+  const requestUrl = requireHttpUrl(url, '接口地址')
   const method = options.method ?? 'GET'
   const responseKind = options.responseKind ?? 'json'
   const headers = { Accept: 'application/json', ...(options.headers ?? {}) }
+  if (Object.values(headers).some((value) => /[^\x20-\x7e]/.test(value))) {
+    throw new Error('API Key 或请求头含有中文、换行或特殊字符，请检查后重试')
+  }
   const timeoutMs = options.timeoutMs ?? 180_000
 
   if (Capacitor.isNativePlatform()) {
     const response = await CapacitorHttp.request({
-      url,
+      url: requestUrl,
       method,
       headers,
       data: options.data,
@@ -130,7 +135,7 @@ async function mediaRequest(url: string, options: MediaRequestOptions = {}): Pro
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetch(url, {
+    const response = await fetch(requestUrl, {
       method,
       headers,
       body: options.data === undefined ? undefined : JSON.stringify(options.data),
@@ -157,9 +162,17 @@ async function mediaRequest(url: string, options: MediaRequestOptions = {}): Pro
 
 function ensureOk(response: MediaResponse, label: string): void {
   if (response.status >= 200 && response.status < 300) return
-  const record = response.data && typeof response.data === 'object' ? response.data as Record<string, unknown> : undefined
-  const detail = [record?.message, record?.error, record?.detail].find((value) => typeof value === 'string')
-  throw new Error(`${label}返回 HTTP ${response.status}${detail ? `：${String(detail).slice(0, 180)}` : ''}`)
+  throw new Error(httpFailureMessage(label, response.status, response.data))
+}
+
+function ensureObjectPayload(response: MediaResponse, label: string): Record<string, unknown> {
+  if (response.data && typeof response.data === 'object' && !Array.isArray(response.data)) {
+    return response.data as Record<string, unknown>
+  }
+  if (typeof response.data === 'string' && /<!doctype|<html/i.test(response.data)) {
+    throw new Error(`${label}返回了网页而不是接口数据，请检查接口地址是否填写正确`)
+  }
+  throw new Error(`${label}返回的数据格式不正确，请检查接口地址和服务版本`)
 }
 
 function imageUrl(value: unknown): string | null {
@@ -265,7 +278,7 @@ export async function searchRemoteStickers(
     const response = await mediaRequest(`https://api.giphy.com/v1/stickers/search?${params}`)
     ensureOk(response, 'GIPHY')
     const data = (response.data as { data?: unknown[] })?.data
-    if (!Array.isArray(data)) return []
+    if (!Array.isArray(data)) throw new Error('GIPHY 返回的数据格式不正确，请检查 API Key')
     return data.flatMap((item): RemoteStickerResult[] => {
       if (!item || typeof item !== 'object') return []
       const record = item as Record<string, unknown>
@@ -299,7 +312,7 @@ export async function searchRemoteStickers(
     const response = await mediaRequest(`${host}/v2/search?${params}`)
     ensureOk(response, provider === 'klipy' ? 'KLIPY' : 'Tenor')
     const results = (response.data as { results?: unknown[] })?.results
-    if (!Array.isArray(results)) return []
+    if (!Array.isArray(results)) throw new Error(`${provider === 'klipy' ? 'KLIPY' : 'Tenor'} 返回的数据格式不正确，请检查 API Key`)
     return results.flatMap((item): RemoteStickerResult[] => {
       if (!item || typeof item !== 'object') return []
       const record = item as Record<string, unknown>
@@ -677,11 +690,14 @@ export async function loadImageProviderOptions(
       headers: comfyHeaders(config.apiKey),
     })
     ensureOk(response, 'ComfyUI')
-    return {
+    ensureObjectPayload(response, 'ComfyUI')
+    const loaded = {
       models: optionList(getPath(response.data, 'CheckpointLoaderSimple.input.required.ckpt_name.0')),
       samplers: optionList(getPath(response.data, 'KSampler.input.required.sampler_name.0')),
       schedulers: optionList(getPath(response.data, 'KSampler.input.required.scheduler.0')),
     }
+    if (loaded.models.length === 0) throw new Error('ComfyUI 已连接，但没有读取到模型，请检查是否已安装并选择模型')
+    return loaded
   }
   if (provider === 'stable-diffusion') {
     const config = settings.imageProviders.stableDiffusion
@@ -693,6 +709,12 @@ export async function loadImageProviderOptions(
     ])
     ensureOk(modelsResponse, 'WebUI / Forge 模型列表')
     ensureOk(samplersResponse, 'WebUI / Forge 采样器列表')
+    if (!Array.isArray(modelsResponse.data) || !Array.isArray(samplersResponse.data)) {
+      if (typeof modelsResponse.data === 'string' && /<!doctype|<html/i.test(modelsResponse.data)) {
+        throw new Error('WebUI / Forge 返回了网页而不是接口数据，请检查地址和 API 模式是否已开启')
+      }
+      throw new Error('WebUI / Forge 返回的数据格式不正确，请确认已开启 API 模式')
+    }
     const names = (payload: unknown, keys: string[]) => Array.isArray(payload)
       ? payload.flatMap((item) => {
           if (!item || typeof item !== 'object') return []
@@ -701,13 +723,15 @@ export async function loadImageProviderOptions(
           return typeof found === 'string' ? [found] : []
         })
       : []
-    return {
+    const loaded = {
       models: names(modelsResponse.data, ['title', 'model_name', 'name']),
       samplers: names(samplersResponse.data, ['name']),
       schedulers: schedulersResponse.status >= 200 && schedulersResponse.status < 300
         ? names(schedulersResponse.data, ['label', 'name'])
         : [],
     }
+    if (loaded.models.length === 0) throw new Error('WebUI / Forge 已连接，但没有读取到模型，请检查模型目录和 API 模式')
+    return loaded
   }
   if (provider === 'atlas') {
     return {
@@ -729,6 +753,7 @@ export async function testImageProviderConnection(
       headers: { Authorization: `Bearer ${settings.imageProviders.novelai.apiKey.trim()}` },
     })
     ensureOk(response, 'NovelAI')
+    ensureObjectPayload(response, 'NovelAI')
     return 'NovelAI Token 有效'
   }
   if (provider === 'comfyui') {
@@ -737,6 +762,7 @@ export async function testImageProviderConnection(
       headers: comfyHeaders(config.apiKey),
     })
     ensureOk(response, 'ComfyUI')
+    ensureObjectPayload(response, 'ComfyUI')
     return 'ComfyUI 已连接'
   }
   if (provider === 'stable-diffusion') {
@@ -747,4 +773,3 @@ export async function testImageProviderConnection(
   if (!generated) throw new Error('接口已响应，但没有解析到图片')
   return '接口调用成功并生成了测试图片'
 }
-

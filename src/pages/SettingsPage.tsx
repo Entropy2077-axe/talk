@@ -8,6 +8,7 @@ import { listModels, testConnection } from '../lib/deepseek'
 import { DEFAULT_STYLE_PROMPT } from '../lib/prompt'
 import { tavilySearch } from '../lib/webSearch'
 import { searchPexelsPhoto } from '../lib/photoSearch'
+import { friendlyConnectionError } from '../lib/connectionError'
 import { imageProviderName, isImageProviderReady } from '../lib/mediaProviders'
 import { db } from '../db/db'
 import { assertTalkBackup, backupFileName, createBackup, restoreBackup } from '../lib/backup'
@@ -15,6 +16,7 @@ import type { AppSettings } from '../types'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { USER_WALLET_ID, setUserBalance } from '../lib/finance'
 import { formatCurrency } from '../lib/wallet'
+import { CHAT_PAGE_SIZE_OPTIONS, normalizeChatPageSize } from '../lib/chatPagination'
 
 export function SettingsPage() {
   const navigate = useNavigate()
@@ -24,6 +26,7 @@ export function SettingsPage() {
     model,
     utilityModel,
     globalSystemPrompt,
+    promptModules,
     tavilyApiKey,
     pexelsApiKey,
     imageProvider,
@@ -31,6 +34,7 @@ export function SettingsPage() {
     themeMode,
     animationsEnabled,
     chatBackground,
+    chatPageSize,
     currencyIconMode,
     customCurrencyEmoji,
     adminModeEnabled,
@@ -172,7 +176,7 @@ export function SettingsPage() {
       const results = await tavilySearch(tavilyKeyDraft.trim(), 'test')
       setTavilyTestResult({ ok: true, message: `连接成功 搜到${results.length}条结果` })
     } catch (err) {
-      setTavilyTestResult({ ok: false, message: err instanceof Error ? err.message : String(err) })
+      setTavilyTestResult({ ok: false, message: friendlyConnectionError(err, 'Tavily') })
     } finally {
       setTavilyTesting(false)
     }
@@ -185,10 +189,10 @@ export function SettingsPage() {
     try {
       const photo = await searchPexelsPhoto(pexelsKeyDraft.trim(), 'cat', 'square')
       setPexelsTestResult(
-        photo ? { ok: true, message: '连接成功 已搜到示例图片' } : { ok: false, message: '连接成功但没搜到结果 可能是key本身有问题' },
+        photo ? { ok: true, message: '连接成功，已搜到示例图片' } : { ok: true, message: '连接成功，但测试关键词暂时没有图片' },
       )
     } catch (err) {
-      setPexelsTestResult({ ok: false, message: err instanceof Error ? err.message : String(err) })
+      setPexelsTestResult({ ok: false, message: friendlyConnectionError(err, 'Pexels') })
     } finally {
       setPexelsTesting(false)
     }
@@ -196,7 +200,10 @@ export function SettingsPage() {
 
   function restoreDefaultPrompt() {
     setPromptDraft(DEFAULT_STYLE_PROMPT)
-    setSettings({ globalSystemPrompt: DEFAULT_STYLE_PROMPT })
+    setSettings({
+      globalSystemPrompt: DEFAULT_STYLE_PROMPT,
+      promptModules: { ...promptModules, chat: { ...promptModules.chat, templates: { ...promptModules.chat.templates, style: DEFAULT_STYLE_PROMPT } } },
+    })
   }
 
   return (
@@ -294,6 +301,23 @@ export function SettingsPage() {
           }}
         />
         <p className="text-[11px] text-gray-400">背景只保存在本机，导出备份时会一起带走。</p>
+      </section>
+      <section className="mt-3 bg-white px-4 py-3">
+        <h2 className="mb-2 text-xs font-medium text-gray-400">聊天</h2>
+        <label className="mb-1 block text-sm text-gray-800" htmlFor="chat-page-size">每次加载消息条数</label>
+        <p className="mb-2 text-[11px] leading-relaxed text-gray-400">打开聊天时先加载这么多条；滚动到顶部后，每次继续加载相同数量。默认 40 条。</p>
+        <div className="flex items-center gap-2">
+          <select
+            id="chat-page-size"
+            aria-label="每次加载消息条数"
+            value={normalizeChatPageSize(chatPageSize)}
+            onChange={(event) => setSettings({ chatPageSize: Number(event.target.value) })}
+            className="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"
+          >
+            {CHAT_PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} 条</option>)}
+          </select>
+          <button type="button" onClick={() => setSettings({ chatPageSize: 40 })} className="rounded-lg bg-gray-100 px-3 py-2 text-xs text-gray-600">恢复默认</button>
+        </div>
       </section>
       {adminModeEnabled && <section className="mt-3 bg-white px-4 py-3"><h2 className="text-sm font-medium text-gray-900">设定我的余额</h2><p className="mt-1 text-xs text-gray-400">当前 {formatCurrency(wallet?.balance ?? 0, useSettingsStore.getState())}</p><div className="mt-2 flex gap-2"><input type="number" min="0" value={adminBalance} onChange={e=>setAdminBalance(e.target.value)} placeholder="目标余额" className="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"/><button onClick={async()=>{const n=Number(adminBalance);if(Number.isFinite(n)&&n>=0&&confirm(`确认将余额设为 ${Math.round(n)}？`)){await setUserBalance(n);setAdminBalance('')}}} className="rounded-lg bg-gray-900 px-4 text-sm text-white">设定</button></div></section>}
 
@@ -530,7 +554,10 @@ export function SettingsPage() {
         <textarea
           value={promptDraft}
           onChange={(e) => setPromptDraft(e.target.value)}
-          onBlur={() => setSettings({ globalSystemPrompt: promptDraft })}
+          onBlur={() => setSettings({
+            globalSystemPrompt: promptDraft,
+            promptModules: { ...promptModules, chat: { ...promptModules.chat, templates: { ...promptModules.chat.templates, style: promptDraft } } },
+          })}
           rows={14}
           className="w-full rounded-lg border border-gray-200 px-3 py-2 text-xs leading-relaxed text-gray-700"
         />

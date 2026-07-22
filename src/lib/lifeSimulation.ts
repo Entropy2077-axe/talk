@@ -4,6 +4,7 @@ import { chatCompletion } from './deepseek'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { retrieveWorldbookContext } from './worldbook'
 import type { AppSettings, Contact, ContactLifeState, LifeEvent } from '../types'
+import { getPromptTemplate, promptModuleEnabled } from './promptModules'
 
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
@@ -45,10 +46,13 @@ function nextState(contact: Contact, current: ContactLifeState | undefined, even
 
 async function polishVisible(events: LifeEvent[], settings: AppSettings): Promise<Map<string, string>> {
   const fallback = new Map(events.map((e) => [e.id, e.summary]))
-  if (!settings.apiKey || events.length === 0) return fallback
+  if (!settings.apiKey || events.length === 0 || !promptModuleEnabled(settings, 'lifeSimulation')) return fallback
   try {
-    const world = await retrieveWorldbookContext(events.map((e) => e.summary).join('\n'), { maxEntries: 3, maxChars: 1600 })
-    const raw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, purpose: 'lifeSimulation', automatic: true, jsonMode: true, messages: [{ role: 'system', content: `你负责把已确定的角色生活事实改写成自然、克制的一句话。不能增加人物、时间、地点或事件。只输出 JSON: {"items":[{"id":"事件id","text":"文案"}]}。世界书仅供措辞参考：${world || '无'}。事件：${JSON.stringify(events.map((e) => ({ id: e.id, summary: e.summary })))}` }, { role: 'user', content: '请润色' }] })
+    const world = promptModuleEnabled(settings, 'worldview') ? await retrieveWorldbookContext(events.map((e) => e.summary).join('\n'), { maxEntries: 3, maxChars: 1600 }) : ''
+    const worldPrompt = world ? getPromptTemplate(settings, 'worldview', 'lifeRuntime', { worldbookEntries: world }) : ''
+    const lifeContext = `${worldPrompt || ''}\n事件：${JSON.stringify(events.map((e) => ({ id: e.id, summary: e.summary })))}`
+    const editable = getPromptTemplate(settings, 'lifeSimulation', 'polish', { lifeContext })!
+    const raw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, purpose: 'lifeSimulation', automatic: true, jsonMode: true, messages: [{ role: 'system', content: `${editable}\n\n固定输出协议：只输出JSON {"items":[{"id":"事件id","text":"文案"}]}` }, { role: 'user', content: '请润色' }] })
     const parsed = JSON.parse(raw) as { items?: Array<{ id?: string; text?: string }> }
     for (const item of parsed.items ?? []) if (item.id && typeof item.text === 'string' && fallback.has(item.id)) fallback.set(item.id, item.text.trim().slice(0, 120))
   } catch {

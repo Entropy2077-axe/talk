@@ -14,6 +14,7 @@ import {
 } from '../lib/remoteMedia'
 import { useSettingsStore } from '../store/useSettingsStore'
 import type { ImageProviderId, ImageProvidersSettings } from '../types'
+import { friendlyConnectionError } from '../lib/connectionError'
 
 const inputClass = 'w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-gray-400'
 const labelClass = 'mb-1 block text-xs text-gray-500'
@@ -157,7 +158,7 @@ export function ImageProviderSettingsPage() {
           : '预设选项已载入。',
       })
     } catch (error) {
-      setStatus({ ok: false, text: error instanceof Error ? error.message : String(error) })
+      setStatus({ ok: false, text: friendlyConnectionError(error, info.name) })
     } finally {
       setLoadingOptions(false)
     }
@@ -170,7 +171,7 @@ export function ImageProviderSettingsPage() {
       const text = await testImageProviderConnection(currentCandidate())
       setStatus({ ok: true, text })
     } catch (error) {
-      setStatus({ ok: false, text: error instanceof Error ? error.message : String(error) })
+      setStatus({ ok: false, text: friendlyConnectionError(error, info.name) })
     } finally {
       setTesting(false)
     }
@@ -192,7 +193,7 @@ export function ImageProviderSettingsPage() {
       setSettings({ imageProvider: provider })
       setStatus({ ok: true, text: `真实调用成功，并已启用 ${info.name}。` })
     } catch (error) {
-      setStatus({ ok: false, text: error instanceof Error ? error.message : String(error) })
+      setStatus({ ok: false, text: friendlyConnectionError(error, info.name) })
     } finally {
       setGenerating(false)
     }
@@ -468,4 +469,3 @@ export function ImageProviderSettingsPage() {
     </div>
   )
 }
-

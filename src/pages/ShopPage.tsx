@@ -33,12 +33,14 @@ export function ShopPage() {
     setLoading(true)
     setError('')
     try {
+      const shopPrompt = buildShopPrompt(searchQuery, settings)
+      if (!shopPrompt.trim()) throw new Error('商城提示词模块已屏蔽')
       const raw = await chatCompletion({
         apiKey: settings.apiKey,
         baseUrl: settings.baseUrl,
         model: settings.utilityModel,
         messages: [
-          { role: 'system', content: buildShopPrompt(searchQuery) },
+          { role: 'system', content: shopPrompt },
           { role: 'user', content: searchQuery ?? '推荐一些商品' },
         ],
         jsonMode: true,

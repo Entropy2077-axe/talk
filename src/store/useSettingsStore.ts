@@ -9,6 +9,8 @@ import {
   normalizeStickerProviders,
 } from '../lib/mediaProviders'
 import type { AppSettings } from '../types'
+import { createDefaultPromptModules, normalizePromptModules } from '../lib/promptModules'
+import { normalizeChatPageSize } from '../lib/chatPagination'
 
 interface SettingsState extends AppSettings {
   setSettings: (patch: Partial<AppSettings>) => void
@@ -41,6 +43,7 @@ export const useSettingsStore = create<SettingsState>()(
       model: 'deepseek-v4-pro',
       utilityModel: 'deepseek-v4-flash',
       globalSystemPrompt: DEFAULT_STYLE_PROMPT,
+      promptModules: createDefaultPromptModules(),
       userNickname: '我',
       userAvatar: '🙂',
       userGender: '',
@@ -75,6 +78,7 @@ export const useSettingsStore = create<SettingsState>()(
       themeMode: 'light',
       topInsetAdjustmentPx: 0,
       chatBackground: '',
+      chatPageSize: 40,
       currencyIconMode: 'coin',
       animationsEnabled: true,
       customCurrencyEmoji: '💎',
@@ -86,7 +90,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'talk-settings',
-      version: 10,
+      version: 14,
       migrate: (persisted, version) => {
         const next = persisted as Partial<SettingsState>
         if (version < 1 && Array.isArray(next.enabledModules) && !next.enabledModules.includes('intent')) {
@@ -109,6 +113,7 @@ export const useSettingsStore = create<SettingsState>()(
         if (typeof next.worldbookMigrationCompleted !== 'boolean') next.worldbookMigrationCompleted = false
         if (typeof next.automaticAiDailyCap !== 'number') next.automaticAiDailyCap = 0
         if (typeof next.animationsEnabled !== 'boolean') next.animationsEnabled = true
+        next.chatPageSize = normalizeChatPageSize(next.chatPageSize)
         if (typeof next.stickerApiUrl !== 'string') next.stickerApiUrl = ''
         if (typeof next.stickerApiKey !== 'string') next.stickerApiKey = ''
         if (typeof next.imageApiUrl !== 'string') next.imageApiUrl = ''
@@ -142,6 +147,7 @@ export const useSettingsStore = create<SettingsState>()(
         if (!['none', 'giphy', 'klipy', 'tenor', 'custom'].includes(String(next.stickerProvider))) next.stickerProvider = 'none'
         if (!['none', 'atlas', 'novelai', 'comfyui', 'stable-diffusion', 'custom'].includes(String(next.imageProvider))) next.imageProvider = 'none'
         if (Array.isArray(next.enabledModules)) next.enabledModules = next.enabledModules.filter((id) => id !== 'mood')
+        next.promptModules = normalizePromptModules(next.promptModules, next.globalSystemPrompt)
         return next
       },
     },

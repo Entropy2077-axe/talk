@@ -1,6 +1,7 @@
 import { chatCompletion, type ChatMessage } from './deepseek'
 import { displayName } from './contact'
 import type { AppSettings, Contact, GroupEnergyLevel, Message } from '../types'
+import { getPromptTemplate } from './promptModules'
 
 function truncate(text: string, max: number): string {
   const trimmed = text.trim()
@@ -37,31 +38,16 @@ async function generateOutline(opts: {
   historyText: string
   signal?: AbortSignal
 }): Promise<string> {
-  const systemPrompt = `你是“剧情大纲生成”实验功能。
-任务：在主聊天模型开始写回复前，根据当前逻辑前提生成一个很短的未来对话大纲，用来指导下一轮回复。
-
-只参考逻辑前提：身份、人设事实、关系、记忆、时间、日程、当前上下文、用户最新话语、群聊发言人/设置。
-不要参考也不要生成“感觉/文采/润色/聊天腔/说话样例/全局风格提示词”。
-
-输出要求：
-- 只输出中文纯文本，不要JSON，不要Markdown代码块。
-- 4到7行，每行尽量短。
-- 必须包含：本轮核心判断、建议的回应方向、是否需要换话题/收束旧梗、禁止事项。
-- 这是给主模型看的内部大纲，不要直接代写完整回复。`
+  const systemPrompt = getPromptTemplate(opts.settings, 'storyOutline', 'generation', {
+    storyContext: `场景：${opts.title}\n逻辑前提：${truncate(opts.premiseText, 5000)}\n最近聊天：${truncate(opts.historyText || '（无）', 2500)}`,
+  })
+  if (!systemPrompt) return ''
 
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
     {
       role: 'user',
-      content: `【场景】${opts.title}
-
-【逻辑前提】
-${truncate(opts.premiseText, 5000)}
-
-【最近聊天】
-${truncate(opts.historyText || '（无）', 2500)}
-
-请生成小型大纲。`,
+      content: '固定输出协议：输出4到7行中文纯文本，包含核心判断、回应方向、话题处理和禁止事项；不要JSON或Markdown。',
     },
   ]
 

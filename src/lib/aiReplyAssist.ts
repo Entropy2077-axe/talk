@@ -5,6 +5,7 @@ import { chatCompletion } from './deepseek'
 import { describeCurrentSchedule, describeUpcomingScheduleText } from './schedule'
 import { recentSocialEventsText } from './socialEvents'
 import { retrieveWorldbookContext } from './worldbook'
+import { getPromptTemplate, promptModuleEnabled } from './promptModules'
 
 function trimText(value: unknown, limit = 900) {
   const text = String(value || '').trim()
@@ -51,7 +52,7 @@ export async function draftReply(
   const baseContext = [history, userProfileText(settings), contact?.systemPrompt, contact?.memoryFacts, group?.memory, group?.vibe]
     .filter(Boolean)
     .join('\n')
-  const worldbookContext = isModuleEnabled('worldview')
+  const worldbookContext = isModuleEnabled('worldview') && promptModuleEnabled(settings, 'worldview')
     ? await retrieveWorldbookContext(baseContext, { maxEntries: 4, maxChars: 2400 })
     : ''
 
@@ -73,20 +74,7 @@ export async function draftReply(
         `成员设定：${members.map((member) => `${member.name}（${trimText(member.systemPrompt, 260)}；关系 ${member.relationshipBase || '普通'}；心情 ${member.mood?.text || '未知'}）`).join('\n') || '无'}`,
       ].join('\n')
     : ''
-  const raw = await chatCompletion({
-    apiKey: settings.apiKey,
-    baseUrl: settings.baseUrl,
-    model: settings.model,
-    maxTokens: 800,
-    purpose: 'other',
-    messages: [
-      {
-        role: 'system',
-        content: `你是用户的即时消息代写助手。直接替用户写一条现在可以发送的回复，不要分析、标题、策略说明、引号或 Markdown。
-必须自然贴合用户的个人简介、当前聊天语境与对方设定；可使用给出的世界观、关系、记忆、日程和近期社交事件，但不能编造事实、泄露其他私聊内容或替用户作超出上下文的承诺。
-回复长度应服从当前语境：简单时可简短，用户需要解释、安慰、澄清或展开讨论时可以自然写完整；不要机械限字，也不要有 AI 腔、复述总结或无意义客套。
-
-【用户资料】
+  const assistContext = `【用户资料】
 ${userProfileText(settings)}
 
 ${privateContext || groupContext}
@@ -97,9 +85,22 @@ ${trimText(socialContext, 1200) || '无'}
 【命中的世界书】
 ${worldbookContext || '无'}
 
-只输出最终代写文本。`,
+【当前对话】
+${history || '暂无历史，请写一句自然的开场回复。'}`
+  const systemPrompt = getPromptTemplate(settings, 'aiReplyAssist', 'draft', { assistContext })
+  if (!systemPrompt) throw new Error('代写助手提示词模块已屏蔽')
+  const raw = await chatCompletion({
+    apiKey: settings.apiKey,
+    baseUrl: settings.baseUrl,
+    model: settings.model,
+    maxTokens: 800,
+    purpose: 'other',
+    messages: [
+      {
+        role: 'system',
+        content: `${systemPrompt}\n\n固定输出协议：只输出最终代写文本。`,
       },
-      { role: 'user', content: `【当前对话】\n${history || '暂无历史，请写一句自然的开场回复。'}` },
+      { role: 'user', content: '请生成' },
     ],
   })
   const suggestion = cleanDraft(raw)

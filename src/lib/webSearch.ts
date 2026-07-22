@@ -11,26 +11,31 @@ export interface WebSearchResult {
   url: string
 }
 
+import { friendlyConnectionError, httpFailureMessage, parseJsonText, requireApiKey } from './connectionError'
+
 export async function tavilySearch(apiKey: string, query: string): Promise<WebSearchResult[]> {
-  const res = await fetch('https://api.tavily.com/search', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      api_key: apiKey,
-      query,
-      search_depth: 'basic',
-      max_results: 5,
-    }),
-  })
-  if (!res.ok) {
+  try {
+    const key = requireApiKey(apiKey, 'Tavily')
+    const res = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: key,
+        query,
+        search_depth: 'basic',
+        max_results: 5,
+      }),
+    })
     const text = await res.text()
-    throw new Error(`Tavily搜索失败 HTTP ${res.status}: ${text.slice(0, 300)}`)
+    const json = parseJsonText(text, 'Tavily') as { results?: unknown }
+    if (!res.ok) throw new Error(httpFailureMessage('Tavily', res.status, json))
+    if (!Array.isArray(json?.results)) throw new Error('Tavily 返回的数据中没有搜索结果，请检查 API Key 或稍后重试')
+    return json.results.map((r: { title?: unknown; content?: unknown; url?: unknown }) => ({
+      title: typeof r?.title === 'string' ? r.title : '',
+      content: typeof r?.content === 'string' ? r.content : '',
+      url: typeof r?.url === 'string' ? r.url : '',
+    }))
+  } catch (error) {
+    throw new Error(friendlyConnectionError(error, 'Tavily'))
   }
-  const json = await res.json()
-  const results = Array.isArray(json?.results) ? json.results : []
-  return results.map((r: { title?: unknown; content?: unknown; url?: unknown }) => ({
-    title: typeof r.title === 'string' ? r.title : '',
-    content: typeof r.content === 'string' ? r.content : '',
-    url: typeof r.url === 'string' ? r.url : '',
-  }))
 }

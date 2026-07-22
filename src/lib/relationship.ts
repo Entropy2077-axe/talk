@@ -284,6 +284,7 @@ import { db } from '../db/db'
 import { chatCompletion } from './deepseek'
 import { isModuleEnabled } from '../features'
 import type { AppSettings, Contact } from '../types'
+import { getPromptTemplate, promptModuleEnabled } from './promptModules'
 
 /**
  * Called once per contact when 好感度 is enabled and warmth hasn't been
@@ -296,6 +297,7 @@ export async function evaluateInitialWarmth(
   conversationId: string,
   settings: AppSettings,
 ): Promise<number> {
+  if (!promptModuleEnabled(settings, 'relationship')) return contact.warmth ?? 0
   // Personality trait with initial warmth takes priority over API evaluation.
   if (isModuleEnabled('personalityTraits') && contact.personalityTrait && contact.personalityTrait !== '无') {
     const initial = initialWarmthForBase(contact.relationshipBase || '朋友', contact.personalityTrait)
@@ -331,18 +333,10 @@ export async function evaluateInitialWarmth(
       messages: [
         {
           role: 'system',
-          content: `你是一个好感度评估器。根据聊天记录评估这个AI角色对用户的初始好感度。
-
-人设: ${contact.systemPrompt}
-关系定位: ${contact.relationshipBase || '朋友'}
-
-输出一个整数 -100(极度厌恶) 到 100(深厚羁绊):
-- 刚认识、没什么交集 → 0~20
-- 聊天内容友好轻松 → 20~50
-- 聊天内容亲密、有情感连接 → 50~80
-- 人设本身暗示了对特定关系的高好感(比如是家人/恋人) → 可以相应提高
-
-只输出数字 不要任何其他文字。`,
+          content: getPromptTemplate(settings, 'relationship', 'coldStart', {
+            persona: contact.systemPrompt,
+            relationshipBase: contact.relationshipBase || '朋友',
+          })!,
         },
         { role: 'user', content: lines || '(没有聊天记录)' },
       ],

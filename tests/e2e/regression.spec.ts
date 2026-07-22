@@ -321,6 +321,54 @@ test('chat page can generate a selected-message screenshot preview', async ({ pa
   await expect(page.getByRole('button', { name: '分享' })).toBeVisible()
 })
 
+test('contact card edits and blocks a global prompt module', async ({ page }) => {
+  await page.goto('/#/contact/contact-a')
+  await seedSearchAndGroupFixture(page)
+  await page.reload()
+
+  await expect(page.getByText('全局提示词模块', { exact: true })).toHaveCount(0)
+  await page.goto('/#/modules')
+  await page.getByRole('button', { name: '开启全局提示词模块' }).click()
+  await page.goto('/#/contact/contact-a')
+  await expect(page.getByText('全局提示词模块', { exact: true })).toBeVisible()
+
+  const relationshipCard = page.locator('div.rounded-xl').filter({ hasText: '好感度' }).first()
+  await expect(relationshipCard).toBeVisible()
+  await relationshipCard.getByRole('button').first().click()
+  const editor = page.locator('textarea').first()
+  await editor.fill('GLOBAL_RELATIONSHIP_E2E\n{{relationshipContext}}')
+  await page.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(relationshipCard).toContainText('GLOBAL_RELATIONSHIP_E2E')
+
+  await relationshipCard.getByRole('button', { name: '启用中' }).click()
+  await expect(relationshipCard).toHaveClass(/bg-black/)
+  await expect(relationshipCard.getByRole('button', { name: '已屏蔽' })).toBeVisible()
+})
+
+test('chat page reads recent messages in pages and loads older history', async ({ page }) => {
+  await page.goto('/#/chat/conversation-a')
+  await seedSearchAndGroupFixture(page)
+  await page.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts')
+    await db.messages.clear()
+    await db.messages.bulkAdd(Array.from({ length: 85 }, (_, index) => ({
+      id: `paged-${String(index).padStart(3, '0')}`,
+      conversationId: 'conversation-a',
+      role: index % 2 ? 'assistant' as const : 'user' as const,
+      type: 'text' as const,
+      content: `page message ${index}`,
+      createdAt: 1000 + index,
+    })))
+  })
+  await page.reload()
+
+  await expect(page.getByText('page message 84', { exact: true })).toBeVisible()
+  await expect(page.getByText('page message 44', { exact: true })).toBeHidden()
+  await page.getByRole('button', { name: '加载更早消息' }).click()
+  await expect(page.getByText('page message 44', { exact: true })).toBeVisible()
+  await expect(page.getByText('page message 4', { exact: true })).toBeHidden()
+})
+
 test('group info page can add and remove members after creation', async ({ page }) => {
   await page.goto('/#/group/group-a')
   await seedSearchAndGroupFixture(page)
@@ -469,7 +517,29 @@ test('top inset adjustment shortens the shell while keeping its bottom fixed', a
   expect(Math.round((after!.y + after!.height) - (before!.y + before!.height))).toBe(0)
 })
 
-test('nuwa mode replaces preset creator fields with free-form fields', async ({ page }) => {
+test('custom chat page size controls initial and older-message loading', async ({ page }) => {
+  await page.goto('/#/settings')
+  await clearDatabase(page)
+  await page.getByLabel('每次加载消息条数').selectOption('20')
+  await expect(page.getByLabel('每次加载消息条数')).toHaveValue('20')
+  await page.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts')
+    await db.contacts.add({ id: 'page-contact', name: '分页测试', avatar: '🙂', avatarColor: '#eee', systemPrompt: '测试', createdAt: 1, memoryFacts: '', memoryStyle: '', memoryUpdatedAt: 0, memoryMessageCursor: 0, relationshipBase: '朋友', relationshipDynamic: '' })
+    await db.conversations.add({ id: 'page-conversation', contactId: 'page-contact', pinned: false, createdAt: 1, updatedAt: 30 })
+    await db.messages.bulkAdd(Array.from({ length: 45 }, (_, index) => ({ id: `page-message-${index}`, conversationId: 'page-conversation', role: 'assistant' as const, type: 'text' as const, content: `分页消息 ${index}`, createdAt: index + 1 })))
+  })
+  await page.goto('/#/chat/page-conversation')
+  await expect(page.getByText('分页消息 25', { exact: true })).toBeVisible()
+  await expect(page.getByText('分页消息 24', { exact: true })).toHaveCount(0)
+  await page.getByTestId('chat-scroll').evaluate((element) => {
+    element.scrollTop = 0
+    element.dispatchEvent(new Event('scroll', { bubbles: true }))
+  })
+  await expect(page.getByText('分页消息 5', { exact: true })).toBeVisible()
+  await expect(page.getByText('分页消息 4', { exact: true })).toHaveCount(0)
+})
+
+test('nuwa mode switches the creator to a free-form AI draft flow', async ({ page }) => {
   await page.goto('/#/contact/new')
   await page.evaluate(async () => {
     const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
@@ -477,14 +547,24 @@ test('nuwa mode replaces preset creator fields with free-form fields', async ({ 
     state.setSettings({ enabledModules: [...new Set([...state.enabledModules, 'nuwaMode'])] })
   })
   await page.reload()
-  await expect(page.getByPlaceholder('例如：慢热、敏感、有主见（顿号分隔）')).toBeVisible()
+  await page.getByRole('button', { name: '女娲模式' }).click()
+  await expect(page.getByText('角色设定', { exact: true })).toBeVisible()
+  await expect(page.getByPlaceholder('例如：慢热、敏感、有主见；完全自由填写')).toBeVisible()
   await expect(page.getByPlaceholder('例如：24岁')).toBeVisible()
+  await expect(page.getByPlaceholder('例如：想要一个嘴硬但很在乎我的雌小鬼恋人，我们小时候就认识。AI会先生成初稿，之后你可以修改。')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'AI补全', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '生成初稿', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'AI润色' })).toHaveCount(0)
+  await expect(page.getByLabel('性格特质名称')).toBeVisible()
+  await expect(page.getByLabel('性格特质内容')).toBeVisible()
+  await page.getByRole('button', { name: '展开特质选项' }).click()
+  await expect(page.getByText('系统性格特质')).toBeVisible()
   await expect(page.getByRole('button', { name: '🎲 完全随机创建' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '18-22' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '恋人', exact: true })).toHaveCount(0)
 })
 
-test('minimal Nuwa mode leaves only one AI-filled role description', async ({ page }) => {
+test('Nuwa mode exposes an editable AI first-draft workflow', async ({ page }) => {
   await page.goto('/#/contact/new')
   await page.evaluate(async () => {
     const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
@@ -492,14 +572,92 @@ test('minimal Nuwa mode leaves only one AI-filled role description', async ({ pa
     state.setSettings({ enabledModules: [...new Set([...state.enabledModules, 'nuwaMode'])] })
   })
   await page.reload()
-  const toggle = page.locator('label').filter({ hasText: '极简女娲模式' }).getByRole('checkbox')
-  await toggle.check()
-  await expect(page.getByPlaceholder('例如：慢热、敏感、有主见（顿号分隔）')).toHaveCount(0)
-  await expect(page.getByPlaceholder('例如：24岁')).toHaveCount(0)
-  await expect(page.getByPlaceholder('例如：想要一个嘴硬但很在乎我的雌小鬼恋人，我们小时候就认识。其余让 AI 自己补全。')).toBeVisible()
-  await expect(page.getByText('保存当前人设')).toBeVisible()
+  await page.getByRole('button', { name: '女娲模式' }).click()
+  await expect(page.getByText('角色设定', { exact: true })).toBeVisible()
+  await expect(page.getByPlaceholder('例如：慢热、敏感、有主见；完全自由填写')).toBeVisible()
+  await expect(page.getByPlaceholder('例如：24岁')).toBeVisible()
+  await expect(page.getByPlaceholder('例如：想要一个嘴硬但很在乎我的雌小鬼恋人，我们小时候就认识。AI会先生成初稿，之后你可以修改。')).toBeVisible()
+  await expect(page.getByRole('button', { name: '生成AI初稿' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'AI补全', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '生成初稿', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'AI润色' })).toHaveCount(0)
   await expect(page.getByText('与用户的过往 / 共同经历（强烈建议填写）')).toHaveCount(0)
   await expect(page.getByText('头像', { exact: true })).toHaveCount(0)
+})
+
+test('Nuwa AI polishing is reviewed and retries invalid form output', async ({ page }) => {
+  type AiRequest = { model?: string; messages?: Array<{ content: string }>; response_format?: unknown }
+  const mainRequests: AiRequest[] = []
+  const reviewRequests: AiRequest[] = []
+  await page.route('**/v1/chat/completions', async (route) => {
+    const requestBody = route.request().postDataJSON() as AiRequest
+    const isReview = requestBody.messages?.[0]?.content.includes('严格格式审查器') ?? false
+    if (isReview) reviewRequests.push(requestBody)
+    else mainRequests.push(requestBody)
+    const content = isReview
+      ? JSON.stringify({ valid: true, issues: [] })
+      : mainRequests.length === 1
+        ? JSON.stringify({
+            realName: '', nickname: '', birthday: '', tendencies: '', age: '', gender: '', relationship: '', occupation: '', hobbies: '', personalityTrait: '', personalityTraitContent: '', otherSetting: '',
+          })
+        : JSON.stringify({
+            realName: '林知夏',
+            nickname: '小夏',
+            birthday: '2003-06-15',
+            tendencies: '活泼、黏人、坦率',
+            age: '23岁',
+            gender: '女孩子',
+            relationship: '亲妹妹',
+            occupation: '大学生',
+            hobbies: '烘焙、摄影',
+            personalityTrait: '爱撒娇但很可靠',
+            personalityTraitContent: '亲近时爱撒娇，遇到重要事情会主动承担责任。',
+            otherSetting: '她会主动分享生活琐事，也尊重彼此边界。',
+          })
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        choices: [{ message: { content } }],
+        usage: { prompt_tokens: 100, completion_tokens: 100 },
+      }),
+    })
+  })
+  await page.goto('/#/contact/new')
+  await page.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts')
+    const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
+    const state = useSettingsStore.getState()
+    await db.worldbookEntries.put({ id: 'nuwa-worldbook', title: '月海城正史', content: '月海城的居民成年后必须登记一种合法职业，普通人不能使用魔法。', keywords: ['月海城'], enabled: true, alwaysInclude: false, priority: 90, createdAt: 1, updatedAt: 1 })
+    state.setSettings({
+      apiKey: 'sk-nuwa-form-test',
+      baseUrl: 'https://nuwa-form.test',
+      model: 'nuwa-main-test',
+      utilityModel: 'nuwa-review-test',
+      enabledModules: [...new Set([...state.enabledModules, 'nuwaMode', 'worldview'])],
+    })
+  })
+  await page.reload()
+  await page.getByRole('button', { name: '女娲模式' }).click()
+  await page.getByPlaceholder('例如：想要一个嘴硬但很在乎我的雌小鬼恋人，我们小时候就认识。AI会先生成初稿，之后你可以修改。').fill('喜欢我的妹妹')
+  await page.getByLabel('性别', { exact: true }).fill('女孩子')
+  await page.getByRole('button', { name: 'AI补全', exact: true }).click()
+
+  await expect(page.getByLabel('真名', { exact: true })).toHaveValue('林知夏')
+  await expect(page.getByLabel('年龄', { exact: true })).toHaveValue('23岁')
+  await expect(page.getByLabel('性别', { exact: true })).toHaveValue('女孩子')
+  await expect(page.getByLabel('关系定位', { exact: true })).toHaveValue('亲妹妹')
+  await expect(page.getByLabel('职业', { exact: true })).toHaveValue('大学生')
+  await expect(page.getByLabel('性格特质名称')).toHaveValue('爱撒娇但很可靠')
+  await expect(page.getByLabel('性格特质内容')).toHaveValue('亲近时爱撒娇，遇到重要事情会主动承担责任。')
+  await expect(page.getByPlaceholder('补充经历、边界、习惯、生活细节、说话方式、关系表现等……')).toHaveValue('她会主动分享生活琐事，也尊重彼此边界。')
+  expect(mainRequests).toHaveLength(2)
+  expect(reviewRequests).toHaveLength(2)
+  expect(mainRequests[0].response_format).toEqual({ type: 'json_object' })
+  expect(mainRequests[0].messages?.[0]?.content).toContain('月海城的居民成年后必须登记一种合法职业')
+  expect(reviewRequests[0].model).toBe('nuwa-review-test')
+  expect(mainRequests[1].messages?.[0]?.content).toContain('上一次输出已被多功能模型退回')
+  expect(mainRequests[1].messages?.[0]?.content).toContain('仍未补全')
 })
 
 test('life simulation catches up local state after elapsed time without an API key', async ({ page }) => {

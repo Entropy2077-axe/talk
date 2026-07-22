@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import Dexie from 'dexie'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { db } from '../db/db'
 import { TopBar } from '../components/TopBar'
@@ -21,6 +22,7 @@ import { claimRedPacket, transferFunds, USER_WALLET_ID } from '../lib/finance'
 import { draftReply } from '../lib/aiReplyAssist'
 import { searchRemoteStickers, trackRemoteStickerSend, type RemoteStickerResult } from '../lib/remoteMedia'
 import { isStickerProviderReady, stickerProviderName } from '../lib/mediaProviders'
+import { normalizeChatPageSize } from '../lib/chatPagination'
 
 const EMPTY_MESSAGES: Message[] = []
 
@@ -30,6 +32,7 @@ export function ChatPage() {
   const highlightId = searchParams.get('highlight')
   const navigate = useNavigate()
   const settings = useSettingsStore()
+  const chatPageSize = normalizeChatPageSize(settings.chatPageSize)
   const setActiveConversation = useChatUiStore((s) => s.setActiveConversation)
   const mindReadingEnabled = useModuleEnabled('mindReading')
   const careerEnabled = useModuleEnabled('career')
@@ -55,14 +58,22 @@ export function ChatPage() {
   const groupMembers = useMemo(() => (groupMembersRaw ?? []).filter((c): c is Contact => !!c), [groupMembersRaw])
   const memberById = useMemo(() => new Map(groupMembers.map((c) => [c.id, c])), [groupMembers])
 
-  const messages =
-    useLiveQuery(
-      () =>
-        conversationId
-          ? db.messages.where('conversationId').equals(conversationId).sortBy('createdAt')
-          : Promise.resolve([] as Message[]),
-      [conversationId],
-    ) ?? EMPTY_MESSAGES
+  const [visibleMessageLimit, setVisibleMessageLimit] = useState(chatPageSize)
+  useEffect(() => setVisibleMessageLimit(chatPageSize), [conversationId, chatPageSize])
+  const messagePage = useLiveQuery(async () => {
+    if (!conversationId) return { items: EMPTY_MESSAGES, total: 0 }
+    const range = () => db.messages
+      .where('[conversationId+createdAt]')
+      .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey], true, true)
+    const [newestFirst, total] = await Promise.all([
+      range().reverse().limit(visibleMessageLimit).toArray(),
+      range().count(),
+    ])
+    return { items: newestFirst.reverse(), total }
+  }, [conversationId, visibleMessageLimit])
+  const messages = messagePage?.items ?? EMPTY_MESSAGES
+  const latestMessageId = messages.at(-1)?.id
+  const hasOlderMessages = messages.length < (messagePage?.total ?? 0)
   const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? []
   const stickerByName = new Map(stickers.map((s) => [s.name, s.dataUrl]))
   const [statusLine, setStatusLine] = useState('')
@@ -115,6 +126,7 @@ export function ChatPage() {
   const currentConversationRef = useRef<string | undefined>(conversationId)
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const loadingOlderRef = useRef<{ scrollHeight: number } | null>(null)
   const bubbleRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const [flashId, setFlashId] = useState<string | null>(highlightId)
   const messageById = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages])
@@ -176,17 +188,39 @@ export function ChatPage() {
   // stopped changing by then) and the ref never gets scrolled at all.
   useLayoutEffect(() => {
     const el = scrollContainerRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [conversationId, messages.length, aiTyping, contact, group])
+    if (!el) return
+    if (loadingOlderRef.current) {
+      el.scrollTop += el.scrollHeight - loadingOlderRef.current.scrollHeight
+      loadingOlderRef.current = null
+    } else {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [conversationId, messages.length, latestMessageId, aiTyping, contact, group])
+
+  function loadOlderMessages() {
+    const el = scrollContainerRef.current
+    if (!el || !hasOlderMessages || loadingOlderRef.current) return
+    loadingOlderRef.current = { scrollHeight: el.scrollHeight }
+    setVisibleMessageLimit((value) => value + chatPageSize)
+  }
 
   useEffect(() => {
-    if (!highlightId || messages.length === 0) return
+    if (!highlightId || !conversationId) return
+    if (!messageById.has(highlightId)) {
+      void db.messages.get(highlightId).then(async (target) => {
+        if (!target || target.conversationId !== conversationId) return
+        const newer = await db.messages.where('[conversationId+createdAt]')
+          .above([conversationId, target.createdAt]).count()
+        setVisibleMessageLimit((value) => Math.max(value, newer + 1))
+      })
+      return
+    }
     const el = bubbleRefs.current.get(highlightId)
     el?.scrollIntoView({ block: 'center' })
     const t = setTimeout(() => setFlashId(null), 2000)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlightId, messages.length])
+  }, [highlightId, conversationId, messages.length, messageById])
 
   async function handleSend() {
     const text = input.trim()
@@ -513,7 +547,18 @@ export function ChatPage() {
         </button>
       )}
 
-      <div ref={scrollContainerRef} data-testid="chat-scroll" className="flex-1 overflow-y-auto pt-2" style={chatBackgroundStyle}>
+      <div
+        ref={scrollContainerRef}
+        data-testid="chat-scroll"
+        className="flex-1 overflow-y-auto pt-2"
+        style={chatBackgroundStyle}
+        onScroll={(event) => { if (event.currentTarget.scrollTop < 80) loadOlderMessages() }}
+      >
+        {hasOlderMessages && (
+          <div className="flex justify-center py-2">
+            <button onClick={loadOlderMessages} className="rounded-full bg-white/90 px-3 py-1 text-xs text-gray-500 shadow-sm">加载更早消息</button>
+          </div>
+        )}
         {messages.map((m, index) => {
           const speaker =
             isGroupConv && m.role === 'assistant' && m.speakerContactId ? memberById.get(m.speakerContactId) : undefined

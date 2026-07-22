@@ -7,6 +7,7 @@ import { useSettingsStore } from '../store/useSettingsStore'
 import { chatCompletion } from '../lib/deepseek'
 import { buildWorldviewDraftPrompt, parseWorldviewDraft } from '../lib/prompt'
 import type { WorldbookEntry } from '../types'
+import { promptModuleEnabled } from '../lib/promptModules'
 
 const blank = (): WorldbookEntry => ({ id: uuid(), title: '', content: '', keywords: [], enabled: true, alwaysInclude: false, priority: 50, createdAt: Date.now(), updatedAt: Date.now() })
 
@@ -29,7 +30,8 @@ export function WorldSettingsPage() {
     if (!idea.trim() || !settings.apiKey) return setError(settings.apiKey ? '请输入世界设定想法' : '请先在设置中配置 API Key')
     setBusy(true); setError('')
     try {
-      const raw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, messages: [{ role: 'system', content: buildWorldviewDraftPrompt(idea.trim(), '') }, { role: 'user', content: '请生成' }], jsonMode: true, purpose: 'worldbook' })
+      if (!promptModuleEnabled(settings, 'worldview')) throw new Error('世界书提示词模块已屏蔽')
+      const raw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, messages: [{ role: 'system', content: buildWorldviewDraftPrompt(idea.trim(), '', settings.promptModules) }, { role: 'user', content: '请生成' }], jsonMode: true, purpose: 'worldbook' })
       const parsed = parseWorldviewDraft(raw)
       if (!parsed) throw new Error('生成结果解析失败')
       const entry = blank(); entry.title = idea.trim().slice(0, 20); entry.content = parsed.worldview

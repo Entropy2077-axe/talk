@@ -5,6 +5,7 @@ import { tavilySearch, type WebSearchResult } from './webSearch'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { toDateKey } from './time'
 import type { AppSettings, KnowledgeEntry } from '../types'
+import { getPromptTemplate, promptModuleEnabled } from './promptModules'
 
 /** Entries older than this are pruned whenever new ones are added, so the table (and the prompt digest) don't grow forever. */
 const MAX_ENTRY_AGE_MS = 30 * 24 * 60 * 60 * 1000
@@ -15,7 +16,7 @@ const DIGEST_ENTRY_COUNT = 15
 /** Hard ceiling on reactive keyword-triggered searches per day — the cost backstop, since this now fires directly out of ordinary chat turns rather than a slow periodic timer. */
 const DAILY_QUERY_CAP = 8
 
-function buildKnowledgeSummaryPrompt(rawResultsPerQuery: { query: string; results: WebSearchResult[] }[]): string {
+function buildKnowledgeSummaryPrompt(rawResultsPerQuery: { query: string; results: WebSearchResult[] }[], settings: AppSettings): string {
   const sections = rawResultsPerQuery
     .map((q) => {
       const lines = q.results.map((r, i) => `  ${i + 1}. ${r.title}: ${r.content}`).join('\n')
@@ -23,18 +24,8 @@ function buildKnowledgeSummaryPrompt(rawResultsPerQuery: { query: string; result
     })
     .join('\n\n')
 
-  return `你是一个网络文化知识整理器 任务是把下面搜索到的原始资讯提炼成几条简短的知识条目 方便一个聊天AI在日常对话中自然地引用最新的梗/番剧/游戏话题 只输出JSON 不要有其他任何文字
-
-${sections}
-
-输出格式:
-{"entries": [{"sourceQuery": "这条来自上面哪个搜索方向 原样复制那个'搜索方向:'后面的文字 一个字都不能改", "topic": "简短的主题", "content": "这条知识的具体内容 讲清楚这是什么、为什么流行/值得一提 50到100字"}]}
-
-要求:
-- sourceQuery必须原样复制自上面某一个"搜索方向:"后面的文字 不能改写、不能编一个新的
-- 每个搜索方向提炼出0到2条真正有具体信息量的条目 内容空泛或不实用就跳过 不用凑数
-- 不要编造搜索结果里没有的信息
-- 只输出JSON 不要markdown代码块标记`
+  const editable = getPromptTemplate(settings, 'knowledgeBase', 'summary', { searchResults: sections }) ?? ''
+  return `${editable}\n\n固定输出协议：只输出JSON {"entries":[{"sourceQuery":"原搜索方向","topic":"简短主题","content":"50到100字具体内容"}]}`
 }
 
 interface ParsedKnowledgeEntry {
@@ -111,6 +102,7 @@ function recordKnowledgeQueriesSent(n: number): void {
 }
 
 async function searchAndStore(topics: { query: string }[], settings: AppSettings): Promise<ParsedKnowledgeEntry[]> {
+  if (!promptModuleEnabled(settings, 'knowledgeBase')) return []
   const rawResultsPerQuery: { query: string; results: WebSearchResult[] }[] = []
   for (const { query } of topics) {
     try {
@@ -129,7 +121,7 @@ async function searchAndStore(topics: { query: string }[], settings: AppSettings
     model: settings.model,
     purpose: 'other',
     messages: [
-      { role: 'system', content: buildKnowledgeSummaryPrompt(rawResultsPerQuery) },
+      { role: 'system', content: buildKnowledgeSummaryPrompt(rawResultsPerQuery, settings) },
       { role: 'user', content: '请生成' },
     ],
     jsonMode: true,

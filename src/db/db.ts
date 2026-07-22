@@ -15,7 +15,7 @@ import type {
   SavedWorldview,
   WorldbookEntry,
   SimulationState, ContactLifeState, LifeEvent, AiUsageRecord,
-  SocialEvent, GroupPlan, AdminLogRecord, AdminAiTrace, SaveSlot, SavedPersona,
+  SocialEvent, GroupPlan, AdminLogRecord, AdminAiTrace, SaveSlot, SavedPersona, PersonaCreationRecord,
   Sticker,
   WalletAccount, WalletTransaction, Loan, JobListing, InterviewSession,
 } from '../types'
@@ -51,6 +51,7 @@ export class TalkDB extends Dexie {
   adminAiTraces!: Table<AdminAiTrace, string>
   saveSlots!: Table<SaveSlot, string>
   savedPersonas!: Table<SavedPersona, string>
+  personaCreationRecords!: Table<PersonaCreationRecord, string>
 
   constructor() {
     super('talk-db')
@@ -203,6 +204,48 @@ export class TalkDB extends Dexie {
     })
     this.version(23).stores({
       savedPersonas: 'id, nickname, realName, updatedAt',
+    })
+    // Efficient newest-first chat pagination without loading an entire
+    // conversation into memory first.
+    this.version(24).stores({
+      messages: 'id, conversationId, createdAt, [conversationId+createdAt]',
+    })
+    // Immutable Nuwa creation history. This table is deliberately omitted
+    // from ordinary backups/restores so history survives rollback and wipes.
+    this.version(25).stores({
+      personaCreationRecords: 'id, sourceContactId, createdAt',
+    }).upgrade(async (tx) => {
+      const contacts = await tx.table('contacts').toArray() as Array<Record<string, any>>
+      const records = tx.table('personaCreationRecords')
+      for (const contact of contacts) {
+        const profile = contact.creatorProfile as Record<string, any> | undefined
+        const setting = typeof contact.personaConstraints === 'string' && contact.personaConstraints.trim()
+          ? contact.personaConstraints.trim()
+          : String(contact.systemPrompt || '')
+        await records.add({
+          id: crypto.randomUUID(),
+          sourceContactId: contact.id,
+          name: String(contact.name || '未命名角色'),
+          realName: typeof contact.realName === 'string' ? contact.realName : undefined,
+          nickname: typeof contact.nickname === 'string' ? contact.nickname : undefined,
+          birthday: typeof contact.birthday === 'string' ? contact.birthday : undefined,
+          gender: typeof contact.gender === 'string' ? contact.gender : profile?.gender,
+          ageRange: typeof profile?.age === 'string' ? profile.age : undefined,
+          relationship: typeof contact.relationshipBase === 'string' ? contact.relationshipBase : profile?.relationship,
+          occupation: typeof contact.occupation === 'string' ? contact.occupation : profile?.occupation,
+          personalityTrait: typeof contact.personalityTrait === 'string' ? contact.personalityTrait : undefined,
+          hobbies: Array.isArray(profile?.hobbies) ? profile.hobbies : [],
+          personaSetting: setting,
+          roleDescription: typeof profile?.notes === 'string' ? profile.notes : undefined,
+          persona: String(contact.systemPrompt || ''),
+          personaProfile: contact.personaProfile,
+          speechSamples: contact.speechSamples,
+          mbti: contact.mbti,
+          schedule: contact.schedule,
+          sharedHistory: contact.sharedHistory,
+          createdAt: Number(contact.createdAt) || Date.now(),
+        })
+      }
     })
   }
 }

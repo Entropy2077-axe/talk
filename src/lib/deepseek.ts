@@ -6,6 +6,7 @@ import { assertAutomaticAiBudget, estimateTokens, recordAiUsage } from './aiUsag
 import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import type { AdminAiTraceStage, AiUsagePurpose } from '../types'
+import { friendlyConnectionError, httpFailureMessage, parseJsonText, requireApiKey, requireHttpUrl } from './connectionError'
 
 /**
  * Merges consecutive same-role messages into one. Each AI turn is stored as
@@ -30,7 +31,7 @@ export function coalesceConsecutiveRoles(messages: ChatMessage[]): ChatMessage[]
 }
 
 function normalizeBaseUrl(baseUrl: string) {
-  return baseUrl.replace(/\/+$/, '')
+  return requireHttpUrl(baseUrl, 'Base URL')
 }
 
 function supportsThinkingOption(model: string): boolean {
@@ -49,15 +50,23 @@ async function traceAiCall(opts: { purpose: AiUsagePurpose; model: string; messa
 }
 
 export async function listModels(apiKey: string, baseUrl: string): Promise<string[]> {
-  const res = await fetch(`${normalizeBaseUrl(baseUrl)}/v1/models`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-  })
-  if (!res.ok) {
-    throw new Error(`拉取模型失败: HTTP ${res.status}`)
+  try {
+    const key = requireApiKey(apiKey, 'AI')
+    const res = await fetch(`${normalizeBaseUrl(baseUrl)}/v1/models`, {
+      headers: { Authorization: `Bearer ${key}` },
+    })
+    const text = await res.text()
+    const json = parseJsonText(text, 'AI 接口') as { data?: unknown }
+    if (!res.ok) throw new Error(httpFailureMessage('AI 接口', res.status, json))
+    if (!Array.isArray(json?.data)) throw new Error('AI 接口返回的数据中没有模型列表，请检查 Base URL 是否兼容 OpenAI 接口')
+    const list = json.data
+      .flatMap((item) => item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string' ? [(item as { id: string }).id] : [])
+      .sort()
+    if (list.length === 0) throw new Error('AI 接口连接成功，但没有返回可用模型')
+    return list
+  } catch (error) {
+    throw new Error(friendlyConnectionError(error, 'AI 接口'))
   }
-  const json = await res.json()
-  const list = (json?.data ?? []) as { id: string }[]
-  return list.map((m) => m.id).sort()
 }
 
 export async function testConnection(
@@ -66,10 +75,12 @@ export async function testConnection(
   model: string,
 ): Promise<{ ok: boolean; message: string }> {
   try {
+    const key = requireApiKey(apiKey, 'AI')
+    if (!model.trim()) throw new Error('请先填写或选择模型')
     const res = await fetch(`${normalizeBaseUrl(baseUrl)}/v1/chat/completions`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${key}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -78,13 +89,17 @@ export async function testConnection(
         max_tokens: 8,
       }),
     })
-    if (!res.ok) {
-      const text = await res.text()
-      return { ok: false, message: `HTTP ${res.status}: ${text.slice(0, 200)}` }
+    const text = await res.text()
+    const json = parseJsonText(text, 'AI 接口') as { choices?: unknown; error?: unknown }
+    if (!res.ok) return { ok: false, message: httpFailureMessage('AI 接口', res.status, json) }
+    const first = Array.isArray(json?.choices) ? json.choices[0] : undefined
+    const message = first && typeof first === 'object' ? (first as { message?: unknown }).message : undefined
+    if (!message || typeof message !== 'object') {
+      return { ok: false, message: '接口虽然返回成功状态，但内容不是兼容的 AI 回复，请检查 Base URL 和模型' }
     }
-    return { ok: true, message: '连接成功' }
+    return { ok: true, message: '连接成功，模型已正常返回回复' }
   } catch (err) {
-    return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    return { ok: false, message: friendlyConnectionError(err, 'AI 接口') }
   }
 }
 
@@ -115,11 +130,12 @@ export async function chatCompletion(opts: {
   if (automatic) await assertAutomaticAiBudget()
   const inputTokens = opts.messages.reduce((sum, message) => sum + estimateTokens(message.content), 0)
   try {
+  const key = requireApiKey(opts.apiKey, 'AI')
   const res = await fetch(`${normalizeBaseUrl(opts.baseUrl)}/v1/chat/completions`, {
     method: 'POST',
     signal: opts.signal,
     headers: {
-      Authorization: `Bearer ${opts.apiKey}`,
+      Authorization: `Bearer ${key}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -133,14 +149,12 @@ export async function chatCompletion(opts: {
       ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
     }),
   })
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`API请求失败 HTTP ${res.status}: ${text.slice(0, 300)}`)
-  }
-  const json = await res.json()
+  const text = await res.text()
+  const json = parseJsonText(text, 'AI 接口') as Record<string, any>
+  if (!res.ok) throw new Error(httpFailureMessage('AI 接口', res.status, json))
   const content = json?.choices?.[0]?.message?.content
   if (typeof content !== 'string') {
-    throw new Error('API返回内容为空或格式异常')
+    throw new Error('AI 接口没有返回有效回复，请检查模型名称是否正确')
   }
   const promptTokens = Number(json?.usage?.prompt_tokens)
   const completionTokens = Number(json?.usage?.completion_tokens)
@@ -154,15 +168,21 @@ export async function chatCompletion(opts: {
     if (automatic) await usageWrite
     else void usageWrite.catch(() => undefined)
     void traceAiCall({ purpose, model: opts.model, messages: opts.messages, error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500), inputTokens, outputTokens: 0, ...opts.trace })
-    throw error
+    throw new Error(friendlyConnectionError(error, 'AI 接口'))
   }
 }
 
 export async function chatCompletionStream(opts: Omit<Parameters<typeof chatCompletion>[0], 'jsonMode'> & { onDelta: (text: string) => void }): Promise<string> {
   const purpose = opts.purpose ?? 'other'
   const inputTokens = opts.messages.reduce((sum, message) => sum + estimateTokens(message.content), 0)
-  const res = await fetch(`${normalizeBaseUrl(opts.baseUrl)}/v1/chat/completions`, { method: 'POST', signal: opts.signal, headers: { Authorization: `Bearer ${opts.apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: opts.model, messages: opts.messages, stream: true, temperature: 1.1, ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}) }) })
-  if (!res.ok || !res.body) throw new Error(`API请求失败 HTTP ${res.status}`)
+  const key = requireApiKey(opts.apiKey, 'AI')
+  const res = await fetch(`${normalizeBaseUrl(opts.baseUrl)}/v1/chat/completions`, { method: 'POST', signal: opts.signal, headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: opts.model, messages: opts.messages, stream: true, temperature: 1.1, ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}) }) })
+  if (!res.ok || !res.body) {
+    const text = await res.text()
+    let payload: unknown = text
+    try { payload = parseJsonText(text, 'AI 接口') } catch {}
+    throw new Error(httpFailureMessage('AI 接口', res.status, payload))
+  }
   const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let output = ''
   while (true) {
     const { done, value } = await reader.read(); if (done) break

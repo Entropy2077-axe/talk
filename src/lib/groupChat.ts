@@ -4,9 +4,10 @@ import { activeUpcomingPlansText } from './memory'
 import { customPersonalityTraitsLine, formatPersonaProfile, formatSpeechSamplesForScene, personalityTraitLine } from './prompt'
 import { describeCurrentSchedule } from './schedule'
 import { isModuleEnabled } from '../features'
-import type { Contact, GroupAiBubble, GroupAiResponse, GroupEnergyLevel, GroupSpeakerLimit } from '../types'
+import type { Contact, GroupAiBubble, GroupAiResponse, GroupEnergyLevel, GroupSpeakerLimit, PromptModuleSettings } from '../types'
 import { dynamicRelationScore } from './contactRelations'
 import { normalizeMood } from './mood'
+import { createDefaultPromptModules, getPromptTemplate, promptModuleEnabled } from './promptModules'
 
 /** Group chats can cap how many members answer per turn; see pickSpeakers. */
 const DEFAULT_GROUP_SPEAKER_LIMIT: GroupSpeakerLimit = 3
@@ -94,113 +95,6 @@ export function stripSpeakerNamePrefix(content: string, memberNames: string[]): 
   return content
 }
 
-export function buildGroupSystemPrompt(opts: {
-  stylePrompt: string
-  groupName: string
-  allMembers: Contact[]
-  speakers: Contact[]
-  stickerNames: string[]
-  currentTimeText: string
-  userProfileText: string
-  targetedContextText?: string
-  recentEventsText?: string
-  worldviewText?: string
-  knowledgeDigestText?: string
-  selfIterationGlobalText?: string
-  /** contactId → formatted recent memories text (from contactMemories table) */
-  speakerMemoriesMap?: Map<string, string>
-}): string {
-  const rosterText = opts.allMembers.map((m) => `- ${m.name}`).join('\n')
-
-  const speakerBlocks = opts.speakers
-    .map((c, i) => {
-      const base = c.relationshipBase || '朋友'
-      const dynamic = c.relationshipDynamic ? `（${c.relationshipDynamic}）` : ''
-      const plansText = activeUpcomingPlansText(c, new Date())
-      const scheduleText = describeCurrentSchedule(c, new Date())
-      const factsFallback = `（还没有具体的聊天记忆 但是${base}关系 不是陌生人）`
-      const styleFallback = `（语气要符合${base}的关系定位 不能生疏客气）`
-      const plansLine = plansText ? `\n【和用户的约定】${plansText}` : ''
-      const selfIterationLine = c.selfIterationPrompt ? `\n【你和用户的关系协商记录】${c.selfIterationPrompt}` : ''
-      const trait = c.personalityTrait?.trim()
-      const traitLine =
-        isModuleEnabled('personalityTraits') && trait && trait !== '无'
-          ? `${personalityTraitLine(trait, c.warmth ?? 0)}${customPersonalityTraitsLine(c.customPersonalityTraits, c.warmth ?? 0)}`
-          : ''
-      const samplesLine = formatSpeechSamplesForScene(c.speechSamples, 'group', 2)
-      const sharedHistoryLine = c.sharedHistory?.trim()
-        ? `\n【与用户的共同过往】${c.sharedHistory.trim().slice(0, 1200)}（只能引用这段已知事实）`
-        : '\n【与用户的共同过往】暂无具体记录，但关系不是陌生人。'
-      const recentMemoText = opts.speakerMemoriesMap?.get(c.id)
-      const recentMemoBlock = recentMemoText ? `\n【最近的记忆碎片】\n${recentMemoText}` : ''
-      return `发言人${i + 1}: ${c.name}
-与用户的关系: ${base}${dynamic}
-【人设 - 必须严格遵守】${c.systemPrompt || '自由发挥'}${isModuleEnabled('career') && c.occupation ? `\n【职业】${c.occupation}，月薪${c.monthlySalary ?? 0}` : ''}${c.mbti ? `\n【MBTI】${c.mbti}（性格底层框架 一切反应和决定都应符合这个类型）` : ''}${traitLine}
-${samplesLine ? `【说话样例】\n${samplesLine}\n` : ''}
-【当前状态】${scheduleText || '没有特别安排'}
-【对用户的了解】${c.memoryFacts || factsFallback}
-【和用户相处的习惯】${c.memoryStyle || styleFallback}${sharedHistoryLine}${plansLine}${recentMemoBlock}${selfIterationLine}`
-    })
-    .join('\n\n')
-
-  const stickersText =
-    opts.stickerNames.length > 0
-      ? opts.stickerNames.map((n) => `- ${n}`).join('\n')
-      : '（当前没有可用表情包）'
-
-  const worldviewPrefix = opts.worldviewText ? `【世界设定】\n${opts.worldviewText}\n\n` : ''
-  const selfIterationLine = opts.selfIterationGlobalText ? `\n【用户边界与偏好 - 全局】\n${opts.selfIterationGlobalText}` : ''
-  const knowledgeLine = opts.knowledgeDigestText
-    ? `\n热梗资讯: ${opts.knowledgeDigestText}`
-    : ''
-  const targetedContextLine = opts.targetedContextText
-    ? `\nTargeted group-chat context:\n${opts.targetedContextText}\nIf the user @mentions someone, that person should answer first. If the user replies to a message, answer that referenced message directly before changing topic. Keep it natural and short.`
-    : ''
-  const recentEventsLine = opts.recentEventsText ? `\n最近发生的事:\n${opts.recentEventsText}` : ''
-  const userNickname = opts.userProfileText.match(/昵称:\s*([^·\n]+)/)?.[1]?.trim()
-
-  return `【场景】
-这是一个微信群聊，名字叫"${opts.groupName}"。
-群里共有 ${opts.allMembers.length} 个人（包括用户"${userNickname || '我'}"）。
-你正在扮演下面几位发言人。这几位发言人和用户都在同一个群里，大家都能看到彼此的消息。
-你在群里的行为准则：
-- 这是一个公开的群聊空间，不是一对一的私聊窗口。不要用"对方"来称呼用户——用户只是群里的一个人。
-- 你可以看到群里所有人发的消息（包括其他发言人说的），也应该对其他人说的话做出反应——搭话、接梗、吐槽、附和、反驳，而不是每个人都只对着用户说话。
-- 不要每个人都回复用户的每一条消息。真实群聊里，有人话多有人话少，有人甚至会完全潜水一轮不吭声。
-- 严格按照你的人设说话。你的人设决定了你的性格、说话风格、兴趣范围——不要让一个内向文静的人主动约人去打篮球，不要让一个高冷的人突然热情洋溢。
-- 首轮或短历史时，每个实际发言人的第一条有效消息必须露出自己的关系距离；如果是恋人或暧昧对象，不能写成普通群友。特色性格也要在措辞或反应中出现可识别的行为锚点，例如雌小鬼的优越感逗弄、嘴硬和反差，而不是只写普通温柔口吻。
-- 共同过往只能由对应角色引用，其他成员不能代述或泄露；只使用该角色资料中明确给出的事实。
-
-${opts.stylePrompt}
-
-${worldviewPrefix}【群聊: ${opts.groupName}】
-成员: ${rosterText}
-你是以下几位发言人 按各自人设说话:
-
-${speakerBlocks}
-
-【当前】
-时间: ${opts.currentTimeText}
-用户（群成员之一）: ${opts.userProfileText}${knowledgeLine}${targetedContextLine}${recentEventsLine}${selfIterationLine}
-
-【输出格式】
-整个输出必须是JSON:
-
-{"messages":[{"speakerIndex":1,"type":"text","content":"..."},{"speakerIndex":2,"type":"text","content":"..."}],"knowledgeQueries":["..."]}
-
-- speakerIndex=上面发言人编号 不能编造 不能写其他成员
-- type=text: content只写这句话本身 **绝对不能加"某某: "名字前缀**(历史记录里那种格式是系统内部辅助 不是真人打字 不能模仿)
-- type=sticker: name=下面表情包列表里的名字 不能编造
-- 这是一个群聊 你的发言要像在群里聊天一样自然 可以接别人的话 也可以主动开启新话题
-- 不是每个人都必须说话 有人多说有人少说甚至不说 更像真实群聊
-- 每个人的记忆/约定只有本人能提 别人不能代提
-- 关系定位、共同过往和核心性格特质必须能从实际消息中辨认，不能只存在于隐藏思考里
-- knowledgeQueries可选 平级字段 不了解的梗/番剧/游戏 最多2个
-
-【表情包】
-${stickersText}`
-}
-
 export function buildGroupRawChatPrompt(opts: {
   stylePrompt: string
   groupName: string
@@ -223,30 +117,35 @@ export function buildGroupRawChatPrompt(opts: {
   selfIterationGlobalText?: string
   speakerMemoriesMap?: Map<string, string>
   aiRelationshipText?: string
+  promptModules?: PromptModuleSettings
 }): string {
+  const promptSettings = { promptModules: opts.promptModules ?? createDefaultPromptModules() }
+  if (!promptModuleEnabled(promptSettings, 'chat')) return ''
+  const relationshipPromptOn = promptModuleEnabled(promptSettings, 'relationship')
+  const memoryPromptOn = promptModuleEnabled(promptSettings, 'memory')
+  const personalityPromptOn = promptModuleEnabled(promptSettings, 'personalityTraits')
+  const selfIterationPromptOn = promptModuleEnabled(promptSettings, 'selfIteration')
   const rosterText = opts.allMembers.map((m) => `- ${m.name}`).join('\n')
   const speakerNames = opts.speakers.map((s) => s.name).join('、')
   const speakerBlocks = opts.speakers
     .map((c, i) => {
       const base = c.relationshipBase || '朋友'
-      const plansText = activeUpcomingPlansText(c, new Date())
+      const plansText = memoryPromptOn ? activeUpcomingPlansText(c, new Date()) : ''
       const scheduleText = describeCurrentSchedule(c, new Date())
-      const samplesText = formatSpeechSamplesForScene(c.speechSamples, 'group', 2)
-      const sharedHistoryText = c.sharedHistory?.trim()
+      const samplesText = personalityPromptOn ? formatSpeechSamplesForScene(c.speechSamples, 'group', 2) : ''
+      const sharedHistoryText = memoryPromptOn && c.sharedHistory?.trim()
         ? `- 与用户的共同过往（只能使用这些事实）: ${c.sharedHistory.trim().slice(0, 1200)}。首轮自然露出一个熟悉度信号。\n`
-        : '- 与用户的共同过往: 暂无具体记录，但不能用陌生人开场。\n'
-      const recentMemoText = opts.speakerMemoriesMap?.get(c.id)
+        : memoryPromptOn ? '- 与用户的共同过往: 暂无具体记录，但不能用陌生人开场。\n' : ''
+      const recentMemoText = memoryPromptOn ? opts.speakerMemoriesMap?.get(c.id) : undefined
       return `【发言人${i + 1}: ${c.name}】
 逻辑:
 - 你是${c.name}，现在在微信群"${opts.groupName}"里。
-- 你和用户的关系: ${base}${c.relationshipDynamic ? `（${c.relationshipDynamic}）` : ''}。
+${relationshipPromptOn ? `- 你和用户的关系: ${base}${c.relationshipDynamic ? `（${c.relationshipDynamic}）` : ''}。\n` : ''}
 - 当前状态: ${scheduleText || '没有特别安排'}。
-- 对用户的了解: ${c.memoryFacts || '还没有具体聊天记忆，但不是陌生人'}。
-- 相处习惯: ${c.memoryStyle || `语气要符合${base}关系，不要生疏客气`}。
- ${sharedHistoryText}${plansText ? `- 和用户的约定: ${plansText}。\n` : ''}${recentMemoText ? `- 最近记忆碎片:\n${recentMemoText}\n` : ''}${c.selfIterationPrompt ? `- 关系协商记录:\n${c.selfIterationPrompt}\n` : ''}
+${memoryPromptOn ? `- 对用户的了解: ${c.memoryFacts || '暂无具体聊天记忆'}。\n- 相处习惯: ${c.memoryStyle || '暂无'}。\n${sharedHistoryText}${plansText ? `- 和用户的约定: ${plansText}。\n` : ''}${recentMemoText ? `- 最近记忆碎片:\n${recentMemoText}\n` : ''}` : ''}${selfIterationPromptOn && c.selfIterationPrompt ? `- 关系协商记录:\n${c.selfIterationPrompt}\n` : ''}
 感觉:
-- 人设必须严格遵守: ${c.systemPrompt || '自由发挥成一个普通朋友'}。${isModuleEnabled('career') && c.occupation ? `职业：${c.occupation}，月薪${c.monthlySalary ?? 0}。` : ''}${c.personaConstraints ? `\n- 用户补充说明（不可违背）: ${c.personaConstraints}` : ''}${c.personaProfile ? `\n- 人设硬约束:\n${formatPersonaProfile(c.personaProfile)}` : ''}
-${c.mbti ? `- MBTI: ${c.mbti}。` : ''}${personalityTraitLine(c.personalityTrait, c.warmth ?? 0)}${customPersonalityTraitsLine(c.customPersonalityTraits, c.warmth ?? 0)}
+- 人设必须严格遵守: ${c.systemPrompt || '自由发挥成一个普通朋友'}。${isModuleEnabled('career') && promptModuleEnabled(promptSettings, 'career') && c.occupation ? `职业：${c.occupation}，月薪${c.monthlySalary ?? 0}。` : ''}${c.personaConstraints ? `\n- 用户补充说明（不可违背）: ${c.personaConstraints}` : ''}${c.personaProfile ? `\n- 人设硬约束:\n${formatPersonaProfile(c.personaProfile)}` : ''}
+${personalityPromptOn ? `${c.mbti ? `- MBTI: ${c.mbti}。` : ''}${personalityTraitLine(c.personalityTrait, c.warmth ?? 0)}${customPersonalityTraitsLine(c.customPersonalityTraits, c.warmth ?? 0)}` : ''}
 ${samplesText ? `- 说话样例:\n${samplesText}` : ''}`
     })
     .join('\n\n')
@@ -255,151 +154,42 @@ ${samplesText ? `- 说话样例:\n${samplesText}` : ''}`
     opts.stickerNames.length > 0 ? `本地表情（名称必须完全一致）:\n${opts.stickerNames.map((n) => `- ${n}`).join('\n')}` : '',
     opts.remoteStickerSearchEnabled ? '远程表情搜索已启用：也可以使用简短、具体的情绪/动作搜索词，优先用英文。' : '',
   ].filter(Boolean).join('\n') || '（当前没有可用表情包）'
-  const stickerRule = opts.remoteStickerSearchEnabled
-    ? '- 如果要发表情，消息内容写成[sticker:搜索词]。可以使用上面的本地表情准确名称，也可以给出简短具体的远程搜索词。【表情使用硬偏好】日常闲聊、玩笑、吐槽、惊讶、开心、疲惫或其他明显情绪反应场景，原则上必须由最合适的一位角色自然插入1个表情；只有严肃安慰、危机、争执、敏感话题、纯信息问答，或最近几轮已经连续发过表情时才可以不发。因此总体应是大多数常规轮次会发，但不是每一轮固定发送。'
-    : opts.stickerNames.length > 0
-      ? '- 如果要发表情，消息内容写成[sticker:表情名]，表情名必须来自下面列表。'
-      : '- 当前没有可用表情包，不要输出[sticker:...]标记。'
-  const imageRule = opts.imageGenerationEnabled
-    ? '- 只有用户明确要求画图/发图/看图，或某位角色在当前语境中有明确具体的视觉分享动机且图片确实比纯文字合适时，才把消息内容写成[image:完整自包含的英文生图提示词:配文]；提示词要包含主体、场景、构图、氛围和风格。普通寒暄、情绪回应或为了让群聊丰富都不能擅自生图。'
-    : opts.imageSearchEnabled
-      ? '- 如果真的适合发送一张真实照片，消息内容写成[image:简洁具体的英文 Pexels 搜图词:配文]。'
-      : '- 当前没有可用图片服务，不要输出[image:...]标记。'
   const targetedContext = opts.targetedContextText
     ? `\n【本轮定向上下文】\n${opts.targetedContextText}\n如果用户@某人，那个人必须优先回应；如果用户回复某条消息，先回应被回复内容再自然延展。`
     : ''
   const recentEvents = opts.recentEventsText ? `\n【最近发生的事】\n${opts.recentEventsText}` : ''
-  const aiRelationships = opts.aiRelationshipText ? `\n${opts.aiRelationshipText}` : ''
-  const worldview = opts.worldviewText ? `\n【世界设定】\n${opts.worldviewText}` : ''
-  const knowledge = opts.knowledgeDigestText ? `\n【可参考资讯】\n${opts.knowledgeDigestText}` : ''
-  const selfIteration = opts.selfIterationGlobalText ? `\n【用户边界与偏好 - 全局】\n${opts.selfIterationGlobalText}` : ''
-  const groupMemory = opts.groupMemoryText?.trim() ? `\n【群聊记忆】\n${opts.groupMemoryText.trim()}` : ''
+  const aiRelationships = relationshipPromptOn && opts.aiRelationshipText ? `\n${opts.aiRelationshipText}` : ''
+  const worldview = opts.worldviewText ? `\n${getPromptTemplate(promptSettings, 'worldview', 'groupRuntime', { worldbookEntries: opts.worldviewText }) ?? ''}` : ''
+  const stylePrompt = getPromptTemplate(promptSettings, 'chat', 'style') ?? ''
+  const knowledge = promptModuleEnabled(promptSettings, 'knowledgeBase') && opts.knowledgeDigestText ? `\n【可参考资讯】\n${opts.knowledgeDigestText}` : ''
+  const selfIteration = selfIterationPromptOn && opts.selfIterationGlobalText ? `\n【用户边界与偏好 - 全局】\n${opts.selfIterationGlobalText}` : ''
+  const groupMemory = memoryPromptOn && opts.groupMemoryText?.trim() ? `\n【群聊记忆】\n${opts.groupMemoryText.trim()}` : ''
   const groupVibe = opts.groupVibeText?.trim() ? `\n【群聊氛围】\n${opts.groupVibeText.trim()}` : ''
-  const chatterRule = opts.allowAiChatter === false
-    ? '- 本群设置为“围绕用户”：AI只能回应用户本轮消息、用户@/回复对象或用户相关话题，不要发展AI之间的旁支闲聊。\n'
-    : opts.speakers.length >= 2
-      ? '- 本群允许AI互相聊起来：当其他成员的话提供自然接点时，可以接话、回应、吐槽、附和、反驳或点名互动；不要为了证明是群聊而强行互聊。\n'
-      : '- 本轮只有一位AI发言人：不要求AI之间互聊，只需要自然回应用户或当前群聊上下文。\n'
-  const energyRule =
-    opts.energyLevel === 'cold'
-      ? '- 群聊热闹程度=冷淡：每个发言人通常只发1句话，整体克制。\n'
-      : opts.energyLevel === 'lively'
-        ? '- 群聊热闹程度=热闹：整轮总共6到12条消息，允许同一人多次插入；不要为了凑条数灌水。\n'
-        : '- 群聊热闹程度=普通：整轮总共3到7条消息，节奏自然。\n'
-  const formatContract = `硬格式契约:
-- 最终只输出群聊草稿行，不输出分析、计划、标题、编号、JSON、Markdown。
-- 第一行第一个字符必须是 <，最后一行必须也是一条完整草稿。
-- 每一行必须严格匹配: <人名>（想法）[心情]“消息内容”
-- 括号必须使用中文全角圆括号（），心情必须使用半角方括号[]，消息必须使用中文弯引号“”。
-- 每一行都必须同时有非空“想法”和非空[心情]；想法不要写进消息内容，心情5字以内。
-- 消息内容里不能残留人名冒号、<人名>、（想法）、[心情]、外层引号。`
-  const moodEmojiContract = `心情规则：每条 [心情] 只能填一个 emoji，且只能从 😀 😊 🥰 😌 😶 😴 🤔 😳 🥺 😟 😠 😤 😞 😭 😈 中选择；禁止文字心情。`
-  const interactionContract = `发言编排契约:
-- 先在心里决定“谁说几句、谁接谁的话”，但不要把计划输出。
-- 本轮发言人只能来自: ${speakerNames}。
-  - 被@或被回复的人先处理；其他人不要机械排队答题，也不必每个被选中的人都说话。
-- ${opts.allowAiChatter === false ? 'AI互聊关闭：所有发言都围绕用户、用户@/回复对象或用户相关话题。' : opts.speakers.length >= 2 ? 'AI互聊开启：至少安排一次AI之间的接话/回应/吐槽/附和/反驳/点名，不能只是每个人各自回答用户。' : '本轮只有一位AI发言人：不要求AI之间互动。'}
-- ${
-    opts.energyLevel === 'cold'
-      ? '冷淡：整轮总共1到3句。'
-      : opts.energyLevel === 'lively'
-        ? '热闹：整轮总共6到12句，可穿插多次。'
-        : '普通：整轮总共3到7句。'
-  }
-- 可以同一人多次插入，不需要按发言人顺序轮流。`
-  const topicContract = `话题推进契约:
-- 不要把同一个特殊词、梗、比喻、称号或外号当成本轮唯一抓手反复使用，例如某个词已经在最近聊天里出现过多次，本轮最多再轻轻提一次，最好换成普通表达或直接跳过。
-- 如果同一个梗已经被接了两轮以上，除非用户明确继续问这个梗，否则必须自然换到相邻话题：当下要做什么、对方刚才真正表达的意思、一个生活化反应、一个新的轻问题。
-- 不要让多名AI围绕同一个词轮流解释、吐槽、复述；一人接梗后，下一人应补充新信息、转弯或收束。
-- 用户说“普通点/别演/别紧张/正常说话/换个话题”时，立刻降温：少提旧梗，短句回应，主动回到普通聊天。`
-  const personaLogicContract = `人格逻辑契约：每位发言人的人设、用户补充约束、结构化人设、MBTI 和特色人格都是与身份、记忆同等级的逻辑前提，不是可选修辞。事实不冲突时，必须选择最符合该角色特殊人格的反应、动机、语气和主动性；不得为了群聊顺滑把不同角色写成同一种普通口吻，也不得编造事实来硬演人设。`
-  const adherenceContract = `关系与特质验收：首轮或短历史中，若角色是恋人/暧昧对象，至少用称呼、亲密语气或共同过往细节体现熟悉度；若角色有核心性格特质，至少用一个可观察的措辞或反应体现，不得只写在想法里。共同过往只能由拥有它的角色使用，不能补造未提供的具体事件。`
+  const editableGroupPrompt = getPromptTemplate(promptSettings, 'chat', 'groupMain', {
+    groupName: opts.groupName,
+    roster: rosterText,
+    speakers: speakerNames,
+    aiChatterMode: opts.allowAiChatter === false ? '关闭，只围绕用户及用户相关话题' : '开启，存在自然接点时允许成员互相接话',
+    energyLevel: opts.energyLevel ?? 'normal',
+    stylePrompt,
+    worldbookPrompt: worldview,
+    currentTime: opts.currentTimeText,
+    userProfile: opts.userProfileText,
+    additionalContext: [groupMemory, groupVibe, knowledge, targetedContext, recentEvents, aiRelationships, selfIteration].filter(Boolean).join('\n'),
+    speakerProfiles: speakerBlocks,
+    stickerCapabilities: opts.remoteStickerSearchEnabled ? `支持远程搜索；本地可用项：${stickersText}` : stickersText,
+    imageCapabilities: opts.imageGenerationEnabled ? '支持按完整英文提示词生图' : opts.imageSearchEnabled ? '支持按英文关键词搜索真实图片' : '未启用',
+  }) ?? ''
+  const finalPrompt = `${editableGroupPrompt}
 
-  return `【场景】
-这是一个微信群，群名是"${opts.groupName}"。用户也是群成员之一，不是私聊里的"对方"。
-群成员:
-${rosterText}
+固定输出协议（不可编辑）：
+- 只输出群聊纯文本草稿，不输出JSON、分析、标题或Markdown。
+- 每一行严格使用：<人名>（想法）[emoji心情]“消息内容”
+- 人名只能来自本轮发言人；想法和心情不得为空；心情只能使用一个允许的emoji。
+- 表情写成[sticker:名称或搜索词]；图片写成[image:英文提示词或搜索词:配文]；陌生知识查询写成[knowledge:关键词]。
+- 消息内容不得残留人名冒号、结构标记或外层格式。`
 
-本轮只能由这些人发言: ${speakerNames}。
-你要模拟一段真实群聊，而不是轮流答题。
-
-【必须先满足的硬约束】
-${formatContract}
-${moodEmojiContract}
-
-${interactionContract}
-
-${topicContract}
-
-${personaLogicContract}
-
-${adherenceContract}
-
-【感觉 - 最低优先级】
-只在逻辑成立后优化文采、节奏和聊天感。感觉要求不能覆盖身份、记忆、@/回复、输出格式。
-${opts.stylePrompt}
-- 像微信群里的自然打字：短句、插话、接梗、轻微跑题都可以。
-- 不要每句都解释完整，不要每条都追问，不要所有人都同一种语气。
-- 角色说话风格必须来自各自人设。
-
-${worldview}
-【当前上下文】
-时间: ${opts.currentTimeText}
-用户资料: ${opts.userProfileText}${groupMemory}${groupVibe}${knowledge}${targetedContext}${recentEvents}${aiRelationships}${selfIteration}
-
-${speakerBlocks}
-
-【逻辑 - 第一优先级】
-- 先判断身份、关系、记忆、时间、上下文和@/回复对象，再决定每个人该不该说、该说什么。
-- 人设、人格特质、边界、习惯和 MBTI 同样参与上述逻辑判断；存在多种事实成立的说法时，必须选择最符合该角色的那一种，不能用泛化口吻替代。
-- 每个角色只能说自己知道或自己能感受到的事，不能替别人提私人记忆/约定。
-- 被@的人必须优先回应；被回复的人或被回复消息的说话者必须优先处理。
-${chatterRule}
-  - 每个发言人可以随时插入多次发言，也可以本轮沉默，不需要按发言人顺序轮流说。允许“1说一句、2插一句、1再接、3再说”。
-${energyRule}
-- 不要把私聊口吻带进群聊，不要称用户为"对方"。
-- 不要编造课堂、线下见面、过去承诺等没有依据的具体事实。
-- 不要复读最近已经反复出现的特殊词或梗；如果上文一直围绕同一个词打转，本轮要主动收束或换话题。
-
-【输出格式】
-不要输出JSON。只输出群聊纯文本草稿，每一行必须严格是:
-<人名>（想法）[心情]“消息内容”
-
-示例:
-<林夏>（他刚才明显是在逗我，我想顺着怼一句）[好笑]“你这话说得也太像临时抱佛脚了吧。”
-<周屿>（我不想太热闹，但这个点我可以补一句）[平静]“不过真要赶的话，先把最容易错的地方过一遍。”
-
-规则:
-- 人名必须来自本轮发言人: ${speakerNames}。
-- 每一行都必须有（想法）和[心情]，不能省略。
-- 第一行必须直接从 <人名> 开始，不要写“好的”“下面是”“草稿:”等任何前缀。
-- 想法是角色内心动机，短一点，不能出现在消息内容里。
-- 心情5字以内，不能空。
-- 消息内容只写群里真正发出的文字，不要带人名冒号、括号、方括号。
-${stickerRule}
-${imageRule}
-- text、sticker、image可以按真实群聊节奏任意穿插，例如文字→图片→文字，或图片→文字→表情→文字；解析器会严格保留输出顺序，不要把媒体统一挪到开头或结尾。
-- 不懂的网络热梗/番剧/游戏名词，可以自然表现为不懂；后续转换器会提取knowledgeQueries。
-- 确实遇到陌生词时先自然追问，并在消息末尾写[knowledge:关键词]；不要假装懂，也不要对普通词滥用。
-
-【表情包】
-${stickersText}
-
-【最终强制检查 - 最高优先级】
-输出前逐条自查，任何一条不满足都必须重写草稿:
-1. ${formatContract.replace(/\n/g, '\n   ')}
-2. ${interactionContract.replace(/\n/g, '\n   ')}
-3. ${topicContract.replace(/\n/g, '\n   ')}
-4. ${opts.allowAiChatter === false ? 'AI互聊关闭：所有发言都围绕用户或用户相关话题，不发展AI之间的旁支闲聊。' : opts.speakers.length >= 2 ? 'AI互聊开启：有自然接点时可以互相接话，不要强行制造互动。' : '本轮只有一位AI发言人，不要求AI之间互动。'}
-5. ${
-    opts.energyLevel === 'cold'
-      ? '冷淡：整轮总共1到3句。'
-      : opts.energyLevel === 'lively'
-        ? '热闹：整轮总共6到12句，并允许同一人多次插入。'
-        : '普通：整轮总共3到7句。'
-  }
-6. 发言顺序不必按发言人编号轮流，可以 1 -> 2 -> 1 -> 3 这样自然插话。
-7. 只输出群聊纯文本草稿，不输出JSON。`
+  return finalPrompt
 }
 
 /**

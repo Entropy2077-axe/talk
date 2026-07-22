@@ -19,7 +19,12 @@ const SENTIMENT_BY_LABEL: Record<string, RelationSentiment> = {
 }
 
 export function relationSentiment(label: ContactRelationLabel): RelationSentiment {
-  return SENTIMENT_BY_LABEL[label] ?? 'neutral'
+  if (SENTIMENT_BY_LABEL[label]) return SENTIMENT_BY_LABEL[label]
+  // Custom labels should still participate in moments instead of becoming a
+  // dead string that the social engine cannot interpret.
+  if (/[恋爱喜欢亲密家人朋友盟友同事暧昧]/.test(label)) return 'good'
+  if (/[敌仇恨讨厌厌恶绝交死对头冲突]/.test(label)) return 'bad'
+  return 'neutral'
 }
 
 /** Create or replace one symmetric social contract. Both contacts always receive the same label. */
@@ -36,6 +41,16 @@ export async function setPairedContactRelation(fromContactId: string, toContactI
     { id: uuid(), pairId, fromContactId, toContactId, label, createdAt: now },
     { id: uuid(), pairId, fromContactId: toContactId, toContactId: fromContactId, label, createdAt: now },
   ])
+}
+
+/** Remove both directions of one user-authored AI-to-AI relationship. */
+export async function removePairedContactRelation(fromContactId: string, toContactId: string): Promise<void> {
+  if (fromContactId === toContactId) return
+  const existing = await db.contactRelations.filter((link) =>
+    (link.fromContactId === fromContactId && link.toContactId === toContactId) ||
+    (link.fromContactId === toContactId && link.toContactId === fromContactId),
+  ).toArray()
+  if (existing.length) await db.contactRelations.bulkDelete(existing.map((link) => link.id))
 }
 
 /** A single canonical record per pair for UI and scene selection. */

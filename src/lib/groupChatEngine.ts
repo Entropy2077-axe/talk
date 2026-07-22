@@ -29,6 +29,8 @@ import { recentSharedOriginalContext } from './sharedRecentContext'
 import { createGroupPlan, planCardMessage } from './groupPlans'
 import { useChatUiStore } from '../store/useChatUiStore'
 import { retrieveWorldbookContext } from './worldbook'
+import { promptModuleEnabled } from './promptModules'
+import { realisticReplyDelayMs } from './replyTiming'
 import type { AppSettings, Contact, Group, GroupAiBubble, Message, Sticker } from '../types'
 
 /** Load recent structured memories for each speaker in parallel. */
@@ -63,6 +65,26 @@ function clearPending(conversationId: string) {
   timersByConversation.get(conversationId)?.forEach(clearTimeout)
   timersByConversation.set(conversationId, [])
   abortByConversation.get(conversationId)?.abort()
+}
+
+function scheduleGroupAiTurn(
+  conversationId: string,
+  group: Group,
+  members: Contact[],
+  settings: AppSettings,
+  stickers: Sticker[],
+  streamId: string,
+): void {
+  const delay = realisticReplyDelayMs(isModuleEnabled('realisticReplies'))
+  if (delay === 0) {
+    void runGroupAiTurn(conversationId, group, members, settings, stickers, streamId)
+    return
+  }
+  const timer = setTimeout(() => {
+    if (streamByConversation.get(conversationId) !== streamId) return
+    void runGroupAiTurn(conversationId, group, members, settings, stickers, streamId)
+  }, delay)
+  timersByConversation.set(conversationId, [...(timersByConversation.get(conversationId) ?? []), timer])
 }
 
 function parseGroupTurnDebugPayload(
@@ -281,7 +303,7 @@ export async function sendGroupMessage(
     })
   }
 
-  runGroupAiTurn(conversationId, group, members, settings, stickers, streamId)
+  scheduleGroupAiTurn(conversationId, group, members, settings, stickers, streamId)
 }
 
 /** Trigger a group reply after a non-text user action has already been stored. */
@@ -300,7 +322,7 @@ export async function triggerGroupAiTurn(
   streamByConversation.set(conversationId, streamId)
   clearPending(conversationId)
   useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: '群成员' })
-  await runGroupAiTurn(conversationId, group, members, settings, stickers, streamId)
+  scheduleGroupAiTurn(conversationId, group, members, settings, stickers, streamId)
 }
 
 export async function regenerateGroupAiTurn(
@@ -330,7 +352,7 @@ export async function regenerateGroupAiTurn(
   await db.aiTurns.delete(aiTurnId)
   await db.conversations.update(conversationId, { updatedAt: Date.now() })
 
-  await runGroupAiTurn(conversationId, group, members, settings, stickers, streamId)
+  scheduleGroupAiTurn(conversationId, group, members, settings, stickers, streamId)
 }
 
 async function runGroupAiTurn(
@@ -361,20 +383,20 @@ async function runGroupAiTurn(
     if (replied?.role === 'assistant' && replied.speakerContactId) preferredSpeakerIds.add(replied.speakerContactId)
     const speakers = await pickSociallyConnectedSpeakers(members, Array.from(preferredSpeakerIds), group.speakerLimit ?? 3)
     console.log(`[group] 本轮发言人: ${speakers.map((s) => s.name).join('、')}`)
-    const knowledgeEntries = await db.knowledgeEntries.toArray()
+    const knowledgeEntries = isModuleEnabled('knowledgeBase') && promptModuleEnabled(settings, 'knowledgeBase') ? await db.knowledgeEntries.toArray() : []
     const targetContext = targetedContextText(latestUserMessage, contactById, messageById, settings.userNickname)
     const recentEventsText = await recentSocialEventsText(members.map((m) => m.id), 4)
-    const sharedOriginalContext = await recentSharedOriginalContext(members.map((m) => m.id), settings.userNickname, {
+    const sharedOriginalContext = promptModuleEnabled(settings, 'memory') ? await recentSharedOriginalContext(members.map((m) => m.id), settings.userNickname, {
       maxMessages: 60,
       maxChars: 10_000,
       // This group already contributes its recent raw history below. Excluding
       // it here avoids paying twice for the same messages.
       excludeConversationId: conversationId,
-    })
-    const worldbookText = isModuleEnabled('worldview') ? await retrieveWorldbookContext([group.name, group.vibe, targetContext, history.slice(-10).map((m) => m.content).join(' '), members.map((m) => `${m.name} ${m.systemPrompt}`).join(' ')].filter(Boolean).join('\n')) : ''
+    }) : ''
+    const worldbookText = isModuleEnabled('worldview') && promptModuleEnabled(settings, 'worldview') ? await retrieveWorldbookContext([group.name, group.vibe, targetContext, history.slice(-10).map((m) => m.content).join(' '), members.map((m) => `${m.name} ${m.systemPrompt}`).join(' ')].filter(Boolean).join('\n')) : ''
 
-    const speakerMemoriesMap = await loadSpeakerMemories(speakers)
-    const aiRelationshipText = await aiRelationshipPrompt(members)
+    const speakerMemoriesMap = promptModuleEnabled(settings, 'memory') ? await loadSpeakerMemories(speakers) : new Map<string, string>()
+    const aiRelationshipText = promptModuleEnabled(settings, 'relationship') ? await aiRelationshipPrompt(members) : ''
     const remoteStickerSearchEnabled = isStickerProviderReady(settings)
     const imageGenerationEnabled = isImageProviderReady(settings)
     const mediaPromptOptions = { remoteStickerSearchEnabled, imageGenerationEnabled }
@@ -396,11 +418,13 @@ async function runGroupAiTurn(
       targetedContextText: targetContext,
       recentEventsText: recentEventsText || undefined,
       worldviewText: worldbookText || undefined,
-      knowledgeDigestText: isModuleEnabled('knowledgeBase') ? (knowledgeDigestText(knowledgeEntries) || undefined) : undefined,
-      selfIterationGlobalText: isModuleEnabled('selfIteration') ? settings.selfIterationGlobalPrompt : undefined,
+      knowledgeDigestText: isModuleEnabled('knowledgeBase') && promptModuleEnabled(settings, 'knowledgeBase') ? (knowledgeDigestText(knowledgeEntries) || undefined) : undefined,
+      selfIterationGlobalText: isModuleEnabled('selfIteration') && promptModuleEnabled(settings, 'selfIteration') ? settings.selfIterationGlobalPrompt : undefined,
       speakerMemoriesMap,
       aiRelationshipText,
+      promptModules: settings.promptModules,
     })
+    if (!systemPrompt.trim()) throw new Error('对话核心提示词模块已屏蔽')
 
     const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
     const controller = new AbortController()
@@ -475,10 +499,10 @@ async function runGroupAiTurn(
       latestUserText: latestUserMessage?.content ?? '',
       draftText: rawText,
       personaFacts: [
-        ...speakers.map((speaker) => `${displayName(speaker)}：${speaker.systemPrompt.slice(0, 700)}${speaker.personaConstraints ? `；硬约束=${speaker.personaConstraints.slice(0, 350)}` : ''}${speaker.personalityTrait ? `；人格特质=${speaker.personalityTrait}` : ''}${speaker.sharedHistory ? `；共同过往锚点=${speaker.sharedHistory.slice(0, 500)}` : ''}`),
+        ...speakers.map((speaker) => `${displayName(speaker)}：${speaker.systemPrompt.slice(0, 700)}${speaker.personaConstraints ? `；硬约束=${speaker.personaConstraints.slice(0, 350)}` : ''}${promptModuleEnabled(settings, 'personalityTraits') && speaker.personalityTrait ? `；人格特质=${speaker.personalityTrait}` : ''}${promptModuleEnabled(settings, 'memory') && speaker.sharedHistory ? `；共同过往锚点=${speaker.sharedHistory.slice(0, 500)}` : ''}`),
         `群聊设置：热闹程度=${group.energyLevel ?? 'normal'}；AI互聊=${group.allowAiChatter === false ? '关闭' : '开启'}`,
         targetContext ? `本轮定向上下文=${targetContext.slice(0, 600)}` : '',
-        worldbookText ? `命中世界书=${worldbookText.slice(0, 800)}` : '',
+        promptModuleEnabled(settings, 'worldview') && worldbookText ? `命中世界书=${worldbookText.slice(0, 800)}` : '',
       ].filter(Boolean).join('\n'),
       recentContext: recentHistory
         .slice(-4)

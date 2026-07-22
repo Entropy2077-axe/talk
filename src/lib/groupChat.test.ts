@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Contact } from '../types'
-import { buildGroupRawChatPrompt, buildGroupSystemPrompt, parseGroupRawDraft, serializeGroupTurn } from './groupChat'
+import { buildGroupRawChatPrompt, parseGroupRawDraft, serializeGroupTurn } from './groupChat'
+import { createDefaultPromptModules } from './promptModules'
 
 const speakers = [
   { id: 'a', name: '林夏' },
@@ -99,13 +100,33 @@ describe('group chat persona prompt anchors', () => {
       currentTimeText: '周六上午',
       userProfileText: '昵称：我',
     }
-    const systemPrompt = buildGroupSystemPrompt(common)
     const rawPrompt = buildGroupRawChatPrompt(common)
-    for (const prompt of [systemPrompt, rawPrompt]) {
-      expect(prompt).toContain('大学社团认识')
-      expect(prompt).toContain('首轮')
-      expect(prompt).toContain('恋人')
-      expect(prompt).toContain('雌小鬼')
-    }
+    expect(rawPrompt).toContain('大学社团认识')
+    expect(rawPrompt).toContain('首轮')
+    expect(rawPrompt).toContain('恋人')
+    expect(rawPrompt).toContain('雌小鬼')
+  })
+
+  it('omits blocked group injection modules and their dynamic payloads', () => {
+    const promptModules = createDefaultPromptModules()
+    promptModules.memory.enabled = false
+    promptModules.relationship.enabled = false
+    promptModules.personalityTraits.enabled = false
+    promptModules.worldview.enabled = false
+    const contact = {
+      id: 'blocked', name: '测试角色', systemPrompt: '核心人设', relationshipBase: '恋人', relationshipDynamic: 'RELATION_PAYLOAD',
+      personalityTrait: 'TRAIT_PAYLOAD', sharedHistory: 'MEMORY_PAYLOAD', memoryFacts: 'MEMORY_FACTS',
+    } as Contact
+    const prompt = buildGroupRawChatPrompt({
+      stylePrompt: '短句', groupName: '测试群', allMembers: [contact], speakers: [contact], stickerNames: [],
+      currentTimeText: '现在', userProfileText: '用户', worldviewText: 'WORLDBOOK_PAYLOAD', promptModules,
+    })
+
+    expect(prompt).toContain('核心人设')
+    expect(prompt).not.toContain('RELATION_PAYLOAD')
+    expect(prompt).not.toContain('TRAIT_PAYLOAD')
+    expect(prompt).not.toContain('MEMORY_PAYLOAD')
+    expect(prompt).not.toContain('MEMORY_FACTS')
+    expect(prompt).not.toContain('WORLDBOOK_PAYLOAD')
   })
 })

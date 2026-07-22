@@ -20,13 +20,15 @@ import { personalityIntimacyStage, warmthLabel, relationshipLine } from '../lib/
 import { buildUserProfileText } from '../lib/chatEngine'
 import { useSettingsStore } from '../store/useSettingsStore'
 import type { ContactMemoryScope, ContactRelationLabel } from '../types'
-import { PERSONALITY_TRAIT_OPTIONS } from '../types'
+import { CONTACT_RELATION_LABELS, PERSONALITY_TRAIT_OPTIONS } from '../types'
 import { activeIntentPrompt, activeIntents, clearIntentQueue } from '../lib/intent'
-import { uniqueRelationPairs } from '../lib/contactRelations'
+import { removePairedContactRelation, setPairedContactRelation, uniqueRelationPairs } from '../lib/contactRelations'
 import { chatCompletion } from '../lib/deepseek'
 import { buildOccupationPrompt, parseOccupation, employmentPatch, OCCUPATION_OPTIONS } from '../lib/career'
 import { formatCurrency } from '../lib/wallet'
 import { setWalletBalance } from '../lib/finance'
+import { createDefaultPromptModules, PROMPT_MODULE_DEFINITIONS, unknownPromptPlaceholders } from '../lib/promptModules'
+import type { PromptModuleId } from '../types'
 
 function LatestAiTurnJson({ contactId }: { contactId: string }) {
   const latestTurn = useLiveQuery(async () => {
@@ -70,9 +72,16 @@ export function ContactCardPage() {
   const moodEnabled = true
   const careerEnabled = useModuleEnabled('career')
   const lifeSimulationEnabled = useModuleEnabled('lifeSimulation')
+  const promptModuleEditorEnabled = useModuleEnabled('promptModuleEditor')
   const [assigningCareer, setAssigningCareer] = useState(false)
+  const [editingPromptModule, setEditingPromptModule] = useState<PromptModuleId | null>(null)
+  const [promptDrafts, setPromptDrafts] = useState<Record<string, string>>({})
+  const [promptValidationError, setPromptValidationError] = useState('')
+  const [editingRelations, setEditingRelations] = useState(false)
+  const [relationDrafts, setRelationDrafts] = useState<Array<{ targetContactId: string; label: string }>>([])
 
   const contact = useLiveQuery(() => (contactId ? db.contacts.get(contactId) : undefined), [contactId])
+  const allContacts = useLiveQuery(() => db.contacts.toArray(), []) ?? []
   const conversation = useLiveQuery(
     () => (contactId ? db.conversations.where('contactId').equals(contactId).first() : undefined),
     [contactId],
@@ -103,9 +112,9 @@ export function ContactCardPage() {
         .map((link) => {
           const otherId = link.fromContactId === contactId ? link.toContactId : link.fromContactId
           const other = contactById.get(otherId)
-          return other ? { id: link.id, name: displayName(other), label: link.label } : null
+          return other ? { id: link.id, targetContactId: otherId, name: displayName(other), label: link.label } : null
         })
-        .filter((item): item is { id: string; name: string; label: ContactRelationLabel } => !!item)
+        .filter((item): item is { id: string; targetContactId: string; name: string; label: ContactRelationLabel } => !!item)
     },
     [contactId],
   ) ?? []
@@ -123,7 +132,9 @@ export function ContactCardPage() {
     if (!value) return
     setAssigningCareer(true)
     try {
-      const raw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, messages: [{ role: 'system', content: buildOccupationPrompt(value, contact.systemPrompt) }, { role: 'user', content: '生成职业资料' }], jsonMode: true, purpose: 'persona' })
+      const careerPrompt = buildOccupationPrompt(value, contact.systemPrompt, settings)
+      if (!careerPrompt.trim()) throw new Error('职业提示词模块已屏蔽')
+      const raw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, messages: [{ role: 'system', content: careerPrompt }, { role: 'user', content: '生成职业资料' }], jsonMode: true, purpose: 'persona' })
       const parsed = parseOccupation(raw)
       if (!parsed) throw new Error('职业资料生成失败')
       await db.contacts.update(contact.id, { ...employmentPatch(value, parsed.monthlySalary), ...(parsed.schedule ? { schedule: parsed.schedule } : {}) })
@@ -161,6 +172,23 @@ export function ContactCardPage() {
     navigate('/contacts', { replace: true })
   }
 
+  function openRelationEditor() {
+    setRelationDrafts(relationLinks.map((link) => ({ targetContactId: link.targetContactId, label: link.label })))
+    setEditingRelations(true)
+  }
+
+  async function saveRelationEditor() {
+    if (!contactId) return
+    const drafts = relationDrafts
+      .map((draft) => ({ targetContactId: draft.targetContactId, label: draft.label.trim() }))
+      .filter((draft, index, all) => draft.targetContactId && draft.label && all.findIndex((item) => item.targetContactId === draft.targetContactId) === index)
+    const oldLinks = await db.contactRelations.filter((link) => link.fromContactId === contactId || link.toContactId === contactId).toArray()
+    const oldTargetIds = new Set(oldLinks.map((link) => link.fromContactId === contactId ? link.toContactId : link.fromContactId))
+    for (const targetId of oldTargetIds) await removePairedContactRelation(contactId, targetId)
+    for (const draft of drafts) await setPairedContactRelation(contactId, draft.targetContactId, draft.label as ContactRelationLabel)
+    setEditingRelations(false)
+  }
+
   async function saveRemark() {
     await db.contacts.update(contactId!, { remark: remarkDraft.trim() })
     setEditingRemark(false)
@@ -193,22 +221,25 @@ export function ContactCardPage() {
         personaConstraints: contact.personaConstraints,
         personaProfile: contact.personaProfile,
         stylePrompt: settings.globalSystemPrompt,
+        promptModules: settings.promptModules,
         selfIterationGlobalText: isModuleEnabled('selfIteration') ? settings.selfIterationGlobalPrompt : undefined,
         selfIterationContactText: isModuleEnabled('selfIteration') ? contact.selfIterationPrompt : undefined,
         personalityTrait: personalityEnabled ? contact.personalityTrait : undefined,
         personalityWarmth: relEnabled ? (contact.warmth ?? 0) : undefined,
         worldviewText: isModuleEnabled('worldview') ? '【运行时按当前对话检索世界书条目；此预览不固定命中结果】' : undefined,
         latestUserText: '【预览】这里会放入用户本轮最新消息',
-        recentContext: [
-          `【你和对方的关系】${relationshipLine(
+        recentContext: '',
+        relationshipContext: `【你和对方的关系】${relationshipLine(
             relEnabled ? (contact.relationshipBase || '朋友') : '朋友',
             relEnabled ? (contact.relationshipDynamic || '') : '',
             relEnabled ? (contact.warmth ?? 0) : 0,
           )}`,
+        memoryContext: [
           `【你对TA的了解】${contact.memoryFacts || '（刚开始聊）'}`,
           `【相处习惯】${contact.memoryStyle || '（还没有形成习惯）'}`,
+        ].join('\n\n'),
+        situationContext:
           `【当前情境】现在: ${describeCurrentTime(now)}。对方: ${buildUserProfileText(settings)}。${contact.mood?.text ? `你的心情: ${contact.mood.text}。` : ''}【日程】${describeCurrentSchedule(contact, now) ? `\n当前: ${describeCurrentSchedule(contact, now)}` : '\n当前: 暂无安排'}${describeUpcomingScheduleText(contact, now) ? `\n接下来:\n${describeUpcomingScheduleText(contact, now)}` : '\n接下来: 暂无安排'}${activeUpcomingPlansText(contact, now) ? `\n约定: ${activeUpcomingPlansText(contact, now)}` : ''}${pendingEvents.length > 0 ? `\n最近: ${pendingEvents.join('；')}` : ''}`,
-        ].filter(Boolean).join('\n\n'),
         activeIntentText: activeIntentPrompt(previewActiveIntents),
         stickerNames: stickers.map((s) => s.name),
         mbti: contact.mbti || undefined,
@@ -306,6 +337,14 @@ export function ContactCardPage() {
       <section className="mt-3 bg-white px-4 py-4">
         <h3 className="mb-2 text-xs font-medium text-gray-400">最近社交动态</h3>
         {socialTimeline.length === 0 ? <p className="text-sm text-gray-400">暂时还没有公开互动。</p> : <div className="space-y-2">{socialTimeline.map((event) => <button key={event.id} type="button" onClick={() => event.groupId ? navigate(`/group/${event.groupId}`) : event.momentId ? navigate(`/moments?focus=${event.momentId}`) : event.conversationId ? navigate(`/chat/${event.conversationId}`) : undefined} className="block w-full border-l-2 border-[#07c160] pl-2 text-left"><p className="text-sm text-gray-700">{event.summary}</p><p className="mt-0.5 text-[10px] text-gray-400">{new Date(event.createdAt).toLocaleString()}</p></button>)}</div>}
+      </section>
+
+      <section className="mt-3 bg-white px-4 py-4">
+        <div className="mb-2 flex items-center justify-between">
+          <div><h3 className="text-xs font-medium text-gray-400">AI之间的关系</h3><p className="mt-1 text-[11px] text-gray-400">关系会影响朋友圈点赞、评论和群聊互动，可随时自定义。</p></div>
+          <button type="button" onClick={openRelationEditor} className="text-xs text-purple-600">编辑关系</button>
+        </div>
+        {relationLinks.length === 0 ? <p className="text-sm text-gray-400">还没有设置与其他联系人的关系</p> : <div className="space-y-1.5">{relationLinks.map((link) => <div key={link.id} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm"><span>{link.name}</span><span className="text-xs text-gray-500">{link.label}</span></div>)}</div>}
       </section>
 
       <section className="mt-3 bg-white px-4 py-4">
@@ -485,6 +524,36 @@ export function ContactCardPage() {
         <LatestAiTurnJson contactId={contactId!} />
       )}
 
+      {promptModuleEditorEnabled && <section className="mt-3 bg-white px-4 py-4">
+        <div className="mb-3">
+          <h3 className="text-sm font-medium text-gray-900">全局提示词模块</h3>
+          <p className="mt-1 text-[11px] leading-relaxed text-gray-400">这里编辑的是代码原本使用的完整提示词模板，保存后对所有相关模型调用生效。固定JSON输出协议不开放编辑。</p>
+        </div>
+        <div className="space-y-2.5">
+          {PROMPT_MODULE_DEFINITIONS.map((definition) => {
+            const config = settings.promptModules?.[definition.id] ?? createDefaultPromptModules()[definition.id]
+            return (
+              <div key={definition.id} className={`overflow-hidden rounded-xl border ${config.enabled ? 'border-gray-200 bg-white' : 'border-gray-950 bg-black text-white'}`}>
+                <div className="flex items-start gap-2.5 px-3 py-3">
+                  <span className="text-lg">{definition.icon}</span>
+                  <button className="min-w-0 flex-1 text-left" onClick={() => { setEditingPromptModule(definition.id); setPromptDrafts({ ...config.templates }); setPromptValidationError('') }}>
+                    <p className={`text-sm font-medium ${config.enabled ? 'text-gray-900' : 'text-white'}`}>{definition.name}</p>
+                    <p className={`mt-0.5 text-[10px] ${config.enabled ? 'text-gray-400' : 'text-gray-400'}`}>{definition.description}</p>
+                    <p className={`mt-2 line-clamp-3 whitespace-pre-wrap text-[11px] leading-relaxed ${config.enabled ? 'text-gray-600' : 'text-gray-500 line-through'}`}>{definition.templates.length} 份原始模板 · {config.templates[definition.templates[0]?.id] || '（空提示词）'}</p>
+                  </button>
+                  <button
+                    onClick={() => settings.setSettings({ promptModules: { ...settings.promptModules, [definition.id]: { ...config, enabled: !config.enabled } } })}
+                    className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] ${config.enabled ? 'bg-gray-100 text-gray-600' : 'bg-gray-800 text-white'}`}
+                  >
+                    {config.enabled ? '启用中' : '已屏蔽'}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </section>}
+
       {adminEnabled && (
         <section className="mt-3 bg-white px-4 py-4">
           <h3 className="mb-2 text-xs font-medium text-gray-400">提示词预览（管理员模式）</h3>
@@ -553,6 +622,61 @@ export function ContactCardPage() {
           options={[{ label: '确认删除该联系人及聊天记录', onSelect: handleDelete, danger: true }]}
         />
       )}
+      {editingRelations && (
+        <div className="absolute inset-0 z-40 flex items-end bg-black/40" onClick={() => setEditingRelations(false)}>
+          <div className="max-h-[86%] w-full overflow-y-auto rounded-t-2xl bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between"><div><h3 className="text-base font-medium text-gray-900">编辑 AI 关系</h3><p className="mt-1 text-[11px] text-gray-400">自定义关系会同步写入双方，并立即影响朋友圈互动。</p></div><button type="button" onClick={() => setEditingRelations(false)} className="text-sm text-gray-500">关闭</button></div>
+            <div className="space-y-2">
+              {relationDrafts.map((draft, index) => (
+                <div key={`${draft.targetContactId}-${index}`} className="flex items-center gap-2">
+                  <select value={draft.targetContactId} onChange={(event) => setRelationDrafts((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, targetContactId: event.target.value } : row))} className="min-w-0 flex-1 rounded-lg border border-gray-200 px-2 py-2 text-xs">
+                    <option value="">选择联系人</option>
+                    {allContacts.filter((candidate) => candidate.id !== contactId).map((candidate) => <option key={candidate.id} value={candidate.id}>{displayName(candidate)}</option>)}
+                  </select>
+                  <input value={draft.label} onChange={(event) => setRelationDrafts((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, label: event.target.value } : row))} list={`relation-labels-${index}`} placeholder="自定义关系" className="min-w-0 flex-1 rounded-lg border border-gray-200 px-2 py-2 text-xs" />
+                  <datalist id={`relation-labels-${index}`}>{CONTACT_RELATION_LABELS.map((label) => <option key={label} value={label} />)}</datalist>
+                  <button type="button" onClick={() => setRelationDrafts((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} className="shrink-0 text-xs text-red-500">删除</button>
+                </div>
+              ))}
+              <button type="button" onClick={() => { const candidate = allContacts.find((item) => item.id !== contactId && !relationDrafts.some((draft) => draft.targetContactId === item.id)); if (candidate) setRelationDrafts((rows) => [...rows, { targetContactId: candidate.id, label: CONTACT_RELATION_LABELS[0] }]) }} className="text-xs text-purple-600">+ 添加关系</button>
+            </div>
+            <button type="button" onClick={() => void saveRelationEditor()} className="mt-4 w-full rounded-xl bg-gray-900 py-2.5 text-sm text-white">保存关系</button>
+          </div>
+        </div>
+      )}
+
+      {promptModuleEditorEnabled && editingPromptModule && (() => {
+        const definition = PROMPT_MODULE_DEFINITIONS.find((item) => item.id === editingPromptModule)!
+        const current = settings.promptModules?.[editingPromptModule] ?? createDefaultPromptModules()[editingPromptModule]
+        return <div className="absolute inset-0 z-50 flex items-end bg-black/40" onClick={() => setEditingPromptModule(null)}>
+          <div className="max-h-[88%] w-full overflow-y-auto rounded-t-2xl bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]" onClick={(event) => event.stopPropagation()}>
+            <h3 className="text-base font-medium text-gray-900">{definition.icon} {definition.name}</h3>
+            <p className="mt-1 text-xs text-gray-400">这是该模块实际使用的原始模板；双花括号是运行时动态数据。</p>
+            <div className="mt-3 space-y-4">
+              {definition.templates.map((item) => (
+                <div key={item.id}>
+                  <div className="mb-1.5 flex items-center justify-between gap-2"><p className="text-xs font-medium text-gray-700">{item.name}</p><button onClick={() => setPromptDrafts((drafts) => ({ ...drafts, [item.id]: item.defaultTemplate }))} className="text-[10px] text-gray-400 underline">恢复此项</button></div>
+                  {item.placeholders.length > 0 && <p className="mb-1.5 break-words text-[10px] text-gray-400">可用占位符：{item.placeholders.map((key) => `{{${key}}}`).join('、')}</p>}
+                  <textarea value={promptDrafts[item.id] ?? ''} onChange={(event) => { setPromptDrafts((drafts) => ({ ...drafts, [item.id]: event.target.value })); setPromptValidationError('') }} rows={Math.min(14, Math.max(6, (promptDrafts[item.id]?.split('\n').length ?? 1) + 2))} className="w-full resize-y rounded-xl border border-gray-200 p-3 font-mono text-xs leading-relaxed outline-none focus:border-gray-500" />
+                </div>
+              ))}
+            </div>
+            {promptValidationError && <p className="mt-2 text-xs text-red-500">{promptValidationError}</p>}
+            <div className="mt-3 flex gap-2">
+              <button onClick={() => setPromptDrafts(Object.fromEntries(definition.templates.map((item) => [item.id, item.defaultTemplate])))} className="rounded-xl bg-gray-100 px-3 py-2.5 text-sm text-gray-600">全部恢复</button>
+              <button onClick={() => setEditingPromptModule(null)} className="flex-1 rounded-xl bg-gray-100 py-2.5 text-sm text-gray-700">取消</button>
+              <button onClick={() => {
+                for (const item of definition.templates) {
+                  const unknown = unknownPromptPlaceholders(definition.id, item.id, promptDrafts[item.id] ?? '')
+                  if (unknown.length > 0) { setPromptValidationError(`${item.name}含未知占位符：${unknown.map((key) => `{{${key}}}`).join('、')}`); return }
+                }
+                settings.setSettings({ promptModules: { ...settings.promptModules, [editingPromptModule]: { ...current, templates: { ...current.templates, ...promptDrafts } } }, ...(editingPromptModule === 'chat' && typeof promptDrafts.style === 'string' ? { globalSystemPrompt: promptDrafts.style } : {}) })
+                setEditingPromptModule(null)
+              }} className="flex-1 rounded-xl bg-gray-900 py-2.5 text-sm text-white">保存</button>
+            </div>
+          </div>
+        </div>
+      })()}
 
       {pickingRelationshipType && (
         <ActionSheet

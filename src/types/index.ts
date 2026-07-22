@@ -473,6 +473,8 @@ export interface AppSettings {
   model: string
   utilityModel: string // model for secondary tasks: shop generation, warmth scoring / memory updates, worldview drafts, etc.
   globalSystemPrompt: string
+  /** Global, user-editable original prompt templates shared by all relevant model calls. */
+  promptModules: PromptModuleSettings
   userNickname: string
   userAvatar: string
   userGender: string
@@ -524,6 +526,8 @@ export interface AppSettings {
   themeMode?: 'light' | 'dark'
   topInsetAdjustmentPx: number
   chatBackground?: string // empty = default; otherwise a CSS color or data URL used behind chat messages
+  /** Number of messages fetched initially and per older-message page. */
+  chatPageSize: number
   currencyIconMode?: 'coin' | 'emoji' | 'yen' | 'dollar'
   customCurrencyEmoji?: string
   animationsEnabled?: boolean
@@ -535,6 +539,30 @@ export interface AppSettings {
   /** Feature-module toggles — see src/features/. Every module id listed here is active. */
   enabledModules: string[]
 }
+
+export type PromptModuleId =
+  | 'chat'
+  | 'relationship'
+  | 'memory'
+  | 'intent'
+  | 'personalityTraits'
+  | 'worldview'
+  | 'moments'
+  | 'knowledgeBase'
+  | 'selfIteration'
+  | 'storyOutline'
+  | 'nuwaMode'
+  | 'career'
+  | 'shop'
+  | 'lifeSimulation'
+  | 'aiReplyAssist'
+
+export interface PromptModuleConfig {
+  enabled: boolean
+  templates: Record<string, string>
+}
+
+export type PromptModuleSettings = Record<PromptModuleId, PromptModuleConfig>
 
 export interface AdminLogRecord { id: string; level: 'log' | 'info' | 'warn' | 'error'; message: string; createdAt: number }
 export type AdminAiTraceStage = 'first_chat' | 'first_quality' | 'second_chat' | 'other' | 'second_quality'
@@ -773,6 +801,40 @@ export interface SavedPersona {
   personaConstraints?: string
   sharedHistory?: string
   customPersonalityTraits?: CustomPersonalityTrait[]
+}
+
+/**
+ * Immutable snapshot of a persona creation. Unlike SavedPersona (which is a
+ * user-managed draft library and participates in ordinary backups), creation
+ * records are an append-only history that survives contact deletion and save
+ * rollback. They are intentionally kept separate from Contact.
+ */
+export interface PersonaCreationRecord {
+  id: string
+  sourceContactId?: string
+  name: string
+  realName?: string
+  nickname?: string
+  birthday?: string
+  gender?: string
+  ageRange?: string
+  relationship?: string
+  occupation?: string
+  personalityTrait?: string
+  hobbies: string[]
+  /** The permanent, user-authored role setting shown in Nuwa mode. */
+  personaSetting: string
+  /** The short direction/role description entered before the setting. */
+  roleDescription?: string
+  persona: string
+  personaProfile?: PersonaProfile
+  speechSamples?: string[]
+  mbti?: string
+  schedule?: ScheduleBlock[]
+  avatarKeyword?: string
+  monthlySalary?: number
+  sharedHistory?: string
+  createdAt: number
 }
 
 export interface ProactiveTopicRecord {

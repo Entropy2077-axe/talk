@@ -30,6 +30,8 @@ import { USER_WALLET_ID, balanceOf, reserveRedPacket, transferFunds } from './fi
 import { searchPexelsPhoto } from './photoSearch'
 import { generateRemoteImage, searchRemoteStickers, trackRemoteStickerSend, type RemoteStickerResult } from './remoteMedia'
 import { isImageProviderReady, isStickerProviderReady } from './mediaProviders'
+import { promptModuleEnabled } from './promptModules'
+import { realisticReplyDelayMs } from './replyTiming'
 import type { AiBubble, AppSettings, Contact, Message, MessageType, ScheduleOverride, Sticker } from '../types'
 
 /**
@@ -94,6 +96,27 @@ function clearPending(conversationId: string) {
   timersByConversation.get(conversationId)?.forEach(clearTimeout)
   timersByConversation.set(conversationId, [])
   abortByConversation.get(conversationId)?.abort()
+}
+
+function scheduleAiTurn(
+  conversationId: string,
+  contact: Contact,
+  settings: AppSettings,
+  stickers: Sticker[],
+  streamId: string,
+  triggeringUserText = '',
+  proactiveContext = '',
+): void {
+  const delay = realisticReplyDelayMs(isModuleEnabled('realisticReplies'))
+  if (delay === 0) {
+    void runAiTurn(conversationId, contact, settings, stickers, streamId, triggeringUserText, proactiveContext)
+    return
+  }
+  const timer = setTimeout(() => {
+    if (streamByConversation.get(conversationId) !== streamId) return
+    void runAiTurn(conversationId, contact, settings, stickers, streamId, triggeringUserText, proactiveContext)
+  }, delay)
+  timersByConversation.set(conversationId, [...(timersByConversation.get(conversationId) ?? []), timer])
 }
 
 export function formatStructuredHistoryEvent(
@@ -250,7 +273,7 @@ export async function sendMessage(
   await db.messages.add(msg)
   await db.conversations.update(conversationId, { updatedAt: Date.now() })
 
-  runAiTurn(conversationId, contact, settings, stickers, streamId, text.trim())
+  scheduleAiTurn(conversationId, contact, settings, stickers, streamId, text.trim())
 }
 
 /**
@@ -272,7 +295,7 @@ export async function triggerAiTurn(
   streamByConversation.set(conversationId, streamId)
   clearPending(conversationId)
   useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: displayName(contact) })
-  await runAiTurn(conversationId, contact, settings, stickers, streamId, '', proactiveContext)
+  scheduleAiTurn(conversationId, contact, settings, stickers, streamId, '', proactiveContext)
 }
 
 export async function regenerateAiTurn(
@@ -301,7 +324,7 @@ export async function regenerateAiTurn(
   await db.aiTurns.delete(aiTurnId)
   await db.conversations.update(conversationId, { updatedAt: Date.now() })
 
-  await runAiTurn(conversationId, contact, settings, stickers, streamId)
+  scheduleAiTurn(conversationId, contact, settings, stickers, streamId)
 }
 
 async function runAiTurn(
@@ -338,54 +361,56 @@ async function runAiTurn(
     if (pendingEvents.length > 0) await db.contacts.update(contact.id, { pendingEvents: [] })
     const socialEventsText = await recentSocialEventsText([contact.id], 4)
     const recentEventsText = [pendingEvents.join('；'), socialEventsText].filter(Boolean).join('\n')
-    const injectedIntents = isModuleEnabled('intent') ? activeIntents(contact, now) : []
+    const injectedIntents = isModuleEnabled('intent') && promptModuleEnabled(settings, 'intent') ? activeIntents(contact, now) : []
     const injectedIntentText = activeIntentPrompt(injectedIntents)
 
     // ---- Step 1: build context sections (no JSON protocol) ----
     const scheduleText = describeUpcomingScheduleText(contact, new Date())
-    const recentMemories = await recentMemoriesText(contact.id)
-    const financeContext = isModuleEnabled('career')
+    const memoryPromptOn = promptModuleEnabled(settings, 'memory')
+    const recentMemories = memoryPromptOn ? await recentMemoriesText(contact.id) : ''
+    const financeContext = isModuleEnabled('career') && promptModuleEnabled(settings, 'career')
       ? `\n【经济状况】你的可用余额：${await balanceOf(contact.id)}；对方可用余额：${await balanceOf(USER_WALLET_ID)}。未结清借款：${(await db.loans.filter(l => l.status === 'active' && (l.lenderId === contact.id || l.borrowerId === contact.id)).toArray()).map(l => `${l.borrowerId === contact.id ? '你欠对方' : '对方欠你'}${l.outstanding}`).join('；') || '无'}。所有金钱动作必须量力而行，不得凭空造钱。`
       : ''
-    const socialMemories = await socialMemoriesText(contact.id)
-    const sharedOriginalContext = await recentSharedOriginalContext([contact.id], settings.userNickname, {
+    const socialMemories = memoryPromptOn ? await socialMemoriesText(contact.id) : ''
+    const sharedOriginalContext = memoryPromptOn ? await recentSharedOriginalContext([contact.id], settings.userNickname, {
       maxMessages: 50,
       maxChars: 8_000,
       excludeConversationId: conversationId,
-    })
+    }) : ''
     const lifeEventText = isModuleEnabled('lifeSimulation')
       ? (await db.lifeEvents.where('contactId').equals(contact.id).reverse().sortBy('occurredAt')).slice(0, 4).map((event) => event.summary).join('；')
       : ''
-    const worldbookTrace = isModuleEnabled('worldview') ? await retrieveWorldbookTrace([
+    const worldbookTrace = isModuleEnabled('worldview') && promptModuleEnabled(settings, 'worldview') ? await retrieveWorldbookTrace([
       _triggeringUserText, proactiveContext, contact.name, contact.systemPrompt, contact.memoryFacts,
       history.slice(-8).map((m) => m.content).join(' '),
     ].filter(Boolean).join('\n')) : { text: '', matches: [] }
     const worldbookText = worldbookTrace.text
     const relationshipText = `【你和对方的关系】${relationshipLine(
-      isModuleEnabled('relationship') ? (contact.relationshipBase || '朋友') : '朋友',
-      isModuleEnabled('relationship') ? (contact.relationshipDynamic || '') : '',
-      isModuleEnabled('relationship') ? (contact.warmth ?? 0) : 0,
+      isModuleEnabled('relationship') && promptModuleEnabled(settings, 'relationship') ? (contact.relationshipBase || '朋友') : '朋友',
+      isModuleEnabled('relationship') && promptModuleEnabled(settings, 'relationship') ? (contact.relationshipDynamic || '') : '',
+      isModuleEnabled('relationship') && promptModuleEnabled(settings, 'relationship') ? (contact.warmth ?? 0) : 0,
     )}`
     const userMemoryText = `【你对TA的了解】${contact.memoryFacts || '（刚开始聊）'}`
     const habitText = `【相处习惯】${contact.memoryStyle || '（还没有形成习惯）'}`
-    const situationText = `【当前情境】现在: ${describeCurrentTime(new Date())}。对方: ${buildUserProfileText(settings)}。${activeMood ? `你的心情: ${activeMood}。` : ''}【日程】${describeCurrentSchedule(contact, new Date()) ? `\n当前: ${describeCurrentSchedule(contact, new Date())}` : '\n当前: 暂无安排'}${scheduleText ? `\n接下来:\n${scheduleText}` : '\n接下来: 暂无安排'}${activeUpcomingPlansText(contact, new Date()) ? `\n约定: ${activeUpcomingPlansText(contact, new Date())}` : ''}${recentEventsText ? `\n最近: ${recentEventsText}` : ''}`
+    const situationText = `【当前情境】现在: ${describeCurrentTime(new Date())}。对方: ${buildUserProfileText(settings)}。${activeMood ? `你的心情: ${activeMood}。` : ''}【日程】${describeCurrentSchedule(contact, new Date()) ? `\n当前: ${describeCurrentSchedule(contact, new Date())}` : '\n当前: 暂无安排'}${scheduleText ? `\n接下来:\n${scheduleText}` : '\n接下来: 暂无安排'}${memoryPromptOn && activeUpcomingPlansText(contact, new Date()) ? `\n约定: ${activeUpcomingPlansText(contact, new Date())}` : ''}${recentEventsText ? `\n最近: ${recentEventsText}` : ''}`
     const contextSections = buildRawChatPrompt({
       name: contact.name,
-      persona: `${contact.systemPrompt}${customPersonalityTraitsLine(contact.customPersonalityTraits, contact.warmth ?? 0)}${isModuleEnabled('career') && contact.occupation ? `\n当前职业：${contact.occupation}，现实月薪：${contact.monthlySalary ?? 0}。工作会真实影响你的作息和日常话题。` : ''}${financeContext}`,
+      persona: `${contact.systemPrompt}${promptModuleEnabled(settings, 'personalityTraits') ? customPersonalityTraitsLine(contact.customPersonalityTraits, contact.warmth ?? 0) : ''}${isModuleEnabled('career') && promptModuleEnabled(settings, 'career') && contact.occupation ? `\n当前职业：${contact.occupation}，现实月薪：${contact.monthlySalary ?? 0}。工作会真实影响你的作息和日常话题。` : ''}${financeContext}`,
       personaConstraints: contact.personaConstraints,
       personaProfile: contact.personaProfile,
       stylePrompt: settings.globalSystemPrompt,
-      selfIterationGlobalText: isModuleEnabled('selfIteration') ? settings.selfIterationGlobalPrompt : undefined,
-      selfIterationContactText: isModuleEnabled('selfIteration') ? contact.selfIterationPrompt : undefined,
-      relationshipBase: isModuleEnabled('relationship') ? (contact.relationshipBase || '朋友') : '朋友',
-      personalityTrait: isModuleEnabled('personalityTraits') ? contact.personalityTrait : undefined,
-      personalityWarmth: isModuleEnabled('relationship') ? (contact.warmth ?? 0) : undefined,
+      promptModules: settings.promptModules,
+      selfIterationGlobalText: isModuleEnabled('selfIteration') && promptModuleEnabled(settings, 'selfIteration') ? settings.selfIterationGlobalPrompt : undefined,
+      selfIterationContactText: isModuleEnabled('selfIteration') && promptModuleEnabled(settings, 'selfIteration') ? contact.selfIterationPrompt : undefined,
+      relationshipBase: isModuleEnabled('relationship') && promptModuleEnabled(settings, 'relationship') ? (contact.relationshipBase || '朋友') : '朋友',
+      personalityTrait: isModuleEnabled('personalityTraits') && promptModuleEnabled(settings, 'personalityTraits') ? contact.personalityTrait : undefined,
+      personalityWarmth: isModuleEnabled('relationship') && promptModuleEnabled(settings, 'relationship') ? (contact.warmth ?? 0) : undefined,
       worldviewText: worldbookText || undefined,
       latestUserText: _triggeringUserText,
-      recentContext: [
-        relationshipText,
-        userMemoryText,
-        habitText,
+      recentContext: '',
+      relationshipContext: relationshipText,
+      memoryContext: [userMemoryText, habitText].join('\n\n'),
+      situationContext: [
         situationText,
         lifeEventText ? `【近期生活】${lifeEventText}` : '',
         proactiveContext,
@@ -397,9 +422,10 @@ async function runAiTurn(
       imageSearchEnabled: !!settings.pexelsApiKey,
       mbti: contact.mbti || undefined,
       recentMemoriesText: recentMemories || undefined,
-      speechSamplesText: formatSpeechSamplesForScene(contact.speechSamples, 'private', 3) || undefined,
-      sharedHistory: contact.sharedHistory,
+      speechSamplesText: promptModuleEnabled(settings, 'personalityTraits') ? (formatSpeechSamplesForScene(contact.speechSamples, 'private', 3) || undefined) : undefined,
+      sharedHistory: memoryPromptOn ? contact.sharedHistory : undefined,
     })
+    if (!contextSections.trim()) throw new Error('对话核心提示词模块已屏蔽')
 
     const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
     const controller = new AbortController()
@@ -481,12 +507,12 @@ async function runAiTurn(
       latestUserText: _triggeringUserText,
       draftText: rawText,
       personaFacts: [
-        `角色=${displayName(contact)}`,
-        `人设=${contact.systemPrompt.slice(0, 1400)}`,
-        contact.personaConstraints ? `硬约束=${contact.personaConstraints.slice(0, 700)}` : '',
-        contact.personalityTrait ? `人格特质=${contact.personalityTrait}` : '',
-        contact.sharedHistory ? `与用户共同过往（关系硬锚点）=${contact.sharedHistory.slice(0, 900)}` : '',
-        worldbookText ? `本轮命中世界书=${worldbookText.slice(0, 1000)}` : '',
+        promptModuleEnabled(settings, 'chat') ? `角色=${displayName(contact)}` : '',
+        promptModuleEnabled(settings, 'chat') ? `人设=${contact.systemPrompt.slice(0, 1400)}` : '',
+        promptModuleEnabled(settings, 'chat') && contact.personaConstraints ? `硬约束=${contact.personaConstraints.slice(0, 700)}` : '',
+        promptModuleEnabled(settings, 'personalityTraits') && contact.personalityTrait ? `人格特质=${contact.personalityTrait}` : '',
+        promptModuleEnabled(settings, 'memory') && contact.sharedHistory ? `与用户共同过往（关系硬锚点）=${contact.sharedHistory.slice(0, 900)}` : '',
+        promptModuleEnabled(settings, 'worldview') && worldbookText ? `本轮命中世界书=${worldbookText.slice(0, 1000)}` : '',
         sharedOriginalContext ? `相关跨场景事实=${sharedOriginalContext.slice(-1000)}` : '',
       ].filter(Boolean).join('\n'),
       recentContext: formatRecentConversationForReview(recentHistory.slice(-4), contact),

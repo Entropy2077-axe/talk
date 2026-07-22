@@ -3,6 +3,7 @@ import { useSettingsStore } from '../store/useSettingsStore'
 import type { WorldbookEntry } from '../types'
 
 export interface WorldbookMatch { entry: WorldbookEntry; score: number }
+export interface WorldbookRetrievalOptions { maxEntries?: number; maxChars?: number; includeHighPriorityFallback?: boolean }
 
 let lastLoggedMatchSignature = ''
 let lastLoggedMatchAt = 0
@@ -33,10 +34,19 @@ export function rankWorldbookEntries(entries: WorldbookEntry[], query: string): 
     .sort((a, b) => b.score - a.score || b.entry.priority - a.entry.priority || b.entry.updatedAt - a.entry.updatedAt)
 }
 
-export async function retrieveWorldbookTrace(query: string, opts: { maxEntries?: number; maxChars?: number } = {}) {
+export async function retrieveWorldbookTrace(query: string, opts: WorldbookRetrievalOptions = {}) {
   const maxEntries = opts.maxEntries ?? 6
   const maxChars = opts.maxChars ?? 5000
-  const matches = rankWorldbookEntries(await db.worldbookEntries.toArray(), query).slice(0, maxEntries)
+  const entries = await db.worldbookEntries.toArray()
+  const ranked = rankWorldbookEntries(entries, query)
+  const rankedIds = new Set(ranked.map((match) => match.entry.id))
+  const fallback = opts.includeHighPriorityFallback
+    ? entries
+      .filter((entry) => entry.enabled && !rankedIds.has(entry.id))
+      .sort((a, b) => b.priority - a.priority || b.updatedAt - a.updatedAt)
+      .map((entry) => ({ entry, score: entry.priority }))
+    : []
+  const matches = [...ranked, ...fallback].slice(0, maxEntries)
   const selected: WorldbookMatch[] = []
   let used = 0
   for (const match of matches) {
@@ -57,7 +67,7 @@ export async function retrieveWorldbookTrace(query: string, opts: { maxEntries?:
   return { text: selected.map((m) => `【${m.entry.title}】\n${m.entry.content}`).join('\n\n'), matches: selected }
 }
 
-export async function retrieveWorldbookContext(query: string, opts: { maxEntries?: number; maxChars?: number } = {}) {
+export async function retrieveWorldbookContext(query: string, opts: WorldbookRetrievalOptions = {}) {
   return (await retrieveWorldbookTrace(query, opts)).text
 }
 

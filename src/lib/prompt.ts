@@ -1,7 +1,9 @@
 import { validateScheduleBlocks } from './schedule'
 import { relationshipLine } from './relationship'
 import type { AvatarCategory } from './avatarCategory'
-import { PERSONALITY_TRAIT_OPTIONS, type PersonaProfile, type ScheduleBlock } from '../types'
+import { PERSONALITY_TRAIT_OPTIONS, type PersonaProfile, type PromptModuleSettings, type ScheduleBlock } from '../types'
+import { createDefaultPromptModules, getPromptTemplate, promptModuleEnabled } from './promptModules'
+export { DEFAULT_STYLE_PROMPT } from './stylePrompt'
 
 /**
  * Personality trait → behavioral prompt injection for the 1:1 system prompt.
@@ -162,18 +164,6 @@ function moodPrompt(mood: string): string {
   // Fallback
   return `你现在感到: ${m}。请让这种情绪自然地影响你这轮回复的语气和措辞。`
 }
-
-/**
- * How the AI should talk — ~5 positive guidelines instead of 20 rules.
- * Editable in Settings. Must never mention JSON/output format.
- */
-export const DEFAULT_STYLE_PROMPT = `你是一个真人在和朋友用手机聊天:
-- 口语化、随意、短句 不刻意加标点 不用书面语
-- 先回应对方真正想表达的意思；只有情境确实触发情绪时，才自然表现出情绪
-- 有自己的主见和情绪 不迎合 不复述总结对方的话
-- 真的想知道或需要确认时可以问问题；不要机械追问，也不要为了规避问句而说得别扭
-- 允许不完美: 可以吐槽、敷衍、跑题、只回一两个字；重要的事再认真多说
-- 语气自然渗透当前关系状态 不要刻意表演或宣告关系`
 
 /**
  * Output-format / protocol instructions. Fixed, hidden from the user.
@@ -359,7 +349,8 @@ export interface PersonaAnswers {
   /** Concrete shared history with the user; a relationship anchor rather than a generic bio. */
   sharedHistory?: string
   /** When true, unspecified identity fields are intentionally delegated to the model. */
-  minimalNuwa?: boolean
+  /** Nuwa mode asks the model for an editable first draft before creation. */
+  draftMode?: boolean
   occupation?: string
 }
 
@@ -382,13 +373,9 @@ export interface PersonaGenerationResult {
   occupation?: string
 }
 
-export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCategory: AvatarCategory): string {
-  const sharedHistoryLine = answers.sharedHistory?.trim()
-    ? `- 与用户的过往/共同经历（关系锚点，必须在 persona、speechSamples 和首次互动里自然体现，不能改写事实）：${answers.sharedHistory.trim()}`
-    : '- 与用户的过往/共同经历：未提供。不要凭空编造具体共同事件；但要根据关系定位设计自然的熟悉程度。'
-  const autoFillLine = answers.minimalNuwa
-    ? '- 这是极简女娲模式：用户只给了一段说明。请你自行补全年龄、性别、关系定位、职业、兴趣、性格特质和身份资料，但必须让所有补全彼此一致，并把说明当作最高优先级约束。'
-    : ''
+export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCategory: AvatarCategory, promptModules?: PromptModuleSettings): string {
+  const promptSettings = { promptModules: promptModules ?? createDefaultPromptModules() }
+  if (!promptModuleEnabled(promptSettings, 'nuwaMode')) return ''
   const avatarInstruction =
     avatarCategory === 'anime'
       ? ''
@@ -401,21 +388,22 @@ export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCate
         : '一句英文人像搜图短语 要体现出符合这个角色性别/年龄/气质的长相和穿搭风格 比如"handsome young asian man portrait outdoor"或"beautiful young woman portrait aesthetic" 如果性别不限 按你刚刚设计的这个角色本身的性别来写'
   }"`
 
-  return `你是一个角色设定生成器 任务是为一个聊天AI设计一个真实可信的人类身份 不要输出除JSON以外的任何内容
+  const personaAnswers = `用户问卷：
+- 模式: ${answers.draftMode ? '女娲初稿模式' : '常规模式'}
+- 性格倾向: ${answers.personalityTags.length > 0 ? answers.personalityTags.join('、') : '未填写'}
+- 年龄段: ${answers.ageRange || '未填写'}
+- 性别: ${answers.gender || '未填写'}
+- 和用户的关系定位: ${answers.relationship || '未填写'}
+- 性格特质: ${answers.personalityTrait || '未填写'}
+- 兴趣爱好: ${answers.hobbies.length > 0 ? answers.hobbies.join('、') : '未填写'}
+- 补充要求: ${answers.extra || '未填写'}
+- 职业: ${answers.occupation || '未填写'}
+- 与用户的过往/共同经历: ${answers.sharedHistory?.trim() || '未提供'}`
+  const editable = getPromptTemplate(promptSettings, 'nuwaMode', 'persona', { personaAnswers }) ?? ''
 
-用户想添加一个这样的聊天对象:
-- 性格倾向: ${answers.personalityTags.length > 0 ? answers.personalityTags.join('、') : '不限 你自由发挥'}
-- 年龄段: ${answers.ageRange || '不限'}
-- 性别: ${answers.gender || '不限'}
-- 和用户的关系定位: ${answers.relationship || '普通朋友'}
-- 性格特质: ${answers.personalityTrait || '无'}
-- 兴趣爱好: ${answers.hobbies.length > 0 ? answers.hobbies.join('、') : '不限 AI自由发挥'}
-- 补充要求: ${answers.extra || '无'}
-- 职业: ${answers.occupation || '自由决定一个现实职业'}
-${sharedHistoryLine}
-${autoFillLine}
+  return `${editable}
 
-请你设计一个具体的人 输出如下JSON:
+固定输出协议：只输出下列结构的JSON，不要Markdown代码块或解释：
 {
   "name": "这个人的名字或者网名",
   "gender": "自然的性别描述",
@@ -434,18 +422,7 @@ ${autoFillLine}
     { "dayOfWeek": 1, "startHour": 9, "endHour": 18, "phoneAccess": "unavailable", "location": "公司", "activity": "上班" },
     { "dayOfWeek": 1, "startHour": 23, "endHour": 7, "phoneAccess": "unavailable", "location": "家里", "activity": "睡觉" }
   ]${avatarInstruction}
-	}
-
-要求:
-- name要符合年龄段和性别 可以是真实姓名也可以是网名/昵称 不要用"AI""助手""小美"这种明显是虚构工具人的名字 除非用户明确要求
-- realName、nickname、birthday 均为必填：realName 是自然可信的真名，nickname 是日常网名/昵称；birthday 必须为 YYYY-MM-DD，并根据给出的年龄段换算合理出生年份。用户在补充要求中给出的身份资料优先，只有明确留空时才由你补全。
-- persona里要体现性格倾向和关系定位 但要写得像在描述一个真实存在的普通人 而不是罗列标签
-- persona和schedule必须明确符合所选职业 monthlySalary按现实人民币尺度生成1000到200000之间的整数
-- personaProfile必须忠实提取补充要求中的明确事实，不得遗漏、改写或用推测补充；每个数组0到6条，简短具体
-- speechSamples必须给4到8条，带简短场景标签，展示自然语气；不能写成旁白或解释
-- mbti必须和persona里描述的性格一致 是这个人设最自然对应的MBTI类型
-- schedule每天写1到2个主要安排即可(比如上班、上课、运动、社交等) 不必覆盖所有小时 只需把最典型的写出来 太多反而干扰 dayOfWeek是0-6(0是周日) startHour/endHour是24小时制的整数(跨零点直接写startHour:23 endHour:7 系统会处理) phoneAccess只能是"available"或"unavailable" 大部分时间是available 只有上班上课睡觉才unavailable 一共7到14条即可
-- 只输出JSON 不要有markdown代码块标记`
+	}`
 }
 
 export function parsePersonaGeneration(raw: string): PersonaGenerationResult | null {
@@ -497,19 +474,12 @@ export function parsePersonaGeneration(raw: string): PersonaGenerationResult | n
 
 // ---- worldview drafting ----
 
-export function buildWorldviewDraftPrompt(userIdea: string, existingWorldview: string): string {
-  return `你是一个世界观设定写作助手 任务是帮用户把一个想法完善成一段完整、自然语言描述的"世界设定" 这段设定之后会影响这个聊天app里所有角色的言行 只输出JSON 不要有其他任何文字
-
-${existingWorldview ? `已有的世界设定:\n${existingWorldview}\n\n用户现在想在这个基础上补充/修改:` : '用户的想法:'}
-${userIdea}
-
-请你把这个想法扩写成一段完整、自然、具体的世界设定描述 输出如下JSON:
-{"worldview": "扩写后的世界设定 200到500字 用自然语言描述这个世界有什么特别之处、这些特点如何影响日常生活 不要写成条款列表"}
-
-要求:
-- 保留用户想法的核心创意 不要偏离或过度发挥用户没提到的方向
-- 写得具体、有画面感 让每个角色都能照着这个背景自然地生活和说话
-- 只输出JSON 不要有markdown代码块标记`
+export function buildWorldviewDraftPrompt(userIdea: string, existingWorldview: string, promptModules?: PromptModuleSettings): string {
+  const editable = getPromptTemplate({ promptModules: promptModules ?? createDefaultPromptModules() }, 'worldview', 'draft', {
+    userIdea,
+    existingWorldview: existingWorldview || '（暂无）',
+  }) ?? ''
+  return `${editable}\n\n固定输出协议：只输出JSON {"worldview":"扩写后的世界设定，200到500字"}`
 }
 
 export interface WorldviewDraftResult {
@@ -585,6 +555,10 @@ export function buildRawChatPrompt(opts: {
   personaConstraints?: string
   personaProfile?: PersonaProfile
   sharedHistory?: string
+  promptModules?: PromptModuleSettings
+  relationshipContext?: string
+  memoryContext?: string
+  situationContext?: string
 }): string {
   return buildRawChatPromptParts(opts).full
 }
@@ -612,16 +586,25 @@ export function buildRawChatPromptParts(opts: {
   personaConstraints?: string
   personaProfile?: PersonaProfile
   sharedHistory?: string
+  promptModules?: PromptModuleSettings
+  relationshipContext?: string
+  memoryContext?: string
+  situationContext?: string
 }): RawChatPromptParts {
-  const worldviewLine = opts.worldviewText ? `这个世界: ${opts.worldviewText}。` : ''
+  const defaultModules = createDefaultPromptModules()
+  if (!opts.promptModules && opts.stylePrompt) defaultModules.chat.templates.style = opts.stylePrompt
+  const promptSettings = { promptModules: opts.promptModules ?? defaultModules }
+  if (!promptModuleEnabled(promptSettings, 'chat')) return { logic: '', feeling: '', full: '' }
+  const render = (moduleId: Parameters<typeof getPromptTemplate>[1], templateId: string, variables: Record<string, unknown> = {}) =>
+    getPromptTemplate(promptSettings, moduleId, templateId, variables) ?? ''
   const traitLine = personalityTraitLine(opts.personalityTrait, opts.personalityWarmth)
   const hardPersona = [
     opts.personaConstraints?.trim() ? `用户补充说明（原文，不可遗忘或违背）: ${opts.personaConstraints.trim()}` : '',
     formatPersonaProfile(opts.personaProfile),
   ].filter(Boolean).join('\n')
   const sharedHistoryLine = opts.sharedHistory?.trim()
-    ? `\n\n【与用户的共同过往 — 关系硬锚点】\n${opts.sharedHistory.trim().slice(0, 1800)}\n这些是已经发生过的事实。首轮或短历史回复必须自然露出至少一个关系/熟悉度信号，但不能机械复述，也不能把没有写出的细节补成事实。`
-    : '\n\n【与用户的共同过往】\n暂无具体共同经历；仍必须按关系定位说话，不能用陌生人开场。'
+    ? `【与用户的共同过往】\n${opts.sharedHistory.trim().slice(0, 1800)}`
+    : '【与用户的共同过往】\n暂无具体共同经历。'
   const stickerHint = opts.remoteStickerSearchEnabled
     ? `\n你可以发表情包：本地可用名称${opts.stickerNames.length > 0 ? `为 ${opts.stickerNames.join('、')}` : '为空'}；也可以单独写 [sticker:简短具体的搜索词] 调用远程表情搜索。远程搜索词应准确表达情绪或动作，优先用简洁英文，也可用中文。【表情使用硬偏好】日常闲聊、玩笑、撒娇、吐槽、惊讶、开心、疲惫或其他明显情绪反应场景，原则上必须自然插入1个表情，这是常规行为而不是偶尔彩蛋；只有严肃安慰、危机、争执、敏感话题、纯信息问答，或最近几轮已经连续发过表情时才可以不发。因此总体应是大多数常规轮次会发，但不是每一轮固定发送。表情可以出现在回复开头、中间或结尾，以当时聊天节奏最自然的位置为准。`
     : opts.stickerNames.length > 0
@@ -632,51 +615,36 @@ export function buildRawChatPromptParts(opts: {
     : opts.imageSearchEnabled
       ? '- 想发送一张真实照片时，单独写[image:简洁具体的英文 Pexels 搜图关键词:配文]；只有真的适合发图时才用。'
       : '- 当前没有可用图片服务，不要输出[image:...]标记。'
-  // User-authored style text is semantic content. Do not globally replace
-  // natural words such as “朋友”, which can invert the user's intended rule.
-  const stylePrompt = opts.stylePrompt
-
   const mbtiLine = opts.mbti ? ` MBTI: ${opts.mbti}（你的性格底层框架 一切反应和决定都要符合这个类型）` : ''
   const selfIterationText = [
     opts.selfIterationGlobalText ? `【用户边界与偏好 - 全局】\n${opts.selfIterationGlobalText}` : '',
     opts.selfIterationContactText ? `【你和用户的关系协商记录】\n${opts.selfIterationContactText}` : '',
   ].filter(Boolean).join('\n\n')
-  const latestUserLine = opts.latestUserText ? `\n\n【本轮最新消息】\n${opts.latestUserText}` : ''
-  const pragmaticRules = `\n\nConsistency and pragmatic-humor rules:
-- Reply to the latest user message first, especially when the user is questioning, correcting, or pushing back.
-- Keep your own identity separate from third parties mentioned in chat.
-- Do not invent concrete scenes such as class, teacher, classroom, offline meeting, or past promises unless persona, memory, or recent chat clearly supports them.
-- If you got the context wrong, admit it naturally and correct course.
-- Watch for pragmatic humor: if you asked for a specific answer and the user gives an over-broad, tautological, deliberately literal, or absurd answer, treat it as likely a joke. Example: you ask what they want to eat, they say "I want to eat food/rice"; catch the joke or tease lightly before continuing.`
-  const memoriesLine = opts.recentMemoriesText ? `\n\n【最近的记忆碎片】\n${opts.recentMemoriesText}` : ''
-  const speechSamplesLine = opts.speechSamplesText ? `\n\n【说话样例】\n${opts.speechSamplesText}` : ''
-  const adherenceRules = `\n\n【关系与特质遵从验收】
-- 关系定位不是标签装饰：如果是恋人或暧昧对象，第一句就要有亲密、熟悉或专属称呼/语气，不能像普通客服或刚认识的人；家人、朋友、同事也要保持对应距离和称谓。
-- 性格特质必须落到可观察的措辞、主动性、反应和情绪，不要只在心里说“我是某某特质”。例如“雌小鬼”要在自然场景里出现带优越感的逗弄/反问/嘴硬，再保留可爱的反差或撒娇收尾；不能退化成普通温柔朋友。
-- 共同过往只允许使用已给出的事实；首轮优先用一个轻微细节体现熟悉度，后续再展开，不要每句复述。
-`
+  const identityBlock = render('chat', 'identity', {
+    name: opts.name,
+    persona: opts.persona || '（自由发挥，扮演一个普通朋友）',
+    hardPersona: hardPersona ? `【人设硬约束】\n${hardPersona}` : '',
+  })
+  const worldbookBlock = opts.worldviewText ? render('worldview', 'privateRuntime', { worldbookEntries: opts.worldviewText }) : ''
+  const relationshipBlock = render('relationship', 'chat', { relationshipContext: opts.relationshipContext ?? '' })
+  const personalityContext = [mbtiLine.trim(), traitLine, opts.speechSamplesText ? `【说话样例】\n${opts.speechSamplesText}` : ''].filter(Boolean).join('\n')
+  const personalityBlock = personalityContext ? render('personalityTraits', 'chat', { personalityContext }) : ''
+  const memoryBlock = render('memory', 'chat', {
+    memoryContext: opts.memoryContext ?? '',
+    sharedHistory: sharedHistoryLine,
+    recentMemories: opts.recentMemoriesText ? `【最近的记忆碎片】\n${opts.recentMemoriesText}` : '',
+  })
+  const situationSource = opts.situationContext ?? opts.recentContext
+  const contextBlock = render('chat', 'context', { situationContext: situationSource, latestUserText: opts.latestUserText || '（后台事件）' })
+  const selfIterationBlock = selfIterationText ? render('selfIteration', 'chat', { iterationContext: selfIterationText }) : ''
+  const intentBlock = opts.activeIntentText ? render('intent', 'chat', { intentContext: opts.activeIntentText }) : ''
+  const logicModules = [identityBlock, worldbookBlock, relationshipBlock, personalityBlock, memoryBlock, contextBlock, selfIterationBlock, intentBlock].filter(Boolean).join('\n\n')
+  const logic = render('chat', 'logicWrapper', { logicModules })
+  const styleBlock = render('chat', 'style')
+  const mediaBlock = render('chat', 'media', { stickerHint, imageHint })
+  const feelingModules = [styleBlock, mediaBlock].filter(Boolean).join('\n\n')
 
-  const logic = `【逻辑 — 第一优先级】
-先判断“前提 → 回复”的逻辑关系，再考虑文笔。身份、记忆、地点、日程、心情、关系、最近事件、用户本轮话语都属于硬前提；如果这些前提和感觉/文风冲突，必须服从逻辑。
-
-【人格也是逻辑硬前提】
-人设、用户补充约束、结构化人设锚点、MBTI 与特色人格不是装饰性的文风标签，而是角色做判断、产生情绪、选择主动性和措辞的因果前提。先保证事实与上下文不矛盾；在多个事实都成立的回复里，必须选择最符合该角色人格的那个，不能为了“正常好聊”把特殊人格磨平成普通人。特色人格的典型触发场景必须清楚影响本轮反应，但不得编造事实来表演人格。
-
-【你是谁】
-你是${opts.name}。${mbtiLine}${worldviewLine}
-${opts.persona || '（自由发挥 扮演一个普通朋友）'}${hardPersona ? `\n\n【人设硬约束 — 优先于记忆、氛围和自由发挥】\n${hardPersona}` : ''}${traitLine}
-
-${sharedHistoryLine}
-${opts.recentContext}${memoriesLine}${latestUserLine}${pragmaticRules}${selfIterationText ? `\n\n${selfIterationText}` : ''}${opts.activeIntentText ? `\n\n${opts.activeIntentText}` : ''}
-
-一致性要求:
-- 先回应【本轮最新消息】；身份、用户补充说明、结构化人设与明确记忆是硬事实，不能为了气氛或人格违背它们。
-- 严格区分自己的身份和第三方；不凭空编造具体场景。看错或接岔时自然承认并修正。`
-
-  const feeling = `【感觉 — 第二优先级】
-只在【逻辑】已经成立的前提下优化文笔、节奏、情绪和聊天感。不要为了好听、有戏剧性、撒娇、吐槽或搞笑而改变事实前提。
-
-${adherenceRules}${stylePrompt}${speechSamplesLine}${stickerHint}
+  const feeling = `${render('chat', 'feelingWrapper', { feelingModules })}
 
   回复要求:
   - 通常回复2到5条消息，按当前语境决定长短；不要为了显得热闹拆出过多没有新信息的句子
@@ -684,7 +652,7 @@ ${adherenceRules}${stylePrompt}${speechSamplesLine}${stickerHint}
   - 每条消息都必须有自己独立的thought，10到50字，符合人设且不能写“用户/对方”；不同消息的想法不能机械重复
   - text、sticker、image可以按真实聊天节奏任意穿插，例如文字→图片→文字，或图片→文字→表情→文字；必须严格保留你想发送的先后顺序，不要把媒体统一挪到开头或结尾
   - 需要真实执行金钱互动时可单独写标记：[transfer:金额:备注]、[redPacket:金额:祝福]、[loanRequest:金额:理由]、[giftPurchase:价格:礼物名:emoji:描述]。看到借款申请历史事件时，可写[loanDecision:loanId:accept或reject:金额]
-  ${imageHint}
+  ${mediaBlock ? '' : '- 媒体提示词已屏蔽，不要输出sticker或image标记。'}
   - 用户提到你确实不了解的新词、梗、作品或专业名词时，先像真人一样自然追问一句，再单独写[knowledge:需要搜索的关键词]。不要假装知道，也不要对普通词滥用搜索
   - 金钱标记会真实扣除你的余额，必须结合关系、理由和余额慎重决定，不能虚构余额或无理由频繁送钱
   - 最后一行单独写<mood>你此刻15字以内的情绪</mood>

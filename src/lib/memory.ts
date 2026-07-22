@@ -8,6 +8,7 @@ import { isModuleEnabled } from '../features'
 import { parseIntentsField, type ParsedIntent } from './intent'
 import { applyInterpersonalMemorySignals, uniqueRelationPairs } from './contactRelations'
 import type { AppSettings, Contact, ContactMemory, ContactMemoryScope, ContactRelationLabel, IntentItem, MemoryCategory, MemoryKind, Message, PlanItem } from '../types'
+import { getPromptTemplate, promptModuleEnabled } from './promptModules'
 
 /** How many *new* messages accumulate before we bother refreshing memory. Keeps the extra API call rare. */
 export const MEMORY_UPDATE_INTERVAL = 10
@@ -37,7 +38,8 @@ function plansPromptFragment(): string {
 
 // ---- 1:1 memory update (now also handles warmth scoring) ----
 
-function buildMemoryUpdatePrompt(opts: {
+export function buildMemoryUpdatePrompt(opts: {
+  settings: AppSettings
   existingFacts: string
   existingStyle: string
   existingPlansText: string
@@ -45,46 +47,28 @@ function buildMemoryUpdatePrompt(opts: {
   currentTimeText: string
 }): string {
   const stage = warmthStage(opts.warmth)
-  return `你是对话记忆整理器 也是好感度评分员 输出JSON 不要有其他任何文字
+  const memoryPrompt = getPromptTemplate(opts.settings, 'memory', 'privateUpdate', {
+    currentTime: opts.currentTimeText,
+    existingFacts: opts.existingFacts || '（暂无）',
+    existingStyle: opts.existingStyle || '（暂无）',
+    existingPlans: opts.existingPlansText || '（暂无）',
+  })
+  const relationshipPrompt = getPromptTemplate(opts.settings, 'relationship', 'memoryScoring')
+  const intentPrompt = getPromptTemplate(opts.settings, 'intent', 'extraction')
+  const activeBlocks = [memoryPrompt, relationshipPrompt ? `${relationshipPrompt}\n当前好感度：${opts.warmth}/100（${stage.label}）` : '', intentPrompt].filter(Boolean)
+  if (activeBlocks.length === 0) return ''
+  const outputShape: Record<string, unknown> = {}
+  if (memoryPrompt) Object.assign(outputShape, {
+    facts: '...', factConfidence: 80, style: '...', styleConfidence: 75,
+    plans: [{ text: '...', date: 'YYYY-MM-DD或空字符串', confidence: 80 }],
+    memoryItems: [{ category: '基础信息', kind: 'user_fact', content: '...', tags: [], importance: 0.7, emotionalWeight: 0.3, confidence: 0.9 }],
+  })
+  if (relationshipPrompt) Object.assign(outputShape, { warmthDelta: 0, relationshipAssessment: '...', relationshipConfidence: 70 })
+  if (intentPrompt) Object.assign(outputShape, { intents: [{ text: '...', kind: 'care', confidence: 85 }] })
+  return `${activeBlocks.join('\n\n')}
 
-【当前时间】
-${opts.currentTimeText}
-
-【已知信息】
-${opts.existingFacts || '（暂无）'}
-【相处状态】
-${opts.existingStyle || '（暂无）'}
-【已知约定】
-${opts.existingPlansText || '（暂无）'}
-【当前好感度】${opts.warmth}/100（${stage.label}）
-
-接下来是一批新的聊天记录（"对方"是用户 "你"是角色扮演AI） 请更新记忆并评估好感度变化 输出:
-{"facts":"...", "factConfidence":80, "style":"...", "styleConfidence":75, "plans":[{"text":"...", "date":"YYYY-MM-DD或空字符串", "confidence":80}], "warmthDelta": 0, "relationshipAssessment":"...", "relationshipConfidence":70, "intents":[{"text":"下次想问问他昨晚睡得怎么样","kind":"care","confidence":85}], "memoryItems":[{"category":"基础信息","kind":"user_fact","content":"用户说他养了一只叫小橘的橘猫","tags":["宠物","猫"],"importance":0.7,"emotionalWeight":0.3,"confidence":0.9}]}
-
-要求:
-- facts: 关于对方的客观信息(名字/年龄/喜好/重要事件等) 只记聊天里明确提到的 ≤200字 分号分隔 新旧冲突以新为准
-- factConfidence/styleConfidence/relationshipConfidence: 0-100整数 只有明确证据才给高分
-- style: AI应如何调整语气来贴合对方 ≤150字 不改变核心性格
-- facts和style有值得更新的才改 没有就原样返回 不要清空
-${plansPromptFragment()}
-- plans每条必须带confidence 0-100 低于60不要写入
-- intents: AI心里想保留到下次的小念头 不是任务清单 kind只能是follow_up/care/avoid/relationship/topic confidence>=70才写 最多4条
-- warmthDelta: 根据这批聊天记录的语气和互动质量 好感度应该变化多少(-5到+5整数) 聊得好→正数 聊崩了→负数 平平无奇→0 不要因为好感度已经很高/很低就不敢给分
-- relationshipAssessment: 每次都要写 一句话描述当前关系实际状态 不超过30字。**如果聊天里发生了关系断裂(分手/离婚/绝交/闹掰/拉黑/删除/断绝联系等) 必须在描述中使用明确的标准化关键词——**比如"已经分手了 关系彻底破裂"或"已经绝交 形同陌路"或"已经离婚 不想再有任何联系"——**不要只用模糊措辞(比如"关系不太好") 因为系统需要识别这些关键词来触发后续处理**。升级的情况同理 比如"已经在一起了 确认恋爱关系"。没有大变化就写"关系稳定"
-- memoryItems: 从这批聊天记录里提取的具体记忆条目 每条都是独立的事实/观察 用于后续检索和注入 规则:
-  * category必须是以下之一: 关系动态/话题历史/基础信息/偏好习惯/人格特质/重要事件/四季日常
-  * kind必须是以下之一: general/user_fact/user_preference/relationship_event/character_promise/open_thread/world_state
-  * character_promise=AI向用户做出的承诺或约定(比如"我答应周末陪你去") 对应的content用第一人称"我"开头 必须是聊天里真正说出口的承诺 不能是自己心里想的
-  * user_fact=关于用户的客观事实(对方在聊天里明确说过的) user_preference=用户的喜好/习惯(对方表达过的)
-  * ⚠️防污染关键: 你在角色扮演中随口说的关于对方的事(比如"你以前说过你喜欢..."但其实对方没说过)绝对不能记成user_fact 只有对方自己明确说过/承认过的事才能记成user_fact 不确定就记成general或直接跳过
-  * ⚠️同样: AI自己幻想/脑补/角色设定里的内容(比如"我是一个来自魔界的恶魔")不能当成世界事实记成world_state 除非聊天里对方确认了这个设定存在于当前世界观 不确定就用general
-  * open_thread=对话里提到但还没完结的话题(比如"下次再聊这个") 用于让AI下次能主动提起
-  * relationship_event=两人关系的重要节点(吵架/和好/告白/约定见面等) 不是日常闲聊
-  * importance/emotionalWeight/confidence都是0-1的小数 不确定就0.5 重要事件/承诺类至少0.7
-  * tags是字符串数组 2-5个标签概括这条记忆
-  * 每条content要独立可懂 不超过80字 用第三人称描述(如"用户喜欢喝奶茶""AI答应周五陪用户去看电影") 写清楚主语 不要用"你""我""他"这种指代不清的词
-  * 新旧信息冲突时 以聊天记录里最新明确出现的信息为准 旧记忆会被自动覆盖
-  * 只记这批新消息里出现的 不重复已有的 没有新材料就不输出空数组`
+以下是固定输出协议，只输出JSON：
+${JSON.stringify(outputShape)}`
 }
 
 function formatMessagesForMemory(messages: Message[]): string {
@@ -224,7 +208,7 @@ function parseMemoryResponse(raw: string): MemoryUpdateResult | null {
   if (fenceMatch) text = fenceMatch[1].trim()
   try {
     const parsed = JSON.parse(text)
-    if (typeof parsed?.facts === 'string' && typeof parsed?.style === 'string') {
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const delta = typeof parsed.warmthDelta === 'number' ? parsed.warmthDelta : Number(parsed.warmthDelta)
       const assessment = typeof parsed.relationshipAssessment === 'string' ? parsed.relationshipAssessment.trim() : ''
       const factConfidence = typeof parsed.factConfidence === 'number' ? parsed.factConfidence : Number(parsed.factConfidence)
@@ -232,9 +216,9 @@ function parseMemoryResponse(raw: string): MemoryUpdateResult | null {
       const relationshipConfidence =
         typeof parsed.relationshipConfidence === 'number' ? parsed.relationshipConfidence : Number(parsed.relationshipConfidence)
       return {
-        facts: parsed.facts.trim(),
+        facts: typeof parsed.facts === 'string' ? parsed.facts.trim() : '',
         factConfidence: Number.isFinite(factConfidence) ? Math.max(0, Math.min(100, Math.round(factConfidence))) : 0,
-        style: parsed.style.trim(),
+        style: typeof parsed.style === 'string' ? parsed.style.trim() : '',
         styleConfidence: Number.isFinite(styleConfidence) ? Math.max(0, Math.min(100, Math.round(styleConfidence))) : 0,
         plans: parsePlansField(parsed.plans, true),
         warmthDelta: Number.isFinite(delta) ? clampWarmthDelta(delta) : 0,
@@ -481,6 +465,10 @@ export async function maybeUpdateMemory(
     const cursor = contact.memoryMessageCursor ?? 0
     const newMessages = allMessages.slice(cursor)
     if (newMessages.length < MEMORY_UPDATE_INTERVAL) return null
+    const memoryPromptEnabled = promptModuleEnabled(settings, 'memory')
+    const relationshipPromptEnabled = promptModuleEnabled(settings, 'relationship') && isModuleEnabled('relationship')
+    const intentPromptEnabled = promptModuleEnabled(settings, 'intent') && isModuleEnabled('intent')
+    if (!memoryPromptEnabled && !relationshipPromptEnabled && !intentPromptEnabled) return null
 
     const raw = await chatCompletion({
       apiKey: settings.apiKey,
@@ -490,6 +478,7 @@ export async function maybeUpdateMemory(
         {
           role: 'system',
           content: buildMemoryUpdatePrompt({
+            settings,
             existingFacts: contact.memoryFacts,
             existingStyle: contact.memoryStyle,
             existingPlansText: activeUpcomingPlansText(contact, new Date()),
@@ -510,9 +499,9 @@ export async function maybeUpdateMemory(
 
     // Relationship scoring is only active when the 好感度 module is enabled.
     // Memory (facts/style/plans) always updates regardless.
-    const relEnabled = isModuleEnabled('relationship')
+    const relEnabled = relationshipPromptEnabled
     const personalityEnabled = isModuleEnabled('personalityTraits')
-    const intentEnabled = isModuleEnabled('intent')
+    const intentEnabled = intentPromptEnabled
 
     const oldWarmth = contact.warmth ?? 0
     const rawDelta = relEnabled ? updated.warmthDelta : 0
@@ -541,20 +530,22 @@ export async function maybeUpdateMemory(
       }
     }
 
-    const factsUpdated = updated.factConfidence >= MEMORY_CONFIDENCE_THRESHOLD && updated.facts !== contact.memoryFacts
-    const styleUpdated = updated.styleConfidence >= MEMORY_CONFIDENCE_THRESHOLD && updated.style !== contact.memoryStyle
-    const addedPlans = newPlanItems(updated.plans, now)
+    const factsUpdated = memoryPromptEnabled && updated.factConfidence >= MEMORY_CONFIDENCE_THRESHOLD && updated.facts !== contact.memoryFacts
+    const styleUpdated = memoryPromptEnabled && updated.styleConfidence >= MEMORY_CONFIDENCE_THRESHOLD && updated.style !== contact.memoryStyle
+    const addedPlans = memoryPromptEnabled ? newPlanItems(updated.plans, now) : []
     const addedIntents = intentEnabled ? newIntentItems(contact.intentQueue ?? [], updated.intents, now) : []
 
     // Write structured memory items to the contactMemories table (deduped).
-    const memStats = await mergeMemoryItems(contact.id, updated.memoryItems, conversationId, now)
+    const memStats = memoryPromptEnabled
+      ? await mergeMemoryItems(contact.id, updated.memoryItems, conversationId, now)
+      : { added: 0, updated: 0 }
     if (memStats.added > 0 || memStats.updated > 0) {
       console.log(`[memory] 结构化记忆: +${memStats.added} 更新${memStats.updated}`)
     }
 
     // character_promise items also feed into upcomingPlans so the AI
     // remembers its commitments across turns.
-    const promisePlans: PlanItem[] = updated.memoryItems
+    const promisePlans: PlanItem[] = (memoryPromptEnabled ? updated.memoryItems : [])
       .filter((item) => item.kind === 'character_promise')
       .map((item) => ({
         id: uuid(),
@@ -566,11 +557,13 @@ export async function maybeUpdateMemory(
     const allAddedPlans = [...addedPlans, ...promisePlans]
 
     await db.contacts.update(contact.id, {
-      memoryFacts: factsUpdated ? updated.facts : contact.memoryFacts,
-      memoryStyle: styleUpdated ? updated.style : contact.memoryStyle,
-      memoryUpdatedAt: now,
       memoryMessageCursor: allMessages.length,
-      upcomingPlans: mergePlanItems(contact.upcomingPlans ?? [], allAddedPlans, now),
+      ...(memoryPromptEnabled ? {
+        memoryFacts: factsUpdated ? updated.facts : contact.memoryFacts,
+        memoryStyle: styleUpdated ? updated.style : contact.memoryStyle,
+        memoryUpdatedAt: now,
+        upcomingPlans: mergePlanItems(contact.upcomingPlans ?? [], allAddedPlans, now),
+      } : {}),
       ...(intentEnabled
         ? { intentQueue: mergeIntentItems(contact.intentQueue ?? [], addedIntents, now) }
         : {}),
@@ -786,6 +779,7 @@ function formatGroupMessagesForMemory(
 }
 
 function buildGroupMemoryUpdatePrompt(opts: {
+  settings: AppSettings
   groupName: string
   transcript: string
   currentTimeText: string
@@ -802,24 +796,20 @@ function buildGroupMemoryUpdatePrompt(opts: {
     )
     .join('\n\n')
 
-  return `你是群聊记忆整理器 帮群聊"${opts.groupName}"里的角色更新记忆 输出JSON 不要有额外文字
+  const editable = getPromptTemplate(opts.settings, 'memory', 'groupUpdate', {
+    groupName: opts.groupName,
+    currentTime: opts.currentTimeText,
+    memberNames: allMemberNames,
+    transcript: opts.transcript,
+    speakerBlocks,
+  })
+  if (!editable) return ''
+  return `${editable}
 
-【当前时间】
-${opts.currentTimeText}
-
-【群成员】
-${allMemberNames}
-
-群聊记录:
-${opts.transcript}
-
-下面是需要更新的发言人(只根据自己能看到的聊天内容更新):
-${speakerBlocks}
-
-输出:
+以下是固定输出协议，只输出JSON：
 {"updates":[{"facts":"...","style":"...","plans":[{"text":"...","date":"YYYY-MM-DD或空字符串"}],"memoryItems":[{"category":"基础信息","kind":"user_fact","content":"...","tags":[],"importance":0.7,"emotionalWeight":0.3,"confidence":0.9}],"groupMemoryItems":[{"category":"话题历史","kind":"general","content":"...","tags":[],"importance":0.6,"emotionalWeight":0.2,"confidence":0.8}],"interpersonalMemoryItems":[{"category":"重要事件","kind":"relationship_event","content":"...","relatedContactNames":["雪乃"],"tags":[],"importance":0.7,"emotionalWeight":0.4,"confidence":0.85}]}]}
 
-要求:
+固定字段约束:
 - updates数组顺序和上面发言人顺序一致 数量一致
 - facts客观信息≤200字 style相处语气≤150字
 - 没有新增内容的就原样返回已知信息 不要清空
@@ -883,6 +873,7 @@ export async function maybeUpdateGroupMemory(
   settings: AppSettings,
 ): Promise<void> {
   try {
+    if (!promptModuleEnabled(settings, 'memory')) return
     const group = await db.groups.get(groupId)
     if (!group) return
 
@@ -926,6 +917,7 @@ export async function maybeUpdateGroupMemory(
         {
           role: 'system',
           content: buildGroupMemoryUpdatePrompt({
+            settings,
             groupName: group.name,
             transcript: formatGroupMessagesForMemory(newMessages, memberById, settings.userNickname),
             currentTimeText: describeCurrentTime(new Date()),
