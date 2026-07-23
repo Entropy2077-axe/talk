@@ -226,6 +226,48 @@ test('settings page scrolls to bottom revealing backup section and danger zone',
   await expect(page.getByRole('button', { name: '清空所有联系人与聊天记录' })).toBeInViewport()
 })
 
+test('settings uses searchable model pickers for large provider model lists', async ({ page }) => {
+  const models = Array.from({ length: 118 }, (_, index) => `vendor/model-${String(index).padStart(3, '0')}`)
+  models[73] = 'deepseek-ai/deepseek-v4-pro'
+
+  await page.route('https://models.example/v1/models', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ data: models.map((id) => ({ id })) }),
+    })
+  })
+  await page.goto('/#/settings')
+  await page.evaluate(async () => {
+    const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
+    useSettingsStore.getState().setSettings({
+      apiKey: 'test-key',
+      baseUrl: 'https://models.example',
+      model: 'old-chat-model',
+      utilityModel: 'old-utility-model',
+    })
+  })
+  await page.reload()
+
+  await page.getByRole('button', { name: '拉取模型' }).click()
+
+  const defaultModel = [...models].sort()[0]
+  await expect(page.locator('option', { hasText: defaultModel })).toHaveCount(0)
+  await page.getByRole('button', { name: defaultModel }).first().click()
+  const dialog = page.getByRole('dialog', { name: '选择聊天模型' })
+  await expect(dialog).toBeVisible()
+  await page.getByRole('textbox', { name: '搜索模型名称' }).fill('deepseek-v4-pro')
+  await expect(page.getByText('共 118 个模型，找到 1 个')).toBeVisible()
+  await dialog.getByRole('button', { name: /deepseek-ai\/deepseek-v4-pro/ }).click()
+
+  await expect(page.getByRole('button', { name: 'deepseek-ai/deepseek-v4-pro' }).first()).toBeVisible()
+  const storedModel = await page.evaluate(async () => {
+    const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
+    return useSettingsStore.getState().model
+  })
+  expect(storedModel).toBe('deepseek-ai/deepseek-v4-pro')
+})
+
 test('messages page empty state keeps bottom nav pinned to viewport bottom', async ({ page }) => {
   await page.goto('/#/')
   await clearDatabase(page)

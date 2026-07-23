@@ -1,7 +1,7 @@
 {
   "name": "talk",
   "private": true,
-  "version": "0.1.31",
+  "version": "0.1.32",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -19,6 +19,7 @@
     "release:apk": "node scripts/release-apk.mjs"
   },
   "dependencies": {
+    "@boengli/capacitor-fullscreen": "^0.0.20",
     "@capacitor/android": "^8.4.1",
     "@capacitor/app": "^8.1.0",
     "@capacitor/core": "^8.4.1",

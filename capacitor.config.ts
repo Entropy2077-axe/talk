@@ -11,6 +11,10 @@ const config: CapacitorConfig = {
     CapacitorHttp: {
       enabled: true,
     },
+    Fullscreen: {
+      // Fullscreen is an explicit button on the "Me" page, never forced at launch.
+      activateOnLoad: false,
+    },
   },
   android: {
     // ComfyUI and Stable Diffusion WebUI commonly run over plain HTTP on

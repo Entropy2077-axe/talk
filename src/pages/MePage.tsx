@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { Capacitor } from '@capacitor/core'
+import { Fullscreen } from '@boengli/capacitor-fullscreen'
 import { useNavigate } from 'react-router-dom'
 import { TopBar } from '../components/TopBar'
 import { Avatar } from '../components/Avatar'
@@ -10,6 +12,11 @@ import { db } from '../db/db'
 import { USER_WALLET_ID } from '../lib/finance'
 import { useModuleEnabled } from '../features'
 
+// The Android plugin does not expose a status query. Keep the state at module
+// scope so it survives navigating away from and back to the Me tab while the
+// current WebView process is alive.
+let androidFullscreenActive = false
+
 export function MePage() {
   const navigate = useNavigate()
   const settings = useSettingsStore()
@@ -18,7 +25,9 @@ export function MePage() {
   const [checking, setChecking] = useState(false)
   const [updateMessage, setUpdateMessage] = useState('')
   const [updateUrl, setUpdateUrl] = useState('')
-  const [isFullscreen, setIsFullscreen] = useState(() => Boolean(document.fullscreenElement))
+  const [isFullscreen, setIsFullscreen] = useState(() =>
+    Capacitor.getPlatform() === 'android' ? androidFullscreenActive : Boolean(document.fullscreenElement),
+  )
   const [fullscreenError, setFullscreenError] = useState('')
   const saveLoadEnabled = useModuleEnabled('saveLoad')
 
@@ -34,7 +43,16 @@ export function MePage() {
   async function handleFullscreen() {
     setFullscreenError('')
     try {
-      if (document.fullscreenElement) {
+      if (Capacitor.getPlatform() === 'android') {
+        if (androidFullscreenActive) {
+          await Fullscreen.deactivateImmersiveMode()
+          androidFullscreenActive = false
+        } else {
+          await Fullscreen.activateImmersiveMode()
+          androidFullscreenActive = true
+        }
+        setIsFullscreen(androidFullscreenActive)
+      } else if (document.fullscreenElement) {
         await document.exitFullscreen()
       } else {
         await document.documentElement.requestFullscreen({ navigationUI: 'hide' })

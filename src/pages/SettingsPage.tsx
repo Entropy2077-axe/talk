@@ -17,6 +17,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { USER_WALLET_ID, setUserBalance } from '../lib/finance'
 import { formatCurrency } from '../lib/wallet'
 import { CHAT_PAGE_SIZE_OPTIONS, normalizeChatPageSize } from '../lib/chatPagination'
+import { ModelPicker } from '../components/ModelPicker'
 
 export function SettingsPage() {
   const navigate = useNavigate()
@@ -119,6 +120,7 @@ export function SettingsPage() {
   const currencyMode = currencyIconMode ?? 'coin'
 
   const [models, setModels] = useState<string[]>([])
+  const [modelPicker, setModelPicker] = useState<'chat' | 'utility' | null>(null)
   const [pulling, setPulling] = useState(false)
   const [pullError, setPullError] = useState('')
   const [testing, setTesting] = useState(false)
@@ -139,10 +141,8 @@ export function SettingsPage() {
       const list = await listModels(apiKeyDraft.trim(), baseUrlDraft.trim())
       setModels(list)
       if (list.length > 0) {
-        // Both drafts need this, not just the main one — otherwise a stale
-        // model id (not in the freshly-pulled list) leaves the <select>
-        // showing the browser's "no match, default to first option" display
-        // while the actual stored setting silently stays on the old value.
+        // Keep both saved choices valid when switching API providers. A
+        // provider-specific stale id must not remain selected after refresh.
         if (!list.includes(modelDraft)) {
           setModelDraft(list[0])
           setSettings({ model: list[0] })
@@ -384,21 +384,14 @@ export function SettingsPage() {
         <label className="mb-1 block text-xs text-gray-500">模型</label>
         <div className="mb-1 flex gap-2">
           {models.length > 0 ? (
-            <select
-              value={modelDraft}
-              onChange={(e) => {
-                setModelDraft(e.target.value)
-                setSettings({ model: e.target.value })
-                setTestResult(null)
-              }}
-              className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            <button
+              type="button"
+              onClick={() => setModelPicker('chat')}
+              className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg border border-gray-200 px-3 py-2 text-left text-sm"
             >
-              {models.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
+              <span className="min-w-0 flex-1 truncate">{modelDraft}</span>
+              <span className="shrink-0 text-xs text-gray-400" aria-hidden="true">▼</span>
+            </button>
           ) : (
             <input
               value={modelDraft}
@@ -416,20 +409,14 @@ export function SettingsPage() {
         <label className="mb-1 block text-xs text-gray-500">多功能模型（商城生成、好感度评分、世界观草稿等辅助任务，独立于主聊天模型）</label>
         <div className="mb-1 flex gap-2">
           {models.length > 0 ? (
-            <select
-              value={utilityModelDraft}
-              onChange={(e) => {
-                setUtilityModelDraft(e.target.value)
-                setSettings({ utilityModel: e.target.value })
-              }}
-              className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            <button
+              type="button"
+              onClick={() => setModelPicker('utility')}
+              className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg border border-gray-200 px-3 py-2 text-left text-sm"
             >
-              {models.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
+              <span className="min-w-0 flex-1 truncate">{utilityModelDraft}</span>
+              <span className="shrink-0 text-xs text-gray-400" aria-hidden="true">▼</span>
+            </button>
           ) : (
             <input
               value={utilityModelDraft}
@@ -648,6 +635,24 @@ export function SettingsPage() {
           onConfirm={(dataUrl) => {
             setSettings({ chatBackground: dataUrl })
             setBackgroundCropSrc('')
+          }}
+        />
+      )}
+      {modelPicker && (
+        <ModelPicker
+          title={modelPicker === 'chat' ? '选择聊天模型' : '选择多功能模型'}
+          models={models}
+          value={modelPicker === 'chat' ? modelDraft : utilityModelDraft}
+          onClose={() => setModelPicker(null)}
+          onSelect={(selectedModel) => {
+            if (modelPicker === 'chat') {
+              setModelDraft(selectedModel)
+              setSettings({ model: selectedModel })
+              setTestResult(null)
+            } else {
+              setUtilityModelDraft(selectedModel)
+              setSettings({ utilityModel: selectedModel })
+            }
           }}
         />
       )}
