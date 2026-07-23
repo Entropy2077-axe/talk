@@ -64,6 +64,7 @@ function syncAppHeight() {
 syncAppHeight()
 window.addEventListener('resize', syncAppHeight)
 window.addEventListener('orientationchange', syncAppHeight)
+window.addEventListener('talk:system-ui-change', syncAppHeight)
 window.visualViewport?.addEventListener('resize', syncAppHeight)
 useSettingsStore.subscribe((state, previous) => {
   if (state.topInsetAdjustmentPx !== previous.topInsetAdjustmentPx) syncAppHeight()

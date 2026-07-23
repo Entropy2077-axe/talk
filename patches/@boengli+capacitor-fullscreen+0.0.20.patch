@@ -1,0 +1,58 @@
+diff --git a/node_modules/@boengli/capacitor-fullscreen/android/src/main/java/com/boengli/plugins/fullscreen/Fullscreen.kt b/node_modules/@boengli/capacitor-fullscreen/android/src/main/java/com/boengli/plugins/fullscreen/Fullscreen.kt
+index 51ecebd..1cc12f7 100644
+--- a/node_modules/@boengli/capacitor-fullscreen/android/src/main/java/com/boengli/plugins/fullscreen/Fullscreen.kt
++++ b/node_modules/@boengli/capacitor-fullscreen/android/src/main/java/com/boengli/plugins/fullscreen/Fullscreen.kt
+@@ -6,6 +6,7 @@ import android.os.Handler
+ import android.os.Looper
+ import android.util.Log
+ import android.view.View
++import android.view.WindowManager
+ import androidx.core.view.WindowCompat
+ import androidx.core.view.WindowInsetsCompat
+ import androidx.core.view.WindowInsetsControllerCompat
+@@ -22,6 +23,7 @@ class Fullscreen : Plugin() {
+   }
+ 
+   private var isImmersiveModeActive: Boolean = false
++  private var previousCutoutMode: Int? = null
+ 
+   override fun load() {
+     super.load()
+@@ -132,6 +134,22 @@ class Fullscreen : Plugin() {
+     val window = activity.window
+     val decorView = window.decorView
+ 
++    // Hiding the status bar is not enough on devices with a display cutout:
++    // Android's default cutout mode can keep the former status-bar strip
++    // letterboxed in black. Explicitly allow the Activity to draw through
++    // that area; CSS safe-area insets still keep important controls clear of
++    // the camera cutout.
++    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
++      val attributes = window.attributes
++      if (previousCutoutMode == null) previousCutoutMode = attributes.layoutInDisplayCutoutMode
++      attributes.layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
++        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
++      } else {
++        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
++      }
++      window.attributes = attributes
++    }
++
+     decorView.onFocusChangeListener = null
+     focusChangeListener = null
+ 
+@@ -168,6 +186,14 @@ class Fullscreen : Plugin() {
+     focusChangeListener = null
+ 
+     WindowCompat.setDecorFitsSystemWindows(window, true)
++    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
++      previousCutoutMode?.let { mode ->
++        val attributes = window.attributes
++        attributes.layoutInDisplayCutoutMode = mode
++        window.attributes = attributes
++      }
++      previousCutoutMode = null
++    }
+     val controller = WindowCompat.getInsetsController(window, decorView)
+     controller?.show(WindowInsetsCompat.Type.systemBars())
+ 

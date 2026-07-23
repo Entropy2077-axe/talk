@@ -17,6 +17,15 @@ import { useModuleEnabled } from '../features'
 // current WebView process is alive.
 let androidFullscreenActive = false
 
+function refreshViewportAfterSystemUiChange() {
+  const notify = () => window.dispatchEvent(new Event('talk:system-ui-change'))
+  notify()
+  // Android applies window-inset and cutout changes asynchronously. Measure
+  // once after layout and once after the system-bar animation has settled.
+  requestAnimationFrame(() => requestAnimationFrame(notify))
+  window.setTimeout(notify, 200)
+}
+
 export function MePage() {
   const navigate = useNavigate()
   const settings = useSettingsStore()
@@ -52,6 +61,7 @@ export function MePage() {
           androidFullscreenActive = true
         }
         setIsFullscreen(androidFullscreenActive)
+        refreshViewportAfterSystemUiChange()
       } else if (document.fullscreenElement) {
         await document.exitFullscreen()
       } else {

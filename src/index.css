@@ -150,6 +150,11 @@ body {
 #root {
   box-sizing: border-box;
   overflow: hidden;
+  background: #ffffff;
+}
+
+:root[data-theme='dark'] #root {
+  background: #111827;
 }
 
 .theme-dark {

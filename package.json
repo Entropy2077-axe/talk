@@ -1,9 +1,10 @@
 {
   "name": "talk",
   "private": true,
-  "version": "0.1.32",
+  "version": "0.1.33",
   "type": "module",
   "scripts": {
+    "postinstall": "patch-package",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:pages": "cross-env VITE_DEPLOY_TARGET=github-pages vite build",
@@ -42,6 +43,7 @@
     "autoprefixer": "^10.5.2",
     "cross-env": "^10.1.0",
     "oxlint": "^1.71.0",
+    "patch-package": "^8.0.1",
     "playwright": "^1.61.1",
     "postcss": "^8.5.16",
     "tailwindcss": "^4.3.2",
