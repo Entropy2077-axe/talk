@@ -2,6 +2,7 @@ import { lazy } from 'react'
 import type { FeatureModule } from './types'
 
 const WorldSettingsPage = lazy(() => import('../pages/WorldSettingsPage').then(({ WorldSettingsPage }) => ({ default: WorldSettingsPage })))
+const WorldbookCollectionPage = lazy(() => import('../pages/WorldbookCollectionPage').then(({ WorldbookCollectionPage }) => ({ default: WorldbookCollectionPage })))
 
 export const worldviewModule: FeatureModule = {
   id: 'worldview',
@@ -9,6 +10,9 @@ export const worldviewModule: FeatureModule = {
   icon: '📖',
   description: '共享世界观设定，注入到所有AI的对话和朋友圈中',
   parentId: 'character-soul',
-  routes: [{ path: '/world-settings', component: WorldSettingsPage }],
+  routes: [
+    { path: '/world-settings', component: WorldSettingsPage },
+    { path: '/world-settings/:collectionId', component: WorldbookCollectionPage },
+  ],
   discoverEntries: [{ to: '/world-settings', icon: '📖', label: '世界书' }],
 }

@@ -4,19 +4,21 @@ import type { ReactNode } from 'react'
 interface TopBarProps {
   title: string
   showBack?: boolean
+  onBack?: () => void
   showSearch?: boolean
   onSearchClick?: () => void
   right?: ReactNode
 }
 
-export function TopBar({ title, showBack, showSearch, onSearchClick, right }: TopBarProps) {
+export function TopBar({ title, showBack, onBack, showSearch, onSearchClick, right }: TopBarProps) {
   const navigate = useNavigate()
   return (
     <header className="relative flex h-12 shrink-0 items-center border-b border-gray-100 bg-white px-2">
       <div className="flex w-14 items-center">
         {showBack && (
           <button
-            onClick={() => navigate(-1)}
+            type="button"
+            onClick={onBack ?? (() => navigate(-1))}
             aria-label="返回"
             className="flex h-9 w-9 items-center justify-center text-gray-700"
           >
@@ -33,7 +35,7 @@ export function TopBar({ title, showBack, showSearch, onSearchClick, right }: To
         )}
       </div>
       <h1
-        className="absolute text-[16px] font-medium text-gray-900"
+        className="pointer-events-none absolute max-w-[calc(100%-7rem)] truncate text-[16px] font-medium text-gray-900"
         style={{ left: 'calc(50% - 6px)', transform: 'translateX(-50%)' }}
       >
         {title}

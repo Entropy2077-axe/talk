@@ -371,9 +371,11 @@ export interface PersonaGenerationResult {
   gender?: string
   ageRange?: string
   occupation?: string
+  /** Nuwa mode lets the model choose this from the completed persona. */
+  initialWarmth?: number
 }
 
-export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCategory: AvatarCategory, promptModules?: PromptModuleSettings): string {
+export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCategory: AvatarCategory, promptModules?: PromptModuleSettings, worldbookText = ''): string {
   const promptSettings = { promptModules: promptModules ?? createDefaultPromptModules() }
   if (!promptModuleEnabled(promptSettings, 'nuwaMode')) return ''
   const avatarInstruction =
@@ -401,7 +403,13 @@ export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCate
 - 与用户的过往/共同经历: ${answers.sharedHistory?.trim() || '未提供'}`
   const editable = getPromptTemplate(promptSettings, 'nuwaMode', 'persona', { personaAnswers }) ?? ''
 
-  return `${editable}
+  const worldbookBlock = worldbookText.trim() ? `
+
+【本次角色生成最高优先级世界观】
+以下内容是用户为这个角色明确选择或由启用中的世界书检索得到的正史硬约束。角色身份、种族、经历、能力边界、关系、生活方式和行为逻辑必须与其一致；不得只提到一嘴，也不得用现实常识或自由发挥覆盖。
+${worldbookText.trim()}` : ''
+
+  return `${editable}${worldbookBlock}
 
 固定输出协议：只输出下列结构的JSON，不要Markdown代码块或解释：
 {
@@ -417,12 +425,13 @@ export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCate
   "mbti": "这个人的MBTI类型 根据你设计的人设推断最符合的四字母 比如INFP/ESTJ/INTJ等 必须是一个有效的MBTI类型",
   "speechSamples": ["[日常] 一句符合这个人说话方式的短消息", "[被关心] 一句短消息", "[情绪触发] 一句短消息", "[亲近互动] 一句短消息"],
   "personaProfile": {"facts":["不可改变的身份/背景事实"],"boundaries":["关系边界或禁忌"],"habits":["稳定习惯/口癖"],"behaviorAnchors":["遇到某类情境会如何自然反应"]},
+  ${answers.draftMode ? '"initialWarmth": 35,' : ''}
   "monthlySalary": 8000,
   "schedule": [
     { "dayOfWeek": 1, "startHour": 9, "endHour": 18, "phoneAccess": "unavailable", "location": "公司", "activity": "上班" },
     { "dayOfWeek": 1, "startHour": 23, "endHour": 7, "phoneAccess": "unavailable", "location": "家里", "activity": "睡觉" }
   ]${avatarInstruction}
-	}`
+	}${answers.draftMode ? '\ninitialWarmth 必须是 -100 到 100 的整数。请根据角色对用户的关系定位、共同经历、性格和边界自行决定，陌生疏离可为负数，亲密关系应与设定相符。' : ''}`
 }
 
 export function parsePersonaGeneration(raw: string): PersonaGenerationResult | null {
@@ -464,6 +473,7 @@ export function parsePersonaGeneration(raw: string): PersonaGenerationResult | n
         mbti,
         personaProfile,
         monthlySalary: Number.isFinite(parsed.monthlySalary) ? Math.max(1000, Math.min(200000, Math.round(parsed.monthlySalary))) : undefined,
+        initialWarmth: Number.isFinite(parsed.initialWarmth) ? Math.max(-100, Math.min(100, Math.round(parsed.initialWarmth))) : undefined,
       }
     }
   } catch {

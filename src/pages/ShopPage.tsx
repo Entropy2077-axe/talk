@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { TopBar } from '../components/TopBar'
 import { useSettingsStore } from '../store/useSettingsStore'
@@ -7,7 +6,8 @@ import { chatCompletion } from '../lib/deepseek'
 import { buildShopPrompt, parseShopProducts, type GeneratedProduct } from '../lib/shop'
 import { formatCurrency } from '../lib/wallet'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { USER_WALLET_ID, transferFunds } from '../lib/finance'
+import { USER_WALLET_ID } from '../lib/finance'
+import { purchaseInventoryProduct } from '../lib/inventory'
 
 export function ShopPage() {
   const settings = useSettingsStore()
@@ -61,15 +61,7 @@ export function ShopPage() {
       setToast('金币不够啦')
       return
     }
-    await transferFunds({ from: USER_WALLET_ID, amount: product.price, kind: 'purchase', note: product.name })
-    await db.inventory.add({
-      id: uuid(),
-      name: product.name,
-      description: product.description,
-      icon: product.icon,
-      price: product.price,
-      acquiredAt: Date.now(),
-    })
+    await purchaseInventoryProduct(product)
     setToast(`已购买「${product.name}」`)
   }
 

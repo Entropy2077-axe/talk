@@ -473,6 +473,9 @@ async function runGroupAiTurn(
         messages: [{
           role: 'system',
           content: buildGroupJsonConversionPrompt(rawText, speakers, stickers.map((s) => s.name), mediaPromptOptions),
+        }, {
+          role: 'user',
+          content: '请执行上述转换，并且只输出指定的 JSON 对象。',
         }],
         jsonMode: true,
         signal: controller.signal,
@@ -548,6 +551,9 @@ async function runGroupAiTurn(
           messages: [{
             role: 'system',
             content: buildGroupJsonConversionPrompt(rawText, speakers, stickers.map((sticker) => sticker.name), mediaPromptOptions),
+          }, {
+            role: 'user',
+            content: '请执行上述转换，并且只输出指定的 JSON 对象。',
           }],
           jsonMode: true,
           signal: controller.signal,
@@ -575,7 +581,7 @@ async function runGroupAiTurn(
         localDraft = parseGroupRawDraft(rawText, speakers, stickers.map((sticker) => sticker.name), remoteStickerSearchEnabled)
         localDraft.groupVibe = group.vibe || '自然、轻松的日常群聊。'
         if (!localDraft.valid || localDraft.needsUtility) {
-          jsonRaw = await chatCompletion({apiKey:settings.apiKey,baseUrl:settings.baseUrl,model:settings.utilityModel,messages:[{role:'system',content:buildGroupJsonConversionPrompt(rawText,speakers,stickers.map(s=>s.name),mediaPromptOptions)}],jsonMode:true,signal:controller.signal,thinking:'disabled',temperature:0.1,maxTokens:1400,trace:{turnId:streamId,stage:'other',conversationId}})
+          jsonRaw = await chatCompletion({apiKey:settings.apiKey,baseUrl:settings.baseUrl,model:settings.utilityModel,messages:[{role:'system',content:buildGroupJsonConversionPrompt(rawText,speakers,stickers.map(s=>s.name),mediaPromptOptions)},{role:'user',content:'请执行上述转换，并且只输出指定的 JSON 对象。'}],jsonMode:true,signal:controller.signal,thinking:'disabled',temperature:0.1,maxTokens:1400,trace:{turnId:streamId,stage:'other',conversationId}})
           finalRaw=jsonRaw
           ;({bubbles,knowledgeQueries,turnSummary,groupVibe,planCandidates}=parseGroupAiResponse(finalRaw,speakers.length))
         } else {

@@ -6,6 +6,7 @@ import { db } from '../db/db'
 import { TopBar } from '../components/TopBar'
 import { Avatar } from '../components/Avatar'
 import { AvatarPicker } from '../components/AvatarPicker'
+import { WorldbookEntrySelector } from '../components/WorldbookEntrySelector'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { useModuleEnabled } from '../features'
 import { chatCompletion } from '../lib/deepseek'
@@ -19,7 +20,7 @@ import { displayName } from '../lib/contact'
 import { pickAvatarCategory } from '../lib/avatarCategory'
 import { OCCUPATION_OPTIONS, employmentPatch } from '../lib/career'
 import { randomAnimeAvatar, searchPexelsPhoto } from '../lib/photoSearch'
-import { retrieveWorldbookContext } from '../lib/worldbook'
+import { retrieveWorldbookContext, selectedWorldbookEntriesText } from '../lib/worldbook'
 import { getPromptTemplate, promptModuleEnabled } from '../lib/promptModules'
 import { customTraitsValidationError, hasOverlappingCustomTraitRules } from '../lib/contactCreator'
 import { CONTACT_RELATION_LABELS, HOBBY_TAG_OPTIONS, PERSONALITY_TRAIT_OPTIONS, type ContactRelationLabel, type CustomPersonalityTrait, type PersonaCreationRecord } from '../types'
@@ -161,6 +162,8 @@ export function ContactAddPage() {
   const [isNuwaMode, setIsNuwaMode] = useState(false)
   const draftMode = isNuwaMode
   const [relationship, setRelationship] = useState('')
+  const [initialWarmthMode, setInitialWarmthMode] = useState<'auto' | 'custom'>('auto')
+  const [customInitialWarmth, setCustomInitialWarmth] = useState(0)
   const [personalityTrait, setPersonalityTrait] = useState('')
   const [personalityTraitContent, setPersonalityTraitContent] = useState('')
   const [traitPickerOpen, setTraitPickerOpen] = useState(false)
@@ -192,6 +195,8 @@ export function ContactAddPage() {
   const [personaDraft, setPersonaDraft] = useState<PersonaGenerationResult | null>(null)
   const [nuwaPersonaSetting, setNuwaPersonaSetting] = useState('')
   const [polishingPersona, setPolishingPersona] = useState(false)
+  const [worldbookSelectorOpen, setWorldbookSelectorOpen] = useState(false)
+  const [selectedWorldbookEntryIds, setSelectedWorldbookEntryIds] = useState<string[]>([])
 
   const previouslyUsedTraits = (() => {
     const byName = new Map<string, CustomPersonalityTrait>()
@@ -230,7 +235,14 @@ export function ContactAddPage() {
 
   async function creationWorldbookContext(query: string) {
     if (!promptModuleEnabled(settings, 'worldview')) return ''
-    return retrieveWorldbookContext(query, { maxEntries: 8, maxChars: 6500, includeHighPriorityFallback: true })
+    const [selectedText, retrievedText] = await Promise.all([
+      selectedWorldbookEntriesText(selectedWorldbookEntryIds),
+      retrieveWorldbookContext(query, { maxEntries: 8, maxChars: 6500, includeHighPriorityFallback: true }),
+    ])
+    return [
+      selectedText ? `【用户为本次角色生成明确勾选的世界观——最高语义优先级】\n${selectedText}` : '',
+      retrievedText,
+    ].filter(Boolean).join('\n\n')
   }
 
   function fallbackBirthday(ageText: string) {
@@ -362,7 +374,8 @@ issues 要用简短中文列出具体错误。` },
   async function saveCurrentPersona() {
     const now = Date.now()
     const profile = personaSnapshot()
-    await db.savedPersonas.add({ id: uuid(), name: customNickname.trim() || customRealName.trim(), nickname: customNickname.trim() || undefined, realName: customRealName.trim() || undefined, birthday: customBirthday.trim() || undefined, profile, sharedHistory: profile.sharedHistory || undefined, personaConstraints: (isNuwaMode ? `${extra.trim()}\n${currentNuwaPersonaText()}` : extra.trim()) || undefined, customPersonalityTraits: isNuwaMode ? effectiveNuwaTraits() : customTraits, createdAt: now, updatedAt: now })
+    const automaticWarmth = initialWarmthForBase(profile.relationship || '朋友', personalityTrait)
+    await db.savedPersonas.add({ id: uuid(), name: customNickname.trim() || customRealName.trim(), nickname: customNickname.trim() || undefined, realName: customRealName.trim() || undefined, birthday: customBirthday.trim() || undefined, profile, sharedHistory: profile.sharedHistory || undefined, personaConstraints: (isNuwaMode ? `${extra.trim()}\n${currentNuwaPersonaText()}` : extra.trim()) || undefined, customPersonalityTraits: isNuwaMode ? effectiveNuwaTraits() : customTraits, initialWarmth: isNuwaMode ? personaDraft?.initialWarmth : initialWarmthMode === 'custom' ? customInitialWarmth : automaticWarmth, initialWarmthMode: isNuwaMode ? 'ai' : initialWarmthMode, createdAt: now, updatedAt: now })
     setPersonaPage(0)
   }
 
@@ -370,7 +383,15 @@ issues 要用简短中文列出具体错误。` },
     const profile = saved.profile
     setNuwaPersonaSetting(saved.personaConstraints || profile.notes || '')
     const firstTrait = saved.customPersonalityTraits?.[0]
-    setCustomTendencies(profile.personalityTendencies.join('、')); setCustomAge(profile.age); setCustomGender(profile.gender); setCustomRelationship(profile.relationship); setCustomOccupation(profile.occupation); setCustomHobbies(profile.hobbies.join('、')); setExtra(saved.personaConstraints || profile.notes || ''); setSharedHistory(saved.sharedHistory || profile.sharedHistory || ''); setCustomTraits(saved.customPersonalityTraits || []); setPersonalityTrait(firstTrait?.name || ''); setPersonalityTraitContent(firstTrait?.meaning || ''); setCustomRealName(saved.realName || ''); setCustomNickname(saved.nickname || ''); setCustomBirthday(saved.birthday || ''); setPersonaPickerOpen(false)
+    setCustomTendencies(profile.personalityTendencies.join('、')); setCustomAge(profile.age); setCustomGender(profile.gender); setCustomRelationship(profile.relationship); setCustomOccupation(profile.occupation); setCustomHobbies(profile.hobbies.join('、')); setExtra(saved.personaConstraints || profile.notes || ''); setSharedHistory(saved.sharedHistory || profile.sharedHistory || ''); setCustomTraits(saved.customPersonalityTraits || []); setPersonalityTrait(firstTrait?.name || ''); setPersonalityTraitContent(firstTrait?.meaning || ''); setCustomRealName(saved.realName || ''); setCustomNickname(saved.nickname || ''); setCustomBirthday(saved.birthday || ''); setInitialWarmthMode(saved.initialWarmthMode === 'custom' ? 'custom' : 'auto'); if (typeof saved.initialWarmth === 'number') setCustomInitialWarmth(saved.initialWarmth); setPersonaPickerOpen(false)
+  }
+
+  async function deleteSavedPersona(saved: import('../types').SavedPersona) {
+    const label = saved.nickname || saved.realName || saved.name || '未命名人设'
+    if (!window.confirm(`确定删除已保存的人设“${label}”吗？\n已创建的联系人和创建历史不会受到影响。`)) return
+    await db.savedPersonas.delete(saved.id)
+    const remainingCount = Math.max(0, savedPersonas.length - 1)
+    setPersonaPage((page) => Math.min(page, Math.max(0, Math.ceil(remainingCount / 5) - 1)))
   }
 
   function applyCreationRecord(record: PersonaCreationRecord) {
@@ -401,6 +422,7 @@ issues 要用简短中文列出具体错误。` },
       mbti: record.mbti || '',
       personaProfile: record.personaProfile,
       monthlySalary: record.monthlySalary,
+      initialWarmth: record.initialWarmth,
       relationship: record.relationship,
       gender: record.gender,
       ageRange: record.ageRange,
@@ -535,11 +557,12 @@ issues 要用简短中文列出具体错误。` },
                   hobbies: values.hobbies,
                   sharedHistory: effectiveSharedHistory,
                   draftMode: isNuwaMode,
-                  extra: [extra, worldbookText ? `【创建角色时必须遵守的世界书】\n${worldbookText}` : ''].filter(Boolean).join('\n\n'),
+                  extra,
                   occupation: values.occupation,
                 },
                 avatarCategory,
                 settings.promptModules,
+                worldbookText,
               ),
             },
             { role: 'user', content: '请生成' },
@@ -559,7 +582,10 @@ issues 要用简短中文列出具体错误。` },
       }
       if (isNuwaMode) {
         if (!draftOverride) {
-          setPersonaDraft(parsed)
+          setPersonaDraft({
+            ...parsed,
+            initialWarmth: parsed.initialWarmth ?? initialWarmthForBase(values.relationship || parsed.relationship || '朋友', values.personalityTrait || parsed.personalityTrait),
+          })
           setError('初稿已生成，请检查并修改后再确认创建')
           return
         }
@@ -601,6 +627,12 @@ issues 要用简短中文列出具体错误。` },
       const id = uuid()
       const now = Date.now()
       const chosenOccupation = values.occupation
+      const automaticWarmth = initialWarmthForBase(values.relationship || parsed.relationship || '朋友', values.personalityTrait || parsed.personalityTrait)
+      const resolvedInitialWarmth = isNuwaMode
+        ? parsed.initialWarmth ?? automaticWarmth
+        : initialWarmthMode === 'custom'
+          ? Math.max(-100, Math.min(100, Math.round(customInitialWarmth)))
+          : automaticWarmth
       await db.contacts.add({
         id,
         name: parsed.name,
@@ -625,7 +657,7 @@ issues 要用简短中文列出具体错误。` },
         memoryUpdatedAt: 0,
         memoryMessageCursor: 0,
         ...(relEnabled
-          ? { warmth: initialWarmthForBase(values.relationship || parsed.relationship || '朋友', values.personalityTrait || parsed.personalityTrait) }
+          ? { warmth: resolvedInitialWarmth }
           : {}),
         relationshipBase: values.relationship || parsed.relationship || '朋友',
         relationshipDynamic: '',
@@ -666,6 +698,7 @@ issues 要用简短中文列出具体错误。` },
         relationship: values.relationship || parsed.relationship,
         occupation: values.occupation || parsed.occupation,
         personalityTrait: values.personalityTrait || parsed.personalityTrait,
+        initialWarmth: relEnabled ? resolvedInitialWarmth : undefined,
         hobbies: values.hobbies,
         personaSetting: personaSettingText || parsed.persona,
         roleDescription: extra.trim() || undefined,
@@ -712,7 +745,7 @@ issues 要用简短中文列出具体错误。` },
     const randomRows: RelationRow[] = existingContacts.filter(() => Math.random() < 0.35).map((contact) => ({ key: uuid(), targetContactId: contact.id, label: pick(CONTACT_RELATION_LABELS) }))
     const randomOccupation = careerEnabled ? pick(OCCUPATION_OPTIONS) : ''
     const values = { tags: [pick(PERSONALITY_TAG_OPTIONS), pick(PERSONALITY_TAG_OPTIONS)].filter((v, i, a) => a.indexOf(v) === i), ageRange: pick(AGE_RANGE_OPTIONS), gender: pick(GENDER_OPTIONS.filter((x) => x !== '不限')), relationship: pick(RELATIONSHIP_OPTIONS), personalityTrait: personalityEnabled ? pick(PERSONALITY_TRAIT_OPTIONS.filter((x) => x.value !== '无')).value : '', hobbies: [...HOBBY_TAG_OPTIONS].sort(() => Math.random() - 0.5).slice(0, 1 + Math.floor(Math.random() * 4)), occupation: randomOccupation, relationRows: randomRows }
-    setTags(values.tags); setAgeRange(values.ageRange); setGender(values.gender); setRelationship(values.relationship); setPersonalityTrait(values.personalityTrait); setHobbies(values.hobbies); setOccupation(randomOccupation); setRelationRows(randomRows)
+    setTags(values.tags); setAgeRange(values.ageRange); setGender(values.gender); setRelationship(values.relationship); setPersonalityTrait(values.personalityTrait); setHobbies(values.hobbies); setOccupation(randomOccupation); setRelationRows(randomRows); setInitialWarmthMode('auto')
     void handleGenerate(values)
   }
 
@@ -873,6 +906,29 @@ issues 要用简短中文列出具体错误。` },
           </>
         )}
 
+        {relEnabled && !isNuwaMode && (
+          <section className="mb-4 rounded-xl border border-gray-200 bg-white p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-medium text-gray-700">初始好感度</p>
+                <p className="mt-0.5 text-[11px] text-gray-400">自动值会根据关系定位和性格特质计算</p>
+              </div>
+              <div className="flex rounded-lg bg-gray-100 p-0.5 text-xs">
+                <button type="button" onClick={() => setInitialWarmthMode('auto')} className={`rounded-md px-2.5 py-1.5 ${initialWarmthMode === 'auto' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>自动</button>
+                <button type="button" onClick={() => { setCustomInitialWarmth(initialWarmthForBase(relationship || '朋友', personalityTrait)); setInitialWarmthMode('custom') }} className={`rounded-md px-2.5 py-1.5 ${initialWarmthMode === 'custom' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>自定义</button>
+              </div>
+            </div>
+            {initialWarmthMode === 'auto' ? (
+              <p className="mt-3 text-center text-lg font-semibold text-[#aa3bff]">{initialWarmthForBase(relationship || '朋友', personalityTrait)}</p>
+            ) : (
+              <div className="mt-3 flex items-center gap-3">
+                <input type="range" min="-100" max="100" value={customInitialWarmth} onChange={(event) => setCustomInitialWarmth(Number(event.target.value))} className="min-w-0 flex-1 accent-[#aa3bff]" aria-label="初始好感度" />
+                <input type="number" min="-100" max="100" value={customInitialWarmth} onChange={(event) => setCustomInitialWarmth(Math.max(-100, Math.min(100, Number(event.target.value) || 0)))} className="w-20 rounded-lg border border-gray-200 px-2 py-1.5 text-center text-sm" />
+              </div>
+            )}
+          </section>
+        )}
+
         {careerEnabled && <div className="mb-4"><label className="mb-2 block text-xs font-medium text-gray-400">职业（必选）</label><div className="flex flex-wrap gap-2"><button type="button" onClick={()=>setOccupation(OCCUPATION_OPTIONS[Math.floor(Math.random()*OCCUPATION_OPTIONS.length)])} className="rounded-full bg-gray-100 px-3 py-1.5 text-xs text-gray-600">🎲 随机</button>{[...OCCUPATION_OPTIONS,'自定义'].map(v=><button key={v} type="button" onClick={()=>setOccupation(v)} className={`rounded-full px-3 py-1.5 text-xs ${occupation===v?'bg-gray-900 text-white':'bg-gray-100 text-gray-600'}`}>{v}</button>)}</div>{occupation==='自定义'&&<input value={customOccupation} onChange={e=>setCustomOccupation(e.target.value)} placeholder="输入职业" className="mt-2 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"/>}</div>}
 
         {/* 兴趣爱好（可选） */}
@@ -969,6 +1025,13 @@ issues 要用简短中文列出具体错误。` },
             className="mb-4 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
           />
         </>}
+        <section className="mb-4 rounded-xl border border-purple-100 bg-purple-50/40 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div><p className="text-sm font-medium text-purple-900">本次生成的额外世界观</p><p className="mt-1 text-[11px] leading-relaxed text-purple-600">从任意世界书集合选择条目，作为本次角色生成的最高优先级正史；不会修改运行时开关。</p></div>
+            <button type="button" onClick={() => setWorldbookSelectorOpen(true)} className="shrink-0 rounded-lg bg-purple-600 px-3 py-2 text-xs text-white">选择条目</button>
+          </div>
+          <p className="mt-2 text-xs text-purple-700">{selectedWorldbookEntryIds.length ? `已选择 ${selectedWorldbookEntryIds.length} 个条目` : '暂未额外选择，将使用启用中的底层世界观和自动命中的条目'}</p>
+        </section>
         <label className="mb-2 block text-xs font-medium text-gray-400">{draftMode ? '角色说明 / 初稿建议' : '补充说明（可选）'}</label>
         <textarea
           value={extra}
@@ -1051,6 +1114,7 @@ issues 要用简短中文列出具体错误。` },
               <label className="block text-xs font-medium text-purple-800">MBTI<input value={personaDraft.mbti ?? ''} onChange={(event) => setPersonaDraft((draft) => draft ? { ...draft, mbti: event.target.value } : draft)} placeholder="例如 INFP" className="mt-1 w-full rounded-lg border border-purple-100 bg-white px-3 py-2 text-sm" /></label>
               <label className="block text-xs font-medium text-purple-800">头像关键词<input value={personaDraft.avatarKeyword ?? ''} onChange={(event) => setPersonaDraft((draft) => draft ? { ...draft, avatarKeyword: event.target.value } : draft)} placeholder="用于头像搜索的英文关键词" className="mt-1 w-full rounded-lg border border-purple-100 bg-white px-3 py-2 text-sm" /></label>
             </div>
+            {relEnabled && <div className="mb-3 rounded-lg border border-purple-100 bg-white px-3 py-2"><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-medium text-purple-800">初始好感度</p><p className="mt-0.5 text-[10px] text-purple-500">AI已根据完整人设生成，你可以在创建前修改</p></div><input aria-label="女娲初始好感度数值" type="number" min="-100" max="100" value={personaDraft.initialWarmth ?? 0} onChange={(event) => setPersonaDraft((draft) => draft ? { ...draft, initialWarmth: Math.max(-100, Math.min(100, Number(event.target.value) || 0)) } : draft)} className="w-20 rounded-lg border border-purple-100 px-2 py-1.5 text-center text-sm font-semibold text-purple-700" /></div><input aria-label="女娲初始好感度" type="range" min="-100" max="100" value={personaDraft.initialWarmth ?? 0} onChange={(event) => setPersonaDraft((draft) => draft ? { ...draft, initialWarmth: Number(event.target.value) } : draft)} className="mt-2 w-full accent-purple-600" /></div>}
             <label className="block text-xs font-medium text-purple-800">完整人设</label>
             <textarea value={personaDraft.persona} onChange={(e) => setPersonaDraft((draft) => draft ? { ...draft, persona: e.target.value } : draft)} rows={8} className="mt-1 w-full resize-y rounded-lg border border-purple-100 bg-white px-3 py-2 text-sm leading-relaxed" />
             <label className="mt-3 block text-xs font-medium text-purple-800">说话样例（每行一条）</label>
@@ -1084,7 +1148,7 @@ issues 要用简短中文列出具体错误。` },
 
       {creationPickerOpen && <div className="absolute inset-0 z-40 flex items-center bg-black/30 p-4"><div className="max-h-[82%] w-full overflow-y-auto rounded-2xl bg-white p-4"><div className="mb-3 flex items-center justify-between"><div><h2 className="font-medium text-gray-900">以前创建过的人设</h2><p className="mt-1 text-[11px] text-gray-400">这些记录不会随联系人删除、回档或清空资料消失</p></div><button type="button" onClick={() => setCreationPickerOpen(false)} className="text-sm text-gray-500">关闭</button></div><div className="space-y-2">{creationRecords.map((record) => <button key={record.id} type="button" onClick={() => applyCreationRecord(record)} className="w-full rounded-xl bg-gray-50 px-3 py-3 text-left"><div className="flex items-center justify-between"><span className="text-sm font-medium text-gray-900">{record.nickname || record.name}</span><span className="text-[10px] text-gray-400">{new Date(record.createdAt).toLocaleString()}</span></div><p className="mt-1 line-clamp-2 text-xs text-gray-500">{record.personaSetting || record.persona}</p></button>)}{creationRecords.length === 0 && <p className="py-8 text-center text-sm text-gray-400">还没有创建记录</p>}</div></div></div>}
 
-      {personaPickerOpen && <div className="absolute inset-0 z-30 flex items-center bg-black/30 p-4"><div className="w-full rounded-2xl bg-white p-4"><div className="mb-3 flex items-center justify-between"><h2 className="font-medium">已保存的人设</h2><button type="button" onClick={() => setPersonaPickerOpen(false)} className="text-sm text-gray-500">关闭</button></div><div className="space-y-2">{savedPersonas.slice(personaPage * 5, personaPage * 5 + 5).map((saved, index) => <button key={saved.id} type="button" onClick={() => applySavedPersona(saved)} className="flex w-full items-center justify-between rounded-xl bg-gray-50 px-3 py-3 text-left"><span className="text-sm text-gray-900">{saved.nickname || saved.realName || `未命名人设${personaPage * 5 + index + 1}`}</span><span className="text-xs text-gray-400">使用</span></button>)}{savedPersonas.length === 0 && <p className="py-6 text-center text-sm text-gray-400">还没有保存的人设</p>}</div><div className="mt-4 flex items-center justify-between"><button type="button" disabled={personaPage === 0} onClick={() => setPersonaPage((page) => page - 1)} className="text-sm text-gray-600 disabled:text-gray-300">上一页</button><span className="text-xs text-gray-400">{personaPage + 1} / {Math.max(1, Math.ceil(savedPersonas.length / 5))}</span><button type="button" disabled={(personaPage + 1) * 5 >= savedPersonas.length} onClick={() => setPersonaPage((page) => page + 1)} className="text-sm text-gray-600 disabled:text-gray-300">下一页</button></div></div></div>}
+      {personaPickerOpen && <div className="absolute inset-0 z-30 flex items-center bg-black/30 p-4"><div className="w-full rounded-2xl bg-white p-4"><div className="mb-3 flex items-center justify-between"><h2 className="font-medium">已保存的人设</h2><button type="button" onClick={() => setPersonaPickerOpen(false)} className="text-sm text-gray-500">关闭</button></div><div className="space-y-2">{savedPersonas.slice(personaPage * 5, personaPage * 5 + 5).map((saved, index) => <div key={saved.id} className="flex items-center gap-2 rounded-xl bg-gray-50 px-3 py-2"><button type="button" onClick={() => applySavedPersona(saved)} className="min-w-0 flex-1 py-1 text-left"><span className="block truncate text-sm text-gray-900">{saved.nickname || saved.realName || `未命名人设${personaPage * 5 + index + 1}`}</span><span className="mt-0.5 block text-[11px] text-gray-400">点击使用</span></button><button type="button" onClick={() => void deleteSavedPersona(saved)} className="rounded-lg px-2 py-2 text-xs text-red-500" aria-label={`删除${saved.nickname || saved.realName || '未命名人设'}`}>删除</button></div>)}{savedPersonas.length === 0 && <p className="py-6 text-center text-sm text-gray-400">还没有保存的人设</p>}</div><div className="mt-4 flex items-center justify-between"><button type="button" disabled={personaPage === 0} onClick={() => setPersonaPage((page) => page - 1)} className="text-sm text-gray-600 disabled:text-gray-300">上一页</button><span className="text-xs text-gray-400">{personaPage + 1} / {Math.max(1, Math.ceil(savedPersonas.length / 5))}</span><button type="button" disabled={(personaPage + 1) * 5 >= savedPersonas.length} onClick={() => setPersonaPage((page) => page + 1)} className="text-sm text-gray-600 disabled:text-gray-300">下一页</button></div></div></div>}
       {pickingAvatar && (
         <AvatarPicker
           onSelect={(a) => {
@@ -1094,6 +1158,7 @@ issues 要用简短中文列出具体错误。` },
           onClose={() => setPickingAvatar(false)}
         />
       )}
+      <WorldbookEntrySelector open={worldbookSelectorOpen} selectedIds={selectedWorldbookEntryIds} onChange={setSelectedWorldbookEntryIds} onClose={() => setWorldbookSelectorOpen(false)}/>
     </div>
   )
 }

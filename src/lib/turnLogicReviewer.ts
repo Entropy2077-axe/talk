@@ -52,7 +52,10 @@ export async function reviewTurnLogic(
     temperature: 0,
     maxTokens: 180,
     purpose: 'quality',
-    messages: [{ role: 'system', content: prompt }],
+    messages: [
+      { role: 'system', content: prompt },
+      { role: 'user', content: '请审查上述回复，并严格按照指定的 JSON 格式输出结果。' },
+    ],
     signal: input.signal,
     trace: input.trace,
   })

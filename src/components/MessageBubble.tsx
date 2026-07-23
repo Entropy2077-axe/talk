@@ -52,7 +52,7 @@ export const MessageBubble = forwardRef<HTMLDivElement, MessageBubbleProps>(func
       ref={ref}
       {...(selecting ? {} : longPress)}
       onClick={selecting ? onSelect : undefined}
-      className={`relative px-3 py-1.5 ${selecting ? 'cursor-pointer pl-12' : ''} ${
+      className={`relative select-none [-webkit-touch-callout:none] px-3 py-1.5 ${selecting ? 'cursor-pointer pl-12' : ''} ${
         selected ? 'bg-gray-200' : highlighted ? 'bg-yellow-50' : ''
       }`}
     >

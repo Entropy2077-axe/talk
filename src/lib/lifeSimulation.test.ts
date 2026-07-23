@@ -15,8 +15,8 @@ describe('life simulation windows', () => {
 
 describe('worldbook and trait rules', () => {
   it('keeps permanent entries ahead of keyword matches', () => {
-    const entry = (id: string, title: string, content: string, alwaysInclude = false) => ({ id, title, content, keywords: id === 'magic' ? ['魔法'] : [], enabled: true, alwaysInclude, priority: 10, createdAt: 1, updatedAt: 1 })
-    expect(rankWorldbookEntries([entry('always', '基础规则', '所有人遵守', true), entry('magic', '魔法学院', '学院课程')], '去魔法学院').map((item) => item.entry.id)).toEqual(['always', 'magic'])
+    const entry = (id: string, title: string, content: string) => ({ id, collectionId: 'test', title, content, keywords: id === 'magic' ? ['魔法'] : [], enabled: true, priority: 10, createdAt: 1, updatedAt: 1 })
+    expect(rankWorldbookEntries([entry('always', '基础规则', '所有人遵守'), entry('magic', '魔法学院', '学院课程')], '去魔法学院').map((item) => item.entry.id)).toEqual(['always', 'magic'])
   })
   it('caps combined custom trait multipliers', () => {
     const traits = [{ id: 'x', name: 'x', meaning: 'x', rules: [{ id: 'r', minWarmth: -100, maxWarmth: 100, positiveMultiplier: 20, negativeMultiplier: 20, prompt: '' }] }]

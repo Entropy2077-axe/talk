@@ -7,6 +7,8 @@ import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import type { AdminAiTraceStage, AiUsagePurpose } from '../types'
 import { friendlyConnectionError, httpFailureMessage, parseJsonText, requireApiKey, requireHttpUrl } from './connectionError'
+import { useSettingsStore } from '../store/useSettingsStore'
+import { foundationalWorldviewText } from './worldbook'
 
 /**
  * Merges consecutive same-role messages into one. Each AI turn is stored as
@@ -103,6 +105,21 @@ export async function testConnection(
   }
 }
 
+const FOUNDATIONAL_PURPOSES = new Set<AiUsagePurpose>(['chat', 'proactive', 'moments', 'lifeSimulation', 'persona', 'other'])
+
+async function messagesWithFoundationalWorldview(messages: ChatMessage[], model: string, purpose: AiUsagePurpose): Promise<ChatMessage[]> {
+  const settings = useSettingsStore.getState()
+  if (model !== settings.model || !FOUNDATIONAL_PURPOSES.has(purpose)) return messages
+  if (messages.some((message) => message.content.includes('【底层世界观——全局最高优先级正史】'))) return messages
+  const worldview = await foundationalWorldviewText()
+  if (!worldview) return messages
+  const next = messages.map((message) => ({ ...message }))
+  const systemIndex = next.findIndex((message) => message.role === 'system')
+  if (systemIndex >= 0) next[systemIndex].content = `${worldview}\n\n${next[systemIndex].content}`
+  else next.unshift({ role: 'system', content: worldview })
+  return next
+}
+
 export async function chatCompletion(opts: {
   apiKey: string
   baseUrl: string
@@ -128,7 +145,8 @@ export async function chatCompletion(opts: {
   const purpose = opts.purpose ?? 'other'
   const automatic = opts.automatic ?? false
   if (automatic) await assertAutomaticAiBudget()
-  const inputTokens = opts.messages.reduce((sum, message) => sum + estimateTokens(message.content), 0)
+  const messages = await messagesWithFoundationalWorldview(opts.messages, opts.model, purpose)
+  const inputTokens = messages.reduce((sum, message) => sum + estimateTokens(message.content), 0)
   try {
   const key = requireApiKey(opts.apiKey, 'AI')
   const res = await fetch(`${normalizeBaseUrl(opts.baseUrl)}/v1/chat/completions`, {
@@ -140,7 +158,7 @@ export async function chatCompletion(opts: {
     },
     body: JSON.stringify({
       model: opts.model,
-      messages: opts.messages,
+        messages,
       ...(opts.jsonMode ? { response_format: { type: 'json_object' } } : {}),
       ...(supportsThinkingOption(opts.model)
         ? { thinking: { type: opts.thinking ?? 'disabled' } }
@@ -161,22 +179,23 @@ export async function chatCompletion(opts: {
   const usageWrite = recordAiUsage({ purpose, model: opts.model, automatic, success: true, inputTokens: Number.isFinite(promptTokens) ? promptTokens : inputTokens, outputTokens: Number.isFinite(completionTokens) ? completionTokens : estimateTokens(content), estimated: !Number.isFinite(promptTokens) || !Number.isFinite(completionTokens) })
   if (automatic) await usageWrite
   else void usageWrite.catch(() => undefined)
-  void traceAiCall({ purpose, model: opts.model, messages: opts.messages, output: content, inputTokens: Number.isFinite(promptTokens) ? promptTokens : inputTokens, outputTokens: Number.isFinite(completionTokens) ? completionTokens : estimateTokens(content), ...opts.trace })
+  void traceAiCall({ purpose, model: opts.model, messages, output: content, inputTokens: Number.isFinite(promptTokens) ? promptTokens : inputTokens, outputTokens: Number.isFinite(completionTokens) ? completionTokens : estimateTokens(content), ...opts.trace })
   return content
   } catch (error) {
     const usageWrite = recordAiUsage({ purpose, model: opts.model, automatic, success: false, inputTokens, outputTokens: 0, estimated: true, error: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200) })
     if (automatic) await usageWrite
     else void usageWrite.catch(() => undefined)
-    void traceAiCall({ purpose, model: opts.model, messages: opts.messages, error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500), inputTokens, outputTokens: 0, ...opts.trace })
+    void traceAiCall({ purpose, model: opts.model, messages, error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500), inputTokens, outputTokens: 0, ...opts.trace })
     throw new Error(friendlyConnectionError(error, 'AI 接口'))
   }
 }
 
 export async function chatCompletionStream(opts: Omit<Parameters<typeof chatCompletion>[0], 'jsonMode'> & { onDelta: (text: string) => void }): Promise<string> {
   const purpose = opts.purpose ?? 'other'
-  const inputTokens = opts.messages.reduce((sum, message) => sum + estimateTokens(message.content), 0)
+  const messages = await messagesWithFoundationalWorldview(opts.messages, opts.model, purpose)
+  const inputTokens = messages.reduce((sum, message) => sum + estimateTokens(message.content), 0)
   const key = requireApiKey(opts.apiKey, 'AI')
-  const res = await fetch(`${normalizeBaseUrl(opts.baseUrl)}/v1/chat/completions`, { method: 'POST', signal: opts.signal, headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: opts.model, messages: opts.messages, stream: true, temperature: 1.1, ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}) }) })
+  const res = await fetch(`${normalizeBaseUrl(opts.baseUrl)}/v1/chat/completions`, { method: 'POST', signal: opts.signal, headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: opts.model, messages, stream: true, temperature: 1.1, ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}) }) })
   if (!res.ok || !res.body) {
     const text = await res.text()
     let payload: unknown = text
@@ -195,6 +214,6 @@ export async function chatCompletionStream(opts: Omit<Parameters<typeof chatComp
     }
   }
   await recordAiUsage({ purpose, model: opts.model, automatic: opts.automatic ?? false, success: true, inputTokens, outputTokens: estimateTokens(output), estimated: true })
-  await traceAiCall({ purpose, model: opts.model, messages: opts.messages, output, inputTokens, outputTokens: estimateTokens(output), ...opts.trace })
+  await traceAiCall({ purpose, model: opts.model, messages, output, inputTokens, outputTokens: estimateTokens(output), ...opts.trace })
   return output
 }

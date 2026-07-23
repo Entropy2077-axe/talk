@@ -474,7 +474,10 @@ async function runAiTurn(
         apiKey: settings.apiKey,
         baseUrl: settings.baseUrl,
         model: settings.utilityModel,
-        messages: [{ role: 'system', content: conversionPrompt }],
+        messages: [
+          { role: 'system', content: conversionPrompt },
+          { role: 'user', content: '请执行上述转换，并且只输出指定的 JSON 对象。' },
+        ],
         jsonMode: true,
         signal: controller.signal,
         purpose: proactiveContext ? 'proactive' : 'chat',
@@ -552,7 +555,10 @@ async function runAiTurn(
           apiKey: settings.apiKey,
           baseUrl: settings.baseUrl,
           model: settings.utilityModel,
-          messages: [{ role: 'system', content: conversionPrompt }],
+          messages: [
+            { role: 'system', content: conversionPrompt },
+            { role: 'user', content: '请执行上述转换，并且只输出指定的 JSON 对象。' },
+          ],
           jsonMode: true,
           signal: controller.signal,
           purpose: proactiveContext ? 'proactive' : 'chat',
@@ -588,7 +594,7 @@ async function runAiTurn(
         const enrichedLocalTurn = parseRawPrivateDraft(rawText, turnMood || activeMood)
         if (rawPrivateDraftNeedsUtility(rawText, enrichedLocalTurn)) {
           conversionPrompt = buildJsonConversionPrompt(rawText)
-          jsonRaw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, messages: [{ role: 'system', content: conversionPrompt }], jsonMode: true, signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext, thinking: 'disabled', temperature: 0.1, maxTokens: 900, trace: { turnId: streamId, stage: 'other', conversationId } })
+          jsonRaw = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, messages: [{ role: 'system', content: conversionPrompt }, { role: 'user', content: '请执行上述转换，并且只输出指定的 JSON 对象。' }], jsonMode: true, signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext, thinking: 'disabled', temperature: 0.1, maxTokens: 900, trace: { turnId: streamId, stage: 'other', conversationId } })
           finalRaw = jsonRaw
           ;({ bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parseAiResponse(finalRaw))
         } else {

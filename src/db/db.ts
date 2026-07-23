@@ -13,6 +13,7 @@ import type {
   MomentComment,
   MomentLike,
   SavedWorldview,
+  WorldbookCollection,
   WorldbookEntry,
   SimulationState, ContactLifeState, LifeEvent, AiUsageRecord,
   SocialEvent, GroupPlan, AdminLogRecord, AdminAiTrace, SaveSlot, SavedPersona, PersonaCreationRecord,
@@ -33,6 +34,7 @@ export class TalkDB extends Dexie {
   groups!: Table<Group, string>
   knowledgeEntries!: Table<KnowledgeEntry, string>
   savedWorldviews!: Table<SavedWorldview, string>
+  worldbookCollections!: Table<WorldbookCollection, string>
   worldbookEntries!: Table<WorldbookEntry, string>
   simulationState!: Table<SimulationState, string>
   contactLifeStates!: Table<ContactLifeState, string>
@@ -245,6 +247,50 @@ export class TalkDB extends Dexie {
           sharedHistory: contact.sharedHistory,
           createdAt: Number(contact.createdAt) || Date.now(),
         })
+      }
+    })
+    this.version(26).stores({
+      worldbookCollections: 'id, enabled, updatedAt',
+      worldbookEntries: 'id, collectionId, enabled, foundationalWorldview, priority, updatedAt, *keywords',
+    }).upgrade(async (tx) => {
+      const entries = await tx.table('worldbookEntries').toArray() as Array<Record<string, unknown>>
+      if (entries.length === 0) return
+      const collectionId = 'default-worldbook'
+      await tx.table('worldbookCollections').put({
+        id: collectionId,
+        name: '默认世界书',
+        enabled: true,
+        sourceType: 'manual',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+      for (const entry of entries) {
+        await tx.table('worldbookEntries').update(entry.id, {
+          collectionId: typeof entry.collectionId === 'string' && entry.collectionId ? entry.collectionId : collectionId,
+          foundationalWorldview: entry.foundationalWorldview === true,
+        })
+      }
+    })
+    // Stack identical shop purchases while retaining zero-quantity products
+    // in the warehouse so they can be bought again later.
+    this.version(27).stores({
+      inventory: 'id, productKey, acquiredAt',
+    }).upgrade(async (tx) => {
+      const table = tx.table('inventory')
+      const items = await table.toArray() as Array<Record<string, any>>
+      const groups = new Map<string, Array<Record<string, any>>>()
+      const normalize = (value: unknown) => String(value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase()
+      for (const item of items) {
+        const key = typeof item.productKey === 'string' && item.productKey
+          ? item.productKey
+          : JSON.stringify([normalize(item.name), normalize(item.description), String(item.icon ?? '').trim(), Math.round(Number(item.price || 0) * 100) / 100])
+        groups.set(key, [...(groups.get(key) ?? []), item])
+      }
+      for (const [productKey, rows] of groups) {
+        const [keeper, ...duplicates] = rows.sort((a, b) => Number(a.acquiredAt || 0) - Number(b.acquiredAt || 0))
+        const quantity = rows.reduce((sum, row) => sum + (Number.isFinite(row.quantity) ? Math.max(0, Math.floor(row.quantity)) : 1), 0)
+        await table.update(keeper.id, { productKey, quantity, updatedAt: Date.now() })
+        if (duplicates.length > 0) await table.bulkDelete(duplicates.map((row) => row.id))
       }
     })
   }

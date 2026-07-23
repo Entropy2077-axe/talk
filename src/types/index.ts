@@ -460,11 +460,16 @@ export interface ImageProvidersSettings {
 /** A purchased shop item sitting in the user's warehouse until used or gifted away. */
 export interface InventoryItem {
   id: string
+  /** Stable identity for stacking purchases of the same generated product. */
+  productKey?: string
   name: string
   description: string
   icon: string // emoji
   price: number // what it cost, kept for reference
+  /** Legacy rows omit this and count as one item. Zero is retained for repurchase. */
+  quantity?: number
   acquiredAt: number
+  updatedAt?: number
 }
 
 export interface AppSettings {
@@ -699,12 +704,31 @@ export interface AiBubbleFinance {
 
 export interface WorldbookEntry {
   id: string
+  collectionId: string
   title: string
   content: string
   keywords: string[]
   enabled: boolean
-  alwaysInclude: boolean
+  /** @deprecated Legacy backup compatibility only. Empty keywords now mean the entry is always active. */
+  alwaysInclude?: boolean
+  foundationalWorldview?: boolean
   priority: number
+  sourceEntryId?: string
+  sourceOrder?: number
+  rawData?: Record<string, unknown>
+  createdAt: number
+  updatedAt: number
+}
+
+export type WorldbookSourceType = 'manual' | 'sillytavern' | 'character-card' | 'novelai' | 'risu' | 'agnai' | 'generic'
+
+export interface WorldbookCollection {
+  id: string
+  name: string
+  enabled: boolean
+  sourceType: WorldbookSourceType
+  sourceFileName?: string
+  sourceLabel?: string
   createdAt: number
   updatedAt: number
 }
@@ -801,6 +825,8 @@ export interface SavedPersona {
   personaConstraints?: string
   sharedHistory?: string
   customPersonalityTraits?: CustomPersonalityTrait[]
+  initialWarmth?: number
+  initialWarmthMode?: 'auto' | 'custom' | 'ai'
 }
 
 /**
@@ -821,6 +847,7 @@ export interface PersonaCreationRecord {
   relationship?: string
   occupation?: string
   personalityTrait?: string
+  initialWarmth?: number
   hobbies: string[]
   /** The permanent, user-authored role setting shown in Nuwa mode. */
   personaSetting: string

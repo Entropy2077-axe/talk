@@ -18,6 +18,7 @@ export const BACKUP_TABLES = [
   'groups',
   'knowledgeEntries',
   'savedWorldviews',
+  'worldbookCollections',
   'worldbookEntries',
   'simulationState', 'contactLifeStates', 'lifeEvents', 'aiUsageRecords',
   'aiTurns',
@@ -64,7 +65,7 @@ export function assertTalkBackup(value: unknown): asserts value is TalkBackup {
   if ((backup.schemaVersion as number | undefined) !== 1 && backup.schemaVersion !== BACKUP_SCHEMA_VERSION) throw new Error('备份版本暂不支持')
   if (!backup.tables || typeof backup.tables !== 'object') throw new Error('备份文件缺少数据表')
   for (const name of BACKUP_TABLES) {
-    if (['worldbookEntries','simulationState','contactLifeStates','lifeEvents','aiUsageRecords','socialEvents','walletAccounts','walletTransactions','loans','jobListings','interviews','groupPlans','adminLogs','adminAiTraces','savedPersonas'].includes(name) && backup.tables[name] === undefined) continue
+    if (['worldbookCollections','worldbookEntries','simulationState','contactLifeStates','lifeEvents','aiUsageRecords','socialEvents','walletAccounts','walletTransactions','loans','jobListings','interviews','groupPlans','adminLogs','adminAiTraces','savedPersonas'].includes(name) && backup.tables[name] === undefined) continue
     if (!Array.isArray(backup.tables[name])) throw new Error(`备份文件缺少 ${name} 表`)
   }
 }
@@ -79,6 +80,14 @@ export async function restoreBackup(backup: TalkBackup) {
       for (const name of BACKUP_TABLES) {
         const rows = backup.tables[name] ?? []
         if (rows.length > 0) await table(name).bulkPut(rows)
+      }
+      const restoredCollections = backup.tables.worldbookCollections ?? []
+      const restoredEntries = backup.tables.worldbookEntries ?? []
+      if (restoredCollections.length === 0 && restoredEntries.length > 0) {
+        const now = Date.now()
+        await db.worldbookCollections.put({ id: 'default-worldbook', name: '默认世界书', enabled: true, sourceType: 'manual', createdAt: now, updatedAt: now })
+        const legacyEntries = await db.worldbookEntries.toArray()
+        await db.worldbookEntries.bulkUpdate(legacyEntries.map((entry) => ({ key: entry.id, changes: { collectionId: 'default-worldbook', foundationalWorldview: entry.foundationalWorldview === true } })))
       }
     },
   )

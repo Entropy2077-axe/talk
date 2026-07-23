@@ -627,6 +627,114 @@ test('Nuwa mode exposes an editable AI first-draft workflow', async ({ page }) =
   await expect(page.getByText('头像', { exact: true })).toHaveCount(0)
 })
 
+test('Nuwa AI initial warmth can be edited before contact creation', async ({ page }) => {
+  await page.route('**/v1/chat/completions', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({ name: '初稿角色', realName: '林澄', nickname: '阿澄', birthday: '2002-06-15', gender: '女', ageRange: '24岁', relationship: '朋友', occupation: '设计师', persona: '慢热但真诚的朋友。', personalityTrait: '猫系', mbti: 'INFP', speechSamples: ['你好'], personaProfile: { facts: [], boundaries: [], habits: [], behaviorAnchors: [] }, monthlySalary: 8000, initialWarmth: 42, schedule: [] }) } }],
+        usage: { prompt_tokens: 100, completion_tokens: 100 },
+      }),
+    })
+  })
+  await page.goto('/#/contact/new')
+  await page.evaluate(async () => {
+    const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
+    const state = useSettingsStore.getState()
+    state.setSettings({ apiKey: 'sk-nuwa-warmth-test', baseUrl: 'https://nuwa-warmth.test', enabledModules: [...new Set([...state.enabledModules, 'nuwaMode', 'relationship'])] })
+  })
+  await page.reload()
+  await page.getByRole('button', { name: '女娲模式' }).click()
+  await page.getByRole('button', { name: '生成AI初稿' }).click()
+  await expect(page.getByLabel('女娲初始好感度数值')).toHaveValue('42')
+  await page.getByLabel('女娲初始好感度数值').fill('-35')
+  await expect(page.getByRole('slider', { name: '女娲初始好感度' })).toHaveValue('-35')
+})
+
+test('ordinary contact creation can override the automatic initial warmth', async ({ page }) => {
+  await page.goto('/#/contact/new')
+  await expect(page.getByText('初始好感度', { exact: true })).toBeVisible()
+  await expect(page.getByText('30', { exact: true })).toBeVisible()
+  const warmthSection = page.getByText('初始好感度', { exact: true }).locator('..').locator('..').locator('..')
+  await warmthSection.getByRole('button', { name: '自定义', exact: true }).click()
+  await warmthSection.locator('input[type="number"]').fill('-45')
+  await expect(warmthSection.locator('input[type="range"]')).toHaveValue('-45')
+})
+
+test('saved personas can be deleted without touching creation history', async ({ page }) => {
+  await page.goto('/#/contact/new')
+  await page.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts')
+    const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
+    const state = useSettingsStore.getState()
+    state.setSettings({ enabledModules: [...new Set([...state.enabledModules, 'nuwaMode'])] })
+    await db.savedPersonas.add({ id: 'saved-delete', nickname: '待删除人设', createdAt: 1, updatedAt: 1, profile: { personalityTendencies: [], age: '', gender: '', relationship: '', occupation: '', hobbies: [], notes: '' } })
+    await db.personaCreationRecords.add({ id: 'history-keep', name: '永久历史', hobbies: [], personaSetting: '历史', persona: '历史', createdAt: 1 })
+  })
+  await page.reload()
+  await page.getByRole('button', { name: '女娲模式' }).click()
+  await page.getByRole('button', { name: '使用已保存的人设' }).click()
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: '删除待删除人设' }).click()
+  await expect(page.getByText('待删除人设')).toHaveCount(0)
+  const counts = await page.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts')
+    return { saved: await db.savedPersonas.count(), history: await db.personaCreationRecords.count() }
+  })
+  expect(counts).toEqual({ saved: 0, history: 1 })
+})
+
+test('chat explains long press once and remembers dismissal', async ({ page }) => {
+  await page.goto('/#/')
+  await seedSearchAndGroupFixture(page)
+  await page.evaluate(() => localStorage.removeItem('talk-chat-long-press-hint-seen-v1'))
+  await page.goto('/#/chat/conversation-a')
+  await expect(page.getByTestId('long-press-hint')).toBeVisible()
+  await page.getByRole('button', { name: '知道了' }).click()
+  await page.reload()
+  await expect(page.getByTestId('long-press-hint')).toHaveCount(0)
+})
+
+test('mobile touch jitter still opens the long-press message menu', async ({ page }) => {
+  await page.goto('/#/')
+  await seedSearchAndGroupFixture(page)
+  await page.evaluate(() => localStorage.setItem('talk-chat-long-press-hint-seen-v1', '1'))
+  await page.goto('/#/chat/conversation-a')
+  const message = page.getByText('the hidden keyword is nebula', { exact: true })
+  await message.dispatchEvent('pointerdown', { pointerId: 7, pointerType: 'touch', clientX: 120, clientY: 280, isPrimary: true, buttons: 1 })
+  await message.dispatchEvent('pointermove', { pointerId: 7, pointerType: 'touch', clientX: 124, clientY: 283, isPrimary: true, buttons: 1 })
+  await page.waitForTimeout(500)
+  await expect(page.getByRole('button', { name: '重新生成这一轮' })).toBeVisible()
+  await message.dispatchEvent('pointerup', { pointerId: 7, pointerType: 'touch', clientX: 124, clientY: 283, isPrimary: true })
+  await page.getByRole('button', { name: '取消', exact: true }).click()
+
+  await message.dispatchEvent('pointerdown', { pointerId: 8, pointerType: 'touch', clientX: 120, clientY: 280, isPrimary: true, buttons: 1 })
+  await message.dispatchEvent('pointermove', { pointerId: 8, pointerType: 'touch', clientX: 120, clientY: 310, isPrimary: true, buttons: 1 })
+  await page.waitForTimeout(500)
+  await expect(page.getByRole('button', { name: '重新生成这一轮' })).toHaveCount(0)
+  await message.dispatchEvent('pointerup', { pointerId: 8, pointerType: 'touch', clientX: 120, clientY: 310, isPrimary: true })
+})
+
+test('an exhausted warehouse item stays visible and can be repurchased', async ({ page }) => {
+  await page.goto('/#/warehouse')
+  await page.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts')
+    await db.walletAccounts.put({ ownerId: 'user', balance: 100, updatedAt: 1 })
+    await db.inventory.put({ id: 'empty-item', productKey: '["纪念品","测试","🎁",10]', name: '纪念品', description: '测试', icon: '🎁', price: 10, quantity: 0, acquiredAt: 1, updatedAt: 1 })
+  })
+  await page.reload()
+  await expect(page.getByText('已用完', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '赠送' })).toBeDisabled()
+  await page.getByRole('button', { name: '复购' }).click()
+  await expect(page.getByText('×1', { exact: true })).toBeVisible()
+  const result = await page.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts')
+    return { quantity: (await db.inventory.get('empty-item'))?.quantity, balance: (await db.walletAccounts.get('user'))?.balance }
+  })
+  expect(result).toEqual({ quantity: 1, balance: 90 })
+})
+
 test('Nuwa AI polishing is reviewed and retries invalid form output', async ({ page }) => {
   type AiRequest = { model?: string; messages?: Array<{ content: string }>; response_format?: unknown }
   const mainRequests: AiRequest[] = []
@@ -670,7 +778,8 @@ test('Nuwa AI polishing is reviewed and retries invalid form output', async ({ p
     const { db } = await import('/src/db/db.ts')
     const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
     const state = useSettingsStore.getState()
-    await db.worldbookEntries.put({ id: 'nuwa-worldbook', title: '月海城正史', content: '月海城的居民成年后必须登记一种合法职业，普通人不能使用魔法。', keywords: ['月海城'], enabled: true, alwaysInclude: false, priority: 90, createdAt: 1, updatedAt: 1 })
+    await db.worldbookCollections.put({ id: 'nuwa-collection', name: '月海城', enabled: true, sourceType: 'manual', createdAt: 1, updatedAt: 1 })
+    await db.worldbookEntries.put({ id: 'nuwa-worldbook', collectionId: 'nuwa-collection', title: '月海城正史', content: '月海城的居民成年后必须登记一种合法职业，普通人不能使用魔法。', keywords: ['月海城'], enabled: true, foundationalWorldview: true, priority: 90, createdAt: 1, updatedAt: 1 })
     state.setSettings({
       apiKey: 'sk-nuwa-form-test',
       baseUrl: 'https://nuwa-form.test',

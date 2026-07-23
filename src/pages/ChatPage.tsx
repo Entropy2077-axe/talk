@@ -25,6 +25,7 @@ import { isStickerProviderReady, stickerProviderName } from '../lib/mediaProvide
 import { normalizeChatPageSize } from '../lib/chatPagination'
 
 const EMPTY_MESSAGES: Message[] = []
+const LONG_PRESS_HINT_KEY = 'talk-chat-long-press-hint-seen-v1'
 
 export function ChatPage() {
   const { conversationId } = useParams()
@@ -105,6 +106,7 @@ export function ChatPage() {
 
   const [input, setInput] = useState('')
   const [toast, setToast] = useState('')
+  const [showLongPressHint, setShowLongPressHint] = useState(false)
   const [searching, setSearching] = useState(false)
   const [selectedMentionIds, setSelectedMentionIds] = useState<string[]>([])
   const [replyToId, setReplyToId] = useState<string | null>(null)
@@ -119,6 +121,21 @@ export function ChatPage() {
   const [stickerResults, setStickerResults] = useState<RemoteStickerResult[]>([])
   const [stickerBusy, setStickerBusy] = useState(false)
   const [financeMode, setFinanceMode] = useState<'transfer'|'redPacket'|'loan'|null>(null)
+
+  useEffect(() => {
+    if (localStorage.getItem(LONG_PRESS_HINT_KEY) === '1') return
+    setShowLongPressHint(true)
+    const timer = setTimeout(() => {
+      localStorage.setItem(LONG_PRESS_HINT_KEY, '1')
+      setShowLongPressHint(false)
+    }, 6000)
+    return () => clearTimeout(timer)
+  }, [])
+
+  function dismissLongPressHint() {
+    localStorage.setItem(LONG_PRESS_HINT_KEY, '1')
+    setShowLongPressHint(false)
+  }
   const [financeAmount,setFinanceAmount]=useState('')
   const [financeNote,setFinanceNote]=useState('')
   const [assistBusy, setAssistBusy] = useState(false)
@@ -545,6 +562,12 @@ export function ChatPage() {
         >
           <span className="block truncate">{statusLine}</span>
         </button>
+      )}
+      {showLongPressHint && (
+        <div data-testid="long-press-hint" className="flex shrink-0 items-center gap-2 border-b border-purple-100 bg-purple-50 px-4 py-2 text-[11px] text-purple-700">
+          <span className="min-w-0 flex-1">提示：长按消息可以重新生成、反馈、复制或删除。</span>
+          <button type="button" onClick={dismissLongPressHint} className="shrink-0 rounded px-1.5 py-1 text-purple-500">知道了</button>
+        </div>
       )}
 
       <div
