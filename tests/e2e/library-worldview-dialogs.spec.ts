@@ -6,6 +6,7 @@ async function clearRelevantData(page: Page) {
     await db.libraryItems.clear()
     await db.worldbookEntries.clear()
     await db.worldbookCollections.clear()
+    await db.worldSnapshots.clear()
   })
 }
 
@@ -15,16 +16,16 @@ for (const viewport of [
 ]) {
   test(`${viewport.label}: worldview and manual library dialogs save data`, async ({ page }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height })
-    await page.goto('/#/world-settings')
+    await page.goto('/#/save-load')
     await clearRelevantData(page)
 
     await page.getByRole('button', { name: '新建世界观' }).click()
     const worldDialog = page.getByRole('dialog', { name: '新建世界观' })
     await expect(worldDialog).toBeVisible()
-    await worldDialog.getByLabel('世界观名称').fill(`${viewport.label} 测试世界`)
+    await worldDialog.getByPlaceholder('世界名称').fill(`${viewport.label} 测试世界`)
     await worldDialog.getByRole('button', { name: '创建' }).click()
 
-    await expect(page).toHaveURL(/#\/world-settings\/[^/]+$/)
+    await expect(page).toHaveURL(/#\/save-load\/world\/[^/]+$/)
     const world = await page.evaluate(async (name) => {
       const { db } = await import('/src/db/db.ts')
       return (await db.worldbookCollections.toArray()).find((item) => item.name === name)

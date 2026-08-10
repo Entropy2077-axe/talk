@@ -933,6 +933,12 @@ export interface AppSettings {
   worldbookMigrationCompleted?: boolean
   /** Default for new contacts and unbound generation surfaces; existing contacts keep their own world. */
   defaultWorldviewId?: string
+  /** The only world currently materialized in the live tables. */
+  activeWorldId?: string
+  /** Completed version of the legacy multi-world-to-snapshot migration. */
+  worldSnapshotMigrationVersion?: number
+  /** When true, economy, inventory, career and shop state are stored per world. */
+  worldEconomyIsolated?: boolean
   /** Compress a single library source only when it exceeds this threshold. */
   autoCompressLibraryImports?: boolean
   libraryCompressionThresholdTokens?: number
@@ -1032,6 +1038,32 @@ export interface GlobalSaveSnapshot {
   kind: 'manual' | 'automatic'
   createdAt: number
   snapshot: unknown
+}
+
+export type WorldSnapshotKind = 'manual' | 'automatic'
+
+export interface WorldSnapshotData {
+  schemaVersion: number
+  world: WorldbookCollection
+  worldbookEntries: WorldbookEntry[]
+  tables: Record<string, unknown[]>
+  /** User economy/career settings are included only when per-world economy is enabled. */
+  economySettings?: Pick<AppSettings, 'userOccupation' | 'userMonthlySalary' | 'userJobStartedDate' | 'userLastSalaryDate'>
+}
+
+/** A complete, restorable state of one world. */
+export interface WorldSnapshot {
+  id: string
+  worldId: string
+  name: string
+  kind: WorldSnapshotKind
+  createdAt: number
+  updatedAt: number
+  contentHash: string
+  contactCount: number
+  estimatedWorldviewTokens: number
+  snapshotVersion: number
+  snapshot: WorldSnapshotData
 }
 
 export type WalletOwnerId = string

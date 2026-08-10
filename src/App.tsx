@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, type ElementType } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState, type ElementType } from 'react'
 import { Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { App as CapacitorApp } from '@capacitor/app'
 import { useSettingsStore } from './store/useSettingsStore'
@@ -14,6 +14,7 @@ import { DesktopHomePage } from './pages/DesktopHomePage'
 import { DesktopContactsPage } from './pages/DesktopContactsPage'
 import { ensureWallets } from './lib/finance'
 import { ensureLegacyWorldviewMigrated } from './lib/worldbook'
+import { ensureWorldSnapshotsMigrated } from './lib/worldSnapshots'
 import { syncContactLocationsAt } from './lib/locations'
 import { initializeContactGenerationTasks } from './lib/contactGenerationTasks'
 import { ensureContactPromptSnapshots } from './lib/promptPresets'
@@ -145,7 +146,9 @@ function useLocationResumeSync() {
 
 function App() {
   useAutonomousBehaviorTimer()
-  useEffect(() => { void resumeMediaAssets() }, [])
+  const [worldReady, setWorldReady] = useState(false)
+  const [worldError, setWorldError] = useState('')
+  useEffect(() => { if (worldReady) void resumeMediaAssets() }, [worldReady])
   useAndroidBackButton()
   useLocationResumeSync()
   const themeMode = useSettingsStore((s) => s.themeMode ?? 'light')
@@ -156,10 +159,17 @@ function App() {
   const experienceMode = useSettingsStore((s) => s.experienceMode)
   const location = useLocation()
   const desktop = Boolean(window.talkDesktop)
-  useEffect(() => { void ensureWallets() }, [enabledModules])
-  useEffect(() => { void ensureLegacyWorldviewMigrated() }, [])
-  useEffect(() => { void initializeContactGenerationTasks() }, [])
-  useEffect(() => { void ensureContactPromptSnapshots(useSettingsStore.getState()) }, [])
+  useEffect(() => { if (worldReady) void ensureWallets() }, [enabledModules, worldReady])
+  useEffect(() => {
+    let cancelled = false
+    void ensureLegacyWorldviewMigrated()
+      .then(() => ensureWorldSnapshotsMigrated())
+      .then(() => { if (!cancelled) setWorldReady(true) })
+      .catch((error: unknown) => { if (!cancelled) setWorldError(error instanceof Error ? error.message : String(error)) })
+    return () => { cancelled = true }
+  }, [])
+  useEffect(() => { if (worldReady) void initializeContactGenerationTasks() }, [worldReady])
+  useEffect(() => { if (worldReady) void ensureContactPromptSnapshots(useSettingsStore.getState()) }, [worldReady])
   useEffect(() => {
     if (!desktop) return
     // Warm the routes people open most often after the desktop shell settles.
@@ -212,7 +222,9 @@ function App() {
     surface.classList.add(animationClass)
   }, [location.pathname, animationsEnabled, desktop])
 
-  const routeContent = (
+  const routeContent = !worldReady ? (
+    <div className="flex h-full items-center justify-center bg-[#f4f4f6] px-6 text-center text-sm text-gray-400">{worldError ? `世界数据初始化失败：${worldError}` : '正在载入世界数据…'}</div>
+  ) : (
     <Suspense fallback={<RouteLoadingFallback desktop={desktop} />}>
         <Routes>
         <Route element={desktop ? <Outlet /> : <TabLayout />}>

@@ -2,7 +2,6 @@ import type { ElementType } from 'react'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { shopModule } from './shop'
 import { warehouseModule } from './warehouse'
-import { worldviewModule } from './worldview'
 import { knowledgeBaseModule } from './knowledgeBase'
 import { relationshipModule } from './relationship'
 import { personalityTraitsModule } from './personalityTraits'
@@ -48,7 +47,6 @@ export const PARENT_MODULES: ParentModule[] = [
 export const ALL_MODULES: FeatureModule[] = [
   shopModule,
   warehouseModule,
-  worldviewModule,
   knowledgeBaseModule,
   relationshipModule,
   personalityTraitsModule,
@@ -75,7 +73,8 @@ export function isModuleAllowedInExperienceMode(id: string, mode = useSettingsSt
 
 function moduleEffectivelyEnabled(id: string, state = useSettingsStore.getState()): boolean {
   if (state.experienceMode === 'immersive' && id === 'realisticReplies') return true
-  return isModuleAllowedInExperienceMode(id, state.experienceMode) && state.enabledModules.includes(id)
+  const effectiveId = id === 'worldview' ? 'saveLoad' : id
+  return isModuleAllowedInExperienceMode(effectiveId, state.experienceMode) && (state.enabledModules.includes(effectiveId) || (id === 'worldview' && state.enabledModules.includes('worldview')))
 }
 
 // ---- helpers ----
@@ -84,7 +83,7 @@ function moduleEffectivelyEnabled(id: string, state = useSettingsStore.getState(
 export function useModuleEnabled(id: string): boolean {
   return useSettingsStore((s) => s.experienceMode === 'immersive' && id === 'realisticReplies'
     ? true
-    : isModuleAllowedInExperienceMode(id, s.experienceMode) && s.enabledModules.includes(id))
+    : isModuleAllowedInExperienceMode(id === 'worldview' ? 'saveLoad' : id, s.experienceMode) && (s.enabledModules.includes(id === 'worldview' ? 'saveLoad' : id) || (id === 'worldview' && s.enabledModules.includes('worldview'))))
 }
 
 /** Non-reactive read for use outside React components (e.g. chat engine). */

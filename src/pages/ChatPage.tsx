@@ -10,8 +10,8 @@ import { ActionSheet } from '../components/ActionSheet'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { useModuleEnabled } from '../features'
 import { useChatUiStore } from '../store/useChatUiStore'
-import { DEFAULT_RUNTIME_STATE, regenerateAiTurn, sendMessage, triggerAiTurn, useChatEngineStore } from '../lib/chatEngine'
-import { regenerateGroupAiTurn, sendGroupMessage, triggerGroupAiTurn } from '../lib/groupChatEngine'
+import { DEFAULT_RUNTIME_STATE, regenerateAiTurn, sendMessage, stopAiTurn, triggerAiTurn, useChatEngineStore } from '../lib/chatEngine'
+import { regenerateGroupAiTurn, sendGroupMessage, stopGroupAiTurn, triggerGroupAiTurn } from '../lib/groupChatEngine'
 import { displayName } from '../lib/contact'
 import { applyMessageFeedback } from '../lib/messageFeedback'
 import { buildPrivateStatusLine } from '../lib/contactStatus'
@@ -138,7 +138,7 @@ export function ChatPage() {
   // The AI-turn state (typing indicator / error) lives in a module-level
   // store, not local state — it keeps running in the background even when
   // this page unmounts, so it must be read reactively from there instead.
-  const { aiTyping, error, typingLabel, timedOut } = useChatEngineStore(
+  const { aiTyping, error, typingLabel } = useChatEngineStore(
     (s) => s.states[conversationId ?? ''] ?? DEFAULT_RUNTIME_STATE,
   )
 
@@ -149,6 +149,13 @@ export function ChatPage() {
   const [selectedMentionIds, setSelectedMentionIds] = useState<string[]>([])
   const [replyToId, setReplyToId] = useState<string | null>(null)
   const [menuMessageId, setMenuMessageId] = useState<string | null>(null)
+
+  function handleStopGeneration() {
+    if (!conversationId) return
+    if (isGroupConv) stopGroupAiTurn(conversationId)
+    else stopAiTurn(conversationId)
+    setToast('已停止生成')
+  }
   const [regenerationMessageId, setRegenerationMessageId] = useState<string | null>(null)
   const [regenerationInstruction, setRegenerationInstruction] = useState('')
   const [selectingMessages, setSelectingMessages] = useState(false)
@@ -300,11 +307,6 @@ export function ChatPage() {
       return
     }
     if (contact) void triggerAiTurn(conversationId, contact, settings, stickers)
-  }
-
-  function dismissReplyTimeout() {
-    if (!conversationId) return
-    useChatEngineStore.getState().patch(conversationId, { timedOut: false })
   }
 
   function insertMention(member: Contact) {
@@ -907,6 +909,7 @@ export function ChatPage() {
                     {shopEnabled && <button type="button" onClick={() => navigate('/shop')} aria-label="商城" title="商城"><ShoppingBag size={18} /></button>}
                     {warehouseEnabled && <button type="button" onClick={() => navigate('/warehouse')} aria-label="仓库" title="仓库"><Package size={18} /></button>}
                   </div>
+                  {aiTyping && <button type="button" onClick={handleStopGeneration} aria-label="停止生成" className="desktop-chat-send">停止</button>}
                   <button type="button" onClick={handleSend} disabled={!input.trim()} aria-label="发送消息" className="desktop-chat-send">发送</button>
                 </div>
               </div>
@@ -926,6 +929,7 @@ export function ChatPage() {
                   rows={1}
                   className="max-h-24 flex-1 resize-none rounded-xl border border-gray-200 px-3 py-2 text-[14.5px] outline-none disabled:cursor-wait disabled:bg-gray-50 disabled:text-gray-400"
                 />
+                {aiTyping && <button onClick={handleStopGeneration} aria-label="停止生成" className="shrink-0 rounded-xl bg-gray-200 px-3 py-2 text-sm text-gray-700">停止</button>}
                 <button onClick={handleSend} disabled={!input.trim()} aria-label="发送消息" className="shrink-0 rounded-xl bg-gray-900 px-4 py-2 text-sm text-white disabled:opacity-40">发送</button>
               </div>
             )}
@@ -994,27 +998,6 @@ export function ChatPage() {
             { label: '删除这条消息', onSelect: () => void deleteMessage(menuMessage), danger: true },
           ]}
         />
-      )}
-      {timedOut && (
-        <div className="absolute inset-0 z-[60] flex items-end bg-black/30" onClick={dismissReplyTimeout}>
-          <div className="w-full rounded-t-2xl bg-white p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)]" onClick={(event) => event.stopPropagation()}>
-            <h2 className="text-base font-semibold text-gray-900">回复超时</h2>
-            <p className="mt-1 text-sm leading-6 text-gray-500">这轮回复等待超过 30 秒，已自动停止。你可以重新生成这一轮。</p>
-            <div className="mt-4 flex gap-2">
-              <button type="button" onClick={dismissReplyTimeout} className="flex-1 rounded-xl bg-gray-100 py-2.5 text-sm text-gray-700">取消</button>
-              <button
-                type="button"
-                onClick={() => {
-                  dismissReplyTimeout()
-                  retryCurrentTurn()
-                }}
-                className="flex-1 rounded-xl bg-gray-900 py-2.5 text-sm text-white"
-              >
-                重新生成
-              </button>
-            </div>
-          </div>
-        </div>
       )}
       {regenerationMessage && (
         <div className="absolute inset-0 z-50 flex items-end bg-black/30" onClick={() => setRegenerationMessageId(null)}>

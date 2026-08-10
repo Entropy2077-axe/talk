@@ -18,7 +18,7 @@ import type {
   WorldbookCollection,
   WorldbookEntry,
   SimulationState, ContactLifeState, LifeEvent, ContactExperience, AiUsageRecord,
-  SocialEvent, GroupPlan, AdminLogRecord, AdminAiTrace, SaveSlot, ContactStoryline, ContactSaveSnapshot, GlobalSaveSnapshot, SavedPersona, PersonaCreationRecord, ShopPurchaseHistory, ContactGenerationTask,
+  SocialEvent, GroupPlan, AdminLogRecord, AdminAiTrace, SaveSlot, ContactStoryline, ContactSaveSnapshot, GlobalSaveSnapshot, WorldSnapshot, SavedPersona, PersonaCreationRecord, ShopPurchaseHistory, ContactGenerationTask,
   Sticker, SpeechCacheRecord,
   WalletAccount, WalletTransaction, Loan, JobListing, InterviewSession,
   LocationNode, WorldMapRecord, LocationModuleState, AcousticEdge, InternalTask, MediaAsset,
@@ -61,6 +61,7 @@ export class TalkDB extends Dexie {
   contactStorylines!: Table<ContactStoryline, string>
   contactSaveSnapshots!: Table<ContactSaveSnapshot, string>
   globalSaveSnapshots!: Table<GlobalSaveSnapshot, string>
+  worldSnapshots!: Table<WorldSnapshot, string>
   savedPersonas!: Table<SavedPersona, string>
   personaCreationRecords!: Table<PersonaCreationRecord, string>
   shopPurchaseHistory!: Table<ShopPurchaseHistory, string>
@@ -434,6 +435,9 @@ export class TalkDB extends Dexie {
     })
     this.version(38).stores({
       mediaAssets: 'id, origin, originId, conversationId, provider, status, createdAt, updatedAt, *ownerContactIds',
+    })
+    this.version(39).stores({
+      worldSnapshots: 'id, worldId, kind, createdAt, updatedAt, [worldId+updatedAt]',
     })
   }
 }

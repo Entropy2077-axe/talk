@@ -56,6 +56,49 @@ describe('structured chat completion result', () => {
     expect(result.usage?.reasoningTokens).toBe(18)
   })
 
+  it('preserves native tool calls even when assistant content is empty', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body))
+      expect(body.tool_choice).toBe('required')
+      expect(body.tools[0].function.name).toBe('send_text')
+      return new Response(JSON.stringify({
+        choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'send_text', arguments: '{"content":"你好"}' } }] } }],
+      }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await chatCompletion({
+      ...base,
+      tools: [{ type: 'function', function: { name: 'send_text', description: 'send', parameters: { type: 'object' } } }],
+      toolChoice: 'required',
+    })
+
+    expect(result.status).toBe('ok')
+    expect(result.toolCalls?.[0]).toMatchObject({ id: 'call-1', function: { name: 'send_text' } })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries without tool fields when a compatible relay rejects them', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'unsupported field: tools and tool_choice' } }), { status: 400 }))
+      .mockImplementationOnce(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body))
+        expect(body.tools).toBeUndefined()
+        expect(body.tool_choice).toBeUndefined()
+        return new Response(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: '普通文本回退' } }] }), { status: 200 })
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await chatCompletion({
+      ...base,
+      tools: [{ type: 'function', function: { name: 'send_text', description: 'send', parameters: { type: 'object' } } }],
+      toolChoice: 'required',
+    })
+
+    expect(result.content).toBe('普通文本回退')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('classifies safety blocking and malformed successful payloads', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ finish_reason: 'content_filter', message: { content: '' } }] }), { status: 200 }))

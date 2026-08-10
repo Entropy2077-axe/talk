@@ -18,7 +18,6 @@ test('large pixel map supports spaced custom places, notes, children and regener
   expect(initial.roots).toBeGreaterThan(20)
 
   await expect(page.getByRole('button', { name: '重新生成地图' })).toBeVisible()
-  await page.getByRole('button', { name: '编辑地点' }).click()
   await expect(page.getByText(/点空白格显示/)).toBeVisible()
 
   const box = await mapView.boundingBox()
@@ -28,8 +27,6 @@ test('large pixel map supports spaced custom places, notes, children and regener
     for (let x = 35; x < (box?.width ?? 390) - 35 && !found; x += 55) {
       await mapView.click({ position: { x, y } })
       found = await page.getByRole('button', { name: '在这里新增地点' }).isVisible().catch(() => false)
-      const close = page.getByRole('heading', { name: '编辑地点' })
-      if (!found && await close.isVisible().catch(() => false)) await page.getByRole('button', { name: '关闭地点表单' }).click()
     }
   }
   expect(found).toBe(true)
@@ -46,13 +43,13 @@ test('large pixel map supports spaced custom places, notes, children and regener
   await expect(page.getByRole('button', { name: '测试公寓' })).toBeVisible()
 
   await page.getByRole('button', { name: '测试公寓' }).click()
+  await page.getByRole('button', { name: '编辑', exact: true }).click()
   await page.getByRole('button', { name: '添加子地点' }).click()
   await page.getByPlaceholder('子地点名称').fill('天台花园')
   await page.getByPlaceholder('子地点描述').fill('公寓顶层的小花园')
   await page.getByRole('button', { name: '保存子地点' }).click()
-  await expect(page.getByText('天台花园', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: /天台花园 公寓顶层的小花园/ })).toBeVisible()
   await page.getByRole('button', { name: '保存', exact: true }).click()
-  await page.getByRole('button', { name: '完成编辑' }).click()
 
   const beforeRegenerate = await page.evaluate(async () => {
     const { db } = await import('/src/db/db.ts')

@@ -63,7 +63,7 @@ describe('private chat local draft parser', () => {
       { type: 'text', content: '所以到底想吃什么' },
     ])
     expect(parsed.thought).toBe('我想先接住他的玩笑')
-    expect(parsed.mood).toBe('😌')
+    expect(parsed.mood).toBe('平静')
     expect(rawPrivateDraftNeedsUtility(raw, parsed)).toBe(false)
     expect(JSON.parse(serializePrivateTurn(parsed)).messages).toHaveLength(2)
   })

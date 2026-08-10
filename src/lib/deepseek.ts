@@ -1,6 +1,25 @@
 export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant'
+  role: 'system' | 'user' | 'assistant' | 'tool'
   content: string
+  tool_call_id?: string
+  tool_calls?: ChatToolCall[]
+  reasoning_content?: string
+}
+
+export interface ChatToolCall {
+  id: string
+  type: 'function'
+  function: { name: string; arguments: string }
+}
+
+export interface ChatToolDefinition {
+  type: 'function'
+  function: {
+    name: string
+    description: string
+    parameters: Record<string, unknown>
+    strict?: boolean
+  }
 }
 import { assertAutomaticAiBudget, estimateTokens, recordAiUsage } from './aiUsage'
 import { v4 as uuid } from 'uuid'
@@ -30,7 +49,7 @@ export function coalesceConsecutiveRoles(messages: ChatMessage[]): ChatMessage[]
   const result: ChatMessage[] = []
   for (const m of messages) {
     const last = result[result.length - 1]
-    if (last && last.role === m.role) {
+    if (last && last.role === m.role && !last.tool_calls && !m.tool_calls && !last.tool_call_id && !m.tool_call_id) {
       last.content = `${last.content}\n${m.content}`
     } else {
       result.push({ ...m })
@@ -145,6 +164,7 @@ export interface ChatCompletionResult {
   provider: AiProviderId
   rawShapeSummary: Record<string, unknown>
   retried?: boolean
+  toolCalls?: ChatToolCall[]
 }
 
 export interface ChatCompletionOptions {
@@ -171,6 +191,8 @@ export interface ChatCompletionOptions {
   trace?: { turnId: string; stage: AdminAiTraceStage; conversationId?: string }
   /** Never issue an empty-response retry. Reserved for explicit diagnostics. */
   singleRequest?: boolean
+  tools?: ChatToolDefinition[]
+  toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } }
 }
 
 /**
@@ -227,6 +249,15 @@ function rawShapeSummary(json: Record<string, any>): Record<string, unknown> {
 function extractCompletion(json: Record<string, any>, provider: AiProviderId): ChatCompletionResult {
   const choice = Array.isArray(json.choices) ? json.choices[0] : undefined
   const message = choice?.message
+  const toolCalls: ChatToolCall[] = Array.isArray(message?.tool_calls)
+    ? message.tool_calls.flatMap((candidate: unknown) => {
+        if (!candidate || typeof candidate !== 'object') return []
+        const call = candidate as Record<string, any>
+        const fn = call.function
+        if (typeof call.id !== 'string' || !fn || typeof fn !== 'object' || typeof fn.name !== 'string' || typeof fn.arguments !== 'string') return []
+        return [{ id: call.id, type: 'function' as const, function: { name: fn.name, arguments: fn.arguments } }]
+      })
+    : []
   const rawContent = stringAt(message?.content) || stringAt(choice?.text) || stringAt(json.output_text)
   const separated = separateSupplierThinking(rawContent, provider)
   const adapter = AI_PROVIDERS[provider]
@@ -257,10 +288,10 @@ function extractCompletion(json: Record<string, any>, provider: AiProviderId): C
       ? 'length'
       : !recognizable
         ? 'malformed'
-        : separated.content.trim()
+        : separated.content.trim() || toolCalls.length > 0
           ? 'ok'
           : 'empty'
-  return { status, content: separated.content, reasoning, finishReason, usage, provider, rawShapeSummary: rawShapeSummary(json) }
+  return { status, content: separated.content, reasoning, finishReason, usage, provider, rawShapeSummary: rawShapeSummary(json), toolCalls }
 }
 
 function completionStatusMessage(result: ChatCompletionResult): string {
@@ -271,7 +302,7 @@ function completionStatusMessage(result: ChatCompletionResult): string {
   return '模型没有返回有效正文'
 }
 
-function requestBody(opts: ChatCompletionOptions, messages: ChatMessage[], provider: AiProviderId, overrides: { disableJson?: boolean; alternateToken?: boolean; emptyRetry?: boolean } = {}): Record<string, unknown> {
+function requestBody(opts: ChatCompletionOptions, messages: ChatMessage[], provider: AiProviderId, overrides: { disableJson?: boolean; disableTools?: boolean; alternateToken?: boolean; emptyRetry?: boolean } = {}): Record<string, unknown> {
   const adapter = AI_PROVIDERS[provider]
   const tokenParameter = overrides.alternateToken
     ? adapter.tokenParameter === 'max_tokens' ? 'max_completion_tokens' : 'max_tokens'
@@ -281,6 +312,10 @@ function requestBody(opts: ChatCompletionOptions, messages: ChatMessage[], provi
   const temperature = clampProviderTemperature(provider, opts.temperature ?? 1.1)
   if (temperature !== undefined) body.temperature = temperature
   if (opts.maxTokens) body[tokenParameter] = overrides.emptyRetry ? Math.ceil(opts.maxTokens * 1.35) : opts.maxTokens
+  if (opts.tools?.length && !overrides.disableTools) {
+    body.tools = opts.tools
+    body.tool_choice = opts.toolChoice ?? 'auto'
+  }
   const thinking = overrides.emptyRetry ? 'disabled' : (opts.thinking ?? 'disabled')
   if (adapter.thinking === 'deepseek') body.thinking = { type: thinking }
   else if (adapter.thinking === 'reasoning_effort') body.reasoning_effort = thinking === 'enabled' ? 'medium' : 'none'
@@ -289,11 +324,12 @@ function requestBody(opts: ChatCompletionOptions, messages: ChatMessage[], provi
   return body
 }
 
-function retryableProtocolError(status: number, payload: unknown): 'response_format' | 'token' | null {
+function retryableProtocolError(status: number, payload: unknown): 'response_format' | 'token' | 'tools' | null {
   if (status < 400 || status >= 500) return null
   const text = JSON.stringify(payload).toLowerCase()
   if (/response.?format|json.?mode/.test(text)) return 'response_format'
   if (/max_tokens|max_completion_tokens/.test(text)) return 'token'
+  if (/tool_choice|tool.?calls|function.?calling|unknown field.{0,40}tools|unsupported.{0,40}tools/.test(text)) return 'tools'
   return null
 }
 
@@ -310,7 +346,7 @@ export async function chatCompletion(opts: ChatCompletionOptions): Promise<ChatC
   requireHttpUrl(opts.baseUrl || AI_PROVIDERS[provider].defaultBaseUrl, 'Base URL')
   const endpoint = resolveChatCompletionsUrl(opts.baseUrl, provider)
   let result: ChatCompletionResult | undefined
-  let retryMode: { disableJson?: boolean; alternateToken?: boolean; emptyRetry?: boolean } = {}
+  let retryMode: { disableJson?: boolean; disableTools?: boolean; alternateToken?: boolean; emptyRetry?: boolean } = {}
   const maxAttempts = opts.singleRequest ? 1 : EMPTY_COMPLETION_MAX_ATTEMPTS
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const res = await appFetch(endpoint, {
@@ -326,6 +362,7 @@ export async function chatCompletion(opts: ChatCompletionOptions): Promise<ChatC
       const protocolError = attempt === 0 ? retryableProtocolError(res.status, json) : null
       if (protocolError === 'response_format') { retryMode = { disableJson: true }; continue }
       if (protocolError === 'token') { retryMode = { alternateToken: true }; continue }
+      if (protocolError === 'tools') { retryMode = { disableTools: true }; continue }
       if (/content.?filter|safety|blocked|sensitive|涉敏|安全策略/i.test(JSON.stringify(json))) {
         result = { status: 'blocked', content: '', provider, rawShapeSummary: rawShapeSummary(json), retried: attempt > 0 }
         break
@@ -334,7 +371,7 @@ export async function chatCompletion(opts: ChatCompletionOptions): Promise<ChatC
     }
     result = extractCompletion(json, provider)
     if (attempt < maxAttempts - 1 && result.status === 'empty') {
-      retryMode = { disableJson: opts.jsonMode, emptyRetry: true }
+      retryMode = { ...retryMode, disableJson: opts.jsonMode || retryMode.disableJson, emptyRetry: true }
       continue
     }
     if (attempt > 0) result.retried = true

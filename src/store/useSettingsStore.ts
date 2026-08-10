@@ -76,6 +76,9 @@ export const useSettingsStore = create<SettingsState>()(
       worldview: '',
       worldbookMigrationCompleted: false,
       defaultWorldviewId: undefined,
+      activeWorldId: undefined,
+      worldSnapshotMigrationVersion: 0,
+      worldEconomyIsolated: false,
       autoCompressLibraryImports: true,
       libraryCompressionThresholdTokens: 2000,
       pexelsApiKey: envPexelsKey,
@@ -105,12 +108,12 @@ export const useSettingsStore = create<SettingsState>()(
       customCurrencyEmoji: '💎',
       moodExpiryMs: 30 * 60 * 1000,
       adminModeEnabled: false,
-      enabledModules: ['shop', 'warehouse', 'worldview', 'knowledgeBase', 'relationship', 'personalityTraits', 'intent', 'storyOutline', 'career', 'location'],
+      enabledModules: ['shop', 'warehouse', 'saveLoad', 'knowledgeBase', 'relationship', 'personalityTraits', 'intent', 'storyOutline', 'career', 'location'],
       setSettings: (patch) => set(patch),
     }),
     {
       name: 'talk-settings',
-      version: 22,
+      version: 23,
       migrate: (persisted, version) => {
         const next = persisted as Partial<SettingsState>
         if (next.experienceMode !== 'immersive' && next.experienceMode !== 'free') next.experienceMode = 'free'
@@ -134,6 +137,14 @@ export const useSettingsStore = create<SettingsState>()(
         if (typeof next.worldbookMigrationCompleted !== 'boolean') next.worldbookMigrationCompleted = false
         if (typeof next.autoCompressLibraryImports !== 'boolean') next.autoCompressLibraryImports = true
         if (typeof next.libraryCompressionThresholdTokens !== 'number') next.libraryCompressionThresholdTokens = 2000
+        if (typeof next.worldSnapshotMigrationVersion !== 'number') next.worldSnapshotMigrationVersion = 0
+        if (typeof next.worldEconomyIsolated !== 'boolean') next.worldEconomyIsolated = false
+        if (!next.activeWorldId && next.defaultWorldviewId) next.activeWorldId = next.defaultWorldviewId
+        if (Array.isArray(next.enabledModules)) {
+          const hadWorldFeature = next.enabledModules.includes('worldview') || next.enabledModules.includes('saveLoad')
+          next.enabledModules = next.enabledModules.filter((id) => id !== 'worldview')
+          if (hadWorldFeature && !next.enabledModules.includes('saveLoad')) next.enabledModules.push('saveLoad')
+        }
         if (typeof next.automaticAiDailyCap !== 'number') next.automaticAiDailyCap = 0
         if (typeof next.userVisualIdentity !== 'string') next.userVisualIdentity = ''
         if (typeof next.userVisualSeed !== 'number') next.userVisualSeed = undefined

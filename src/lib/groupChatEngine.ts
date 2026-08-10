@@ -18,7 +18,7 @@ import { isModuleEnabled } from '../features'
 import { describeCurrentTime } from './time'
 import { displayName } from './contact'
 import { previewForMessage } from './messagePreview'
-import { buildUserProfileText, nextMessageTimestamp, REPLY_TIMEOUT_MESSAGE, useChatEngineStore } from './chatEngine'
+import { buildUserProfileText, nextMessageTimestamp, useChatEngineStore } from './chatEngine'
 import { reviewTurnLogic } from './turnLogicReviewer'
 import { buildDirectGroupOutputInstruction, parseDirectOutputReview } from './directOutput'
 import { trackRemoteStickerSend } from './remoteMedia'
@@ -34,7 +34,7 @@ import { retrieveWorldbookContext } from './worldbook'
 import { featureActive, promptModuleEnabled } from './promptModules'
 import { realisticReplyDelayMs } from './replyTiming'
 import { createMediaAsset, startMediaAsset } from './imageAssets'
-import { auditAndRepairRawTurn, insertToolCallsIntoRawTurn } from './responseQuality'
+import { generateGroupAgentTurn } from './chatAgentTools'
 import { traceTurnEvent } from './deepseek'
 import type { AppSettings, Contact, Group, GroupAiBubble, Message, Sticker } from '../types'
 
@@ -63,7 +63,6 @@ async function loadSpeakerMemories(speakers: Contact[]): Promise<Map<string, str
  * updated per speaker, via maybeUpdateGroupMemory — see memory.ts.
  */
 const turns = createTurnController()
-const REPLY_TIMEOUT_MS = 30_000
 
 function scheduleGroupAiTurn(
   conversationId: string,
@@ -106,10 +105,10 @@ function parseGroupTurnDebugPayload(
   return { mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, knowledgeQueries, turnSummary, groupVibe, storyOutline, promptTrace: { sections: [{ label: '群聊主提示词', content: mainPrompt }] } }
 }
 
-/** Admin-only safe stop for a group generation and its queued bubbles. */
+/** Cancels a group generation and its queued bubbles. */
 export function stopGroupAiTurn(conversationId: string): void {
   turns.begin(conversationId, uuid())
-  useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined, error: '已由管理员停止本轮群聊生成' })
+  useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined, error: '' })
 }
 
 export function resetAllGroupChatTurns(): void {
@@ -259,7 +258,7 @@ export async function sendGroupMessage(
 
   const streamId = uuid()
   turns.begin(conversationId, streamId)
-  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: '群成员', timedOut: false })
+  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: '群成员' })
 
   const messageCreatedAt = await nextMessageTimestamp(conversationId)
   const msg: Message = {
@@ -315,7 +314,7 @@ export async function triggerGroupAiTurn(
   }
   const streamId = uuid()
   turns.begin(conversationId, streamId)
-  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: '群成员', timedOut: false })
+  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: '群成员' })
   scheduleGroupAiTurn(conversationId, group, members, settings, stickers, streamId)
 }
 
@@ -335,7 +334,7 @@ export async function regenerateGroupAiTurn(
 
   const streamId = uuid()
   turns.begin(conversationId, streamId)
-  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: '群成员', timedOut: false })
+  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: '群成员' })
 
   const turnMessages = await db.messages
     .where('conversationId')
@@ -361,16 +360,8 @@ async function runGroupAiTurn(
   const engine = useChatEngineStore.getState()
   const directOutput = isModuleEnabled('directOutput')
   const turnStartedAt = performance.now()
-  engine.patch(conversationId, { aiTyping: true, error: '', typingLabel: '群成员', timedOut: false })
+  engine.patch(conversationId, { aiTyping: true, error: '', typingLabel: '群成员' })
   console.log(`[group] 开始生成回复 群=${group.name} conversationId=${conversationId}`)
-  let replyRevealed = false
-  const timeout = setTimeout(() => {
-    if (!turns.isCurrent(conversationId, streamId) || replyRevealed) return
-    console.warn(`[group] 回复超时，群=${group.name} conversationId=${conversationId}`)
-    turns.begin(conversationId, uuid())
-    engine.patch(conversationId, { aiTyping: false, typingLabel: undefined, error: REPLY_TIMEOUT_MESSAGE, timedOut: true })
-  }, REPLY_TIMEOUT_MS)
-  turns.addTimer(conversationId, timeout)
   try {
     let locationParticipants: LocationParticipants | undefined
     if (group.kind === 'location' && group.locationId) {
@@ -411,6 +402,9 @@ async function runGroupAiTurn(
     const remoteStickerSearchEnabled = isStickerProviderReady(settings)
     const imageGenerationEnabled = isImageProviderReady(settings)
     const location = group.kind === 'location' && group.locationId ? await db.locations.get(group.locationId) : undefined
+    const allLocations = isModuleEnabled('location') ? await db.locations.toArray() : []
+    const leafLocations = allLocations.filter((candidate) => !allLocations.some((child) => child.parentId === candidate.id))
+    const locationToolContext = leafLocations.length ? `\n可创建日程的合法地点：${leafLocations.map((candidate) => `${candidate.name}(${candidate.id})`).join('、')}` : ''
     const promptBuilder = group.kind === 'location' ? buildLocationRawChatPrompt : buildGroupRawChatPrompt
     const participantPositions = locationParticipants
       ? [
@@ -476,50 +470,36 @@ async function runGroupAiTurn(
       ...(regenerationUserMessage ? [{ role: 'user' as const, content: regenerationUserMessage }] : []),
       { role: 'system', content: '【最终生成提醒】现在只生成自然群聊正文，不输出JSON、分析、标题或Markdown。' },
     ])
-    let rawText = await chatCompletion({
-      apiKey: settings.apiKey,
-      baseUrl: settings.baseUrl,
-      model: settings.model,
-      messages: chatMessages,
-      signal: controller.signal,
-      purpose: 'chat',
-      thinking: 'disabled',
-      temperature: regenerationInstruction ? 0.55 : 0.9,
-      maxTokens: directOutput ? 1400 : 1000,
-      jsonMode: directOutput,
-      trace: { turnId: streamId, stage: 'original_generation', conversationId },
-    })
+    let rawText: string
+    let agentParsed: ReturnType<typeof parseGroupAiResponse>
+    if (directOutput) {
+      rawText = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, messages: chatMessages, signal: controller.signal, purpose: 'chat', thinking: 'disabled', temperature: regenerationInstruction ? 0.55 : 0.9, maxTokens: 1400, jsonMode: true, trace: { turnId: streamId, stage: 'original_generation', conversationId } })
+      agentParsed = parseGroupAiResponse(rawText, speakers.length)
+    } else {
+      const generated = await generateGroupAgentTurn({
+        apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, utilityModel: settings.utilityModel,
+        messages: [...chatMessages, { role: 'system', content: `本轮必须通过提供的函数发送群聊消息或执行行动。create_schedule 日程卡不能单独作为回复：创建日程时，同一位发言人必须同时调用 send_text 自然说话；图片已有必填配文，表情包可以单独发送。每条消息都必须填写该发言人的真实想法和简短中文文字心情；心情禁止使用 emoji。严格选择正确的 speakerIndex。${locationToolContext}` }],
+        signal: controller.signal, purpose: 'chat', trace: { turnId: streamId, stage: 'original_generation', conversationId },
+        stickerNames: stickers.map((sticker) => sticker.name), stickerSearchEnabled: remoteStickerSearchEnabled,
+        imageEnabled: imageGenerationEnabled || !!settings.pexelsApiKey, knowledgeEnabled: featureActive(settings, 'knowledgeBase'),
+        scheduleEnabled: isModuleEnabled('location'), locationIds: leafLocations.map((candidate) => candidate.id),
+        speakerNames: speakers.map((speaker) => displayName(speaker)), memberNames: members.map((member) => displayName(member)),
+      })
+      rawText = generated.raw
+      agentParsed = generated.parsed
+    }
 
     if (!turns.isCurrent(conversationId, streamId)) return
-    console.log(`[group] 主模型群聊草稿(${rawText.length}字): ${rawText.slice(0, 160)}...`)
-    if (!directOutput) {
-      const tooled = await insertToolCallsIntoRawTurn({
-        settings, rawDraft: rawText,
-        recentContext: recentHistory.slice(-4).map((message) => formatGroupHistoryMessage(message, contactById, messageById, settings.userNickname).content).join('\n'),
-        scene: 'group', imageGenerationEnabled,
-        signal: controller.signal, trace: { turnId: streamId, conversationId },
-      })
-      rawText = tooled.raw
-      if (!turns.isCurrent(conversationId, streamId)) return
-      const audited = await auditAndRepairRawTurn({
-        settings, masterPrompt: chatMessages[0]?.content ?? systemPrompt,
-        rawDraft: rawText, scene: 'group', regenerationInstruction,
-        signal: controller.signal, trace: { turnId: streamId, conversationId },
-      })
-      rawText = audited.raw
-      if (!turns.isCurrent(conversationId, streamId)) return
-      if (parseGroupAiResponse(rawText, speakers.length).bubbles.length === 0) throw new Error('审核及修改没有产出有效的群聊JSON')
-    }
+    console.log(`[group] Agent群聊回复(${rawText.length}字): ${rawText.slice(0, 160)}...`)
     let draftFeedback: string | undefined
-    const parsedTurn = { ...parseGroupAiResponse(rawText, speakers.length), valid: true, needsUtility: false }
+    const parsedTurn = { ...agentParsed, valid: true, needsUtility: false }
     let jsonRaw = rawText
-    if (parsedTurn.bubbles.length === 0) throw new Error('主模型没有产出有效的群聊JSON')
+    if (parsedTurn.bubbles.length === 0 && parsedTurn.knowledgeQueries.length === 0) throw new Error('主模型没有产出有效的群聊行动')
     console.log('[group] 审核模型已完成群聊原文审核和JSON翻译，未调用第三个翻译模型')
 
     let finalRaw = jsonRaw
     let { bubbles, knowledgeQueries, turnSummary, groupVibe, planCandidates } = parsedTurn
     const initiallyRequestedKnowledge = [...knowledgeQueries]
-    let reviewFailure = draftFeedback
     const runLogicReview = (stage: 'first_quality' | 'second_quality') => reviewTurnLogic({
       settings,
       latestUserText: latestUserMessage?.content ?? '',
@@ -550,58 +530,20 @@ async function runGroupAiTurn(
     if (directReview?.valid === false) {
       throw new Error(`群聊同次自审未通过：${directReview.reason || '未知原因'}`)
     }
-    if (!directOutput && logicReview?.status === 'reject') {
-      reviewFailure = logicReview.reason || '群聊回复存在客观逻辑问题'
-      draftFeedback = reviewFailure
-      console.warn(`[group] 逻辑自检要求主模型重写 群=${group.name} 原因=${reviewFailure}`)
-      rawText = await chatCompletion({
-        apiKey: settings.apiKey,
-        baseUrl: settings.baseUrl,
-        model: settings.model,
-        messages: coalesceConsecutiveRoles([
-          ...chatMessages,
-          { role: 'assistant', content: rawText },
-          {
-            role: 'user',
-            content: `上一版群聊回复存在客观逻辑错误：${reviewFailure}
-请依据原始上下文重写完整群聊自然文本。不要解释，不要输出JSON、Markdown或标题。`,
-          },
-        ]),
-        signal: controller.signal,
-        purpose: 'chat',
-        thinking: 'disabled',
-        temperature: regenerationInstruction ? 0.55 : 0.75,
-        maxTokens: 1000,
-        trace: { turnId: streamId, stage: 'second_chat', conversationId },
-      })
-      if (!turns.isCurrent(conversationId, streamId)) return
-      const convertedTooled = await insertToolCallsIntoRawTurn({ settings, rawDraft: rawText, recentContext: recentHistory.slice(-4).map((message) => formatGroupHistoryMessage(message, contactById, messageById, settings.userNickname).content).join('\n'), scene: 'group', imageGenerationEnabled, signal: controller.signal, trace: { turnId: streamId, conversationId } })
-      rawText = convertedTooled.raw
-      const audited = await auditAndRepairRawTurn({ settings, masterPrompt: chatMessages[0]?.content ?? systemPrompt, rawDraft: rawText, scene: 'group', regenerationInstruction, signal: controller.signal, trace: { turnId: streamId, conversationId } })
-      rawText = audited.raw
-      const converted = parseGroupAiResponse(rawText, speakers.length)
-      if (converted.bubbles.length === 0) throw new Error('主模型重写后的审核模型没有产出有效JSON')
-      jsonRaw = rawText
-      ;({ bubbles, knowledgeQueries, turnSummary, groupVibe, planCandidates } = converted)
-      finalRaw = jsonRaw
-      logicReview = (() => undefined as { status: 'pass' | 'reject' | 'unavailable'; reason: string } | undefined)()
-      if (logicReview?.status === 'unavailable') {
-        draftFeedback = `二次审查降级：${logicReview.reason}`
-        console.warn(`[group] 二次逻辑审查不可用，放行重写回复 群=${group.name} 原因=${logicReview.reason}`)
-      } else if (logicReview?.status === 'reject') {
-        throw new Error(`主模型重写后仍未通过群聊逻辑自检：${logicReview.reason || '未知原因'}`)
-      }
-    }
     knowledgeQueries = Array.from(new Set([...initiallyRequestedKnowledge, ...knowledgeQueries])).slice(0, 2)
     if (!directOutput && featureActive(settings, 'knowledgeBase') && knowledgeQueries.length > 0) {
       const knowledge = await resolveKnowledgeQueries(knowledgeQueries, settings)
       if (knowledge.text) {
-        rawText = await chatCompletion({ apiKey:settings.apiKey,baseUrl:settings.baseUrl,model:settings.model,messages:[...chatMessages,{role:'user',content:`刚才出现了你们不了解的词。搜索结果如下：\n${knowledge.text}${reviewFailure?`\n\n上一版审查问题：${reviewFailure}，重写时同时修正。`:''}\n请基于结果重新生成群聊草稿，保持原群聊格式，像刚查明白后自然接话，不要写成报告。${regenerationUserMessage ? `\n\n再次确认：仍必须严格执行前述“最高优先级剧情要求”。` : ''}`}],signal:controller.signal, thinking:'disabled',temperature:regenerationInstruction ? 0.55 : 0.9,maxTokens:1800,trace:{turnId:streamId,stage:'second_chat',conversationId} })
-        const enrichedTooled = await insertToolCallsIntoRawTurn({ settings, rawDraft: rawText, recentContext: recentHistory.slice(-4).map((message) => formatGroupHistoryMessage(message, contactById, messageById, settings.userNickname).content).join('\n'), scene: 'group', imageGenerationEnabled, signal: controller.signal, trace: { turnId: streamId, conversationId } })
-        rawText = enrichedTooled.raw
-        const enrichedAudited = await auditAndRepairRawTurn({ settings, masterPrompt: chatMessages[0]?.content ?? systemPrompt, rawDraft: rawText, scene: 'group', regenerationInstruction, signal: controller.signal, trace: { turnId: streamId, conversationId } })
-        rawText = enrichedAudited.raw
-        const enrichedConverted = parseGroupAiResponse(rawText, speakers.length)
+        const regenerated = await generateGroupAgentTurn({
+          apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, utilityModel: settings.utilityModel,
+          messages: [...chatMessages, { role: 'user', content: `刚才出现了你们不了解的词。搜索结果如下：\n${knowledge.text}\n请基于结果自然接话，不要写成报告。` }, { role: 'system', content: `必须通过提供的函数发送消息。create_schedule 日程卡不能单独作为回复：创建日程时，同一位发言人必须同时调用 send_text 自然说话。每条消息填写真实想法和中文文字心情，禁止使用 emoji。${locationToolContext}` }],
+          signal: controller.signal, purpose: 'chat', trace: { turnId: streamId, stage: 'second_chat', conversationId },
+          stickerNames: stickers.map((sticker) => sticker.name), stickerSearchEnabled: remoteStickerSearchEnabled,
+          imageEnabled: imageGenerationEnabled || !!settings.pexelsApiKey, knowledgeEnabled: false,
+          scheduleEnabled: isModuleEnabled('location'), locationIds: leafLocations.map((candidate) => candidate.id), speakerNames: speakers.map((speaker) => displayName(speaker)), memberNames: members.map((member) => displayName(member)),
+        })
+        rawText = regenerated.raw
+        const enrichedConverted = regenerated.parsed
         if (enrichedConverted.bubbles.length === 0) throw new Error('知识补全后的审核模型没有产出有效群聊JSON')
         jsonRaw = rawText
         finalRaw = jsonRaw
@@ -610,7 +552,6 @@ async function runGroupAiTurn(
     }
     console.log(`[group] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 群=${group.name}`)
     if (bubbles.length === 0) {
-      clearTimeout(timeout)
       console.warn(`[group] 本轮没有人回复 群=${group.name} 原始内容: ${rawText.slice(0, 200)}`)
       engine.patch(conversationId, { error: '群里这次没有人回复 可以再发一条试试', aiTyping: false, typingLabel: undefined })
       return
@@ -639,13 +580,8 @@ async function runGroupAiTurn(
     for (const plan of createdPlans) await db.messages.add(planCardMessage(plan))
     void updateGroupMemoryAndVibe({ group, aiTurnId, settings, turnSummary, groupVibe, directOutput })
     console.info(`[group-perf] 模型与自检完成=${Math.round(performance.now() - turnStartedAt)}ms 群=${group.name}`)
-    revealGroupBubbles(conversationId, group, members, speakers, bubbles, streamId, settings, stickers, aiTurnId, turnSummary, turnStartedAt, directOutput, () => {
-      if (replyRevealed) return
-      replyRevealed = true
-      clearTimeout(timeout)
-    })
+    revealGroupBubbles(conversationId, group, members, speakers, bubbles, streamId, settings, stickers, aiTurnId, turnSummary, turnStartedAt, directOutput)
   } catch (err) {
-    clearTimeout(timeout)
     if (!turns.isCurrent(conversationId, streamId)) return
     if (err instanceof DOMException && err.name === 'AbortError') return
     const message = err instanceof Error ? err.message : String(err)
@@ -680,6 +616,7 @@ function revealGroupBubbles(
     delayMs: (bubble, i) => i > 0 ? groupTypingDelayMs(bubble) : 0,
     reveal: async (bubble, i) => {
       const speaker = speakers[bubble.speakerIndex - 1]
+      let executionError = ''
       useChatEngineStore.getState().patch(conversationId, {
         typingLabel: speaker ? displayName(speaker) : '群成员',
       })
@@ -704,15 +641,15 @@ function revealGroupBubbles(
       const messageId = uuid()
       if (bubble.type === 'scheduleChange' && speaker?.id) {
         const location = bubble.locationId ? await db.locations.get(bubble.locationId) : undefined
-        if (bubble.locationId && !location) return
+        if (bubble.locationId && !location) executionError = '这个地点已经不可用了，日程没有创建成功。'
         const fresh = await db.contacts.get(speaker.id)
-        if (!fresh) return
-        await db.contacts.update(speaker.id, { scheduleOverrides: [...(fresh.scheduleOverrides ?? []), {
+        if (!fresh) executionError = '没有找到对应联系人，日程没有创建成功。'
+        if (!executionError && fresh) await db.contacts.update(speaker.id, { scheduleOverrides: [...(fresh.scheduleOverrides ?? []), {
           id: uuid(), date: bubble.date, startHour: bubble.startHour, endHour: bubble.endHour,
           phoneAccess: bubble.phoneAccess, location: location?.name ?? bubble.location, locationId: location?.id,
           activity: bubble.activity, summary: bubble.summary, priority: 'special', createdAt: Date.now(),
         }] })
-        void traceTurnEvent({ turnId: streamId, conversationId, stage: 'schedule_change', output: `${displayName(speaker)} 新建：${bubble.activity}｜${bubble.date} ${String(bubble.startHour).padStart(2, '0')}:00-${String(bubble.endHour).padStart(2, '0')}:00｜${location?.name ?? bubble.location}` })
+        if (!executionError) void traceTurnEvent({ turnId: streamId, conversationId, stage: 'schedule_change', output: `${displayName(speaker)} 新建：${bubble.activity}｜${bubble.date} ${String(bubble.startHour).padStart(2, '0')}:00-${String(bubble.endHour).padStart(2, '0')}:00｜${location?.name ?? bubble.location}` })
       }
       if (bubble.type === 'image') {
         if (!isImageProviderReady(settings)) imageFailed = true
@@ -731,13 +668,14 @@ function revealGroupBubbles(
         }
       }
       if (bubble.type === 'image' && imageFailed) content = '图片没发出来…'
+      if (executionError) content = executionError
       const msg: Message = {
         id: messageId,
         conversationId,
         role: 'assistant',
-        type: (bubble.type === 'image' && imageFailed) || (bubble.type === 'sticker' && stickerFailed) ? 'text' : bubble.type,
+        type: executionError || (bubble.type === 'image' && imageFailed) || (bubble.type === 'sticker' && stickerFailed) ? 'text' : bubble.type,
         content,
-        scheduleChange: bubble.type === 'scheduleChange' ? { date: bubble.date, startHour: bubble.startHour, endHour: bubble.endHour, phoneAccess: bubble.phoneAccess, location: bubble.location, locationId: bubble.locationId, activity: bubble.activity, summary: bubble.summary } : undefined,
+        scheduleChange: !executionError && bubble.type === 'scheduleChange' ? { date: bubble.date, startHour: bubble.startHour, endHour: bubble.endHour, phoneAccess: bubble.phoneAccess, location: bubble.location, locationId: bubble.locationId, activity: bubble.activity, summary: bubble.summary } : undefined,
         speakerContactId: speaker?.id,
         debugAiTurnId: aiTurnId,
         debugParsedBubble: bubble,
@@ -795,5 +733,6 @@ function revealGroupBubbles(
           }
     },
     onError: (error) => console.error('[group] 气泡写入失败', error),
+    onComplete: () => useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined }),
   })
 }

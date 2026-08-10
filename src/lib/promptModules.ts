@@ -302,6 +302,7 @@ export function featureActive(
   moduleId: PromptModuleId,
 ): boolean {
   if (!promptModuleEnabled(settings, moduleId)) return false
+  if (moduleId === 'worldview') return settings.enabledModules.includes('saveLoad') || settings.enabledModules.includes('worldview')
   return !FEATURE_GATED_PROMPT_MODULES.has(moduleId) || settings.enabledModules.includes(moduleId)
 }
 

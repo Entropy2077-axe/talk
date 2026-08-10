@@ -42,7 +42,7 @@ export function rankWorldbookEntries(entries: WorldbookEntry[], query: string): 
 async function enabledEntries(worldviewId?: string): Promise<{ entries: WorldbookEntry[]; collections: Map<string, WorldbookCollection> }> {
   const [collectionsList, entries] = await Promise.all([db.worldbookCollections.toArray(), db.worldbookEntries.toArray()])
   const collections = new Map(collectionsList.map((collection) => [collection.id, collection]))
-  const selectedId = worldviewId || useSettingsStore.getState().defaultWorldviewId || collectionsList.find((collection) => collection.enabled)?.id || collectionsList[0]?.id
+  const selectedId = worldviewId || useSettingsStore.getState().activeWorldId || useSettingsStore.getState().defaultWorldviewId || collectionsList.find((collection) => collection.enabled)?.id || collectionsList[0]?.id
   return {
     collections,
     entries: entries.filter((entry) => entry.enabled && entry.collectionId === selectedId),

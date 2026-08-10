@@ -63,13 +63,13 @@ describe('original prompt templates', () => {
 
   it('requires both switches for feature-gated prompt modules', () => {
     const promptModules = createDefaultPromptModules()
-    const settings = { promptModules, enabledModules: ['worldview'] }
+    const settings = { promptModules, enabledModules: ['saveLoad'] }
     expect(featureActive(settings, 'worldview')).toBe(true)
 
     settings.enabledModules = []
     expect(featureActive(settings, 'worldview')).toBe(false)
 
-    settings.enabledModules = ['worldview']
+    settings.enabledModules = ['saveLoad']
     promptModules.worldview.enabled = false
     expect(featureActive(settings, 'worldview')).toBe(false)
   })

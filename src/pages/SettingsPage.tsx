@@ -44,6 +44,7 @@ export function SettingsPage() {
     experienceMode,
     topInsetAdjustmentPx,
     automaticAiDailyCap,
+    worldEconomyIsolated,
     setSettings,
   } = useSettingsStore()
   const [confirmingWipe, setConfirmingWipe] = useState(false)
@@ -621,6 +622,14 @@ export function SettingsPage() {
         </button>
       </section>
 
+
+      <section className="mt-3 bg-white px-4 py-3">
+        <h2 className="mb-2 text-xs font-medium text-gray-400">世界经济与资产</h2>
+        <div className="flex items-center justify-between gap-4">
+          <div><p className="text-sm text-gray-800">各世界独立保存经济与资产</p><p className="mt-1 text-[11px] leading-relaxed text-gray-400">关闭时，用户余额、仓库、职业和商城记录在所有世界间共用；开启后随世界存档切换。首次开启时，旧世界会沿用当前共享状态作为初始值。</p></div>
+          <button type="button" role="switch" aria-checked={worldEconomyIsolated === true} onClick={() => setSettings({ worldEconomyIsolated: worldEconomyIsolated !== true })} className={`relative h-6 w-11 shrink-0 rounded-full ${worldEconomyIsolated === true ? 'bg-green-500' : 'bg-gray-200'}`}><span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${worldEconomyIsolated === true ? 'left-5.5' : 'left-0.5'}`} /></button>
+        </div>
+      </section>
 
       <section className="mt-3 bg-white px-4 py-3">
         <h2 className="mb-2 text-xs font-medium text-gray-400">数据备份与恢复</h2>

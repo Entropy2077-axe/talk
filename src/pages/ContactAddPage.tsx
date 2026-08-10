@@ -49,15 +49,12 @@ interface RelationRow {
   targetContactId: string
   label: ContactRelationLabel
 }
-const EMPTY_LIST: never[] = []
-
 export function ContactAddPage() {
   const navigate = useNavigate()
   const settings = useSettingsStore()
   const existingContacts = (useLiveQuery(() => db.contacts.toArray(), []) ?? []).filter((item) => !isAiTestId(item.id))
   const savedPersonas = useLiveQuery(() => db.savedPersonas.orderBy('updatedAt').reverse().toArray(), []) ?? []
   const creationRecords = useLiveQuery(() => db.personaCreationRecords.orderBy('createdAt').reverse().toArray(), []) ?? []
-  const worldviews = useLiveQuery(() => db.worldbookCollections.orderBy('updatedAt').reverse().toArray(), []) ?? EMPTY_LIST
 
   const [tags, setTags] = useState<string[]>([])
   const [customTag, setCustomTag] = useState('')
@@ -106,7 +103,7 @@ export function ContactAddPage() {
   const [importedFirstMessage, setImportedFirstMessage] = useState('')
   const [importedCardName, setImportedCardName] = useState('')
   const [pendingCardWorldbook, setPendingCardWorldbook] = useState<ParsedWorldbookImport | null>(null)
-  const [selectedWorldviewId, setSelectedWorldviewId] = useState(settings.defaultWorldviewId ?? '')
+  const selectedWorldviewId = settings.activeWorldId || settings.defaultWorldviewId || ''
 
   useEffect(() => {
     if (settings.experienceMode === 'immersive' && isNuwaMode) {
@@ -115,10 +112,7 @@ export function ContactAddPage() {
     }
   }, [settings.experienceMode, isNuwaMode])
 
-  useEffect(() => {
-    if (!selectedWorldviewId && worldviews[0]) setSelectedWorldviewId(settings.defaultWorldviewId || worldviews[0].id)
-  }, [selectedWorldviewId, settings.defaultWorldviewId, worldviews])
-  const compatibleContacts = existingContacts.filter((contact) => (contact.worldviewId || settings.defaultWorldviewId) === (selectedWorldviewId || settings.defaultWorldviewId))
+  const compatibleContacts = existingContacts
 
   async function importCharacterCard(file: File) {
     try {
@@ -831,7 +825,6 @@ issues 要用简短中文列出具体错误。` },
             className="mb-4 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
           />
         </>}
-        {settings.experienceMode === 'free' && <label className="mb-4 block text-xs font-medium text-gray-400">TA生活在哪个世界？<select value={selectedWorldviewId} onChange={(event) => { setSelectedWorldviewId(event.target.value); setRelationRows([]) }} className="mt-2 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800"><option value="">请选择世界观</option>{worldviews.map((world) => <option key={world.id} value={world.id}>{world.name}{settings.defaultWorldviewId === world.id ? '（默认）' : ''}</option>)}</select><span className="mt-1 block text-[11px] font-normal leading-relaxed text-gray-400">私聊、朋友圈和离线经历每次只读取这个世界的正史。</span></label>}
         {settings.experienceMode === 'free' && <section className="mb-4 rounded-xl border border-[var(--ui-special-border)] bg-[var(--ui-special-soft)] p-3">
           <div className="flex items-center justify-between gap-3">
             <div><p className="text-sm font-medium text-[var(--ui-special-ink)]">本次生成的参考资料</p><p className="mt-1 text-[11px] leading-relaxed text-[var(--ui-special-ink)]">从资料库选择角色卡、外部世界书或联网资料，只用于生成这个人物，不会自动写入世界正史。</p></div>

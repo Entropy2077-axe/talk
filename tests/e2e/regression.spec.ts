@@ -152,14 +152,14 @@ test('settings page exports a complete Talk backup json', async ({ page }) => {
 
   const backup = JSON.parse(await import('node:fs/promises').then((fs) => fs.readFile(path!, 'utf8')))
   expect(backup.format).toBe('talk-backup')
-  expect(backup.schemaVersion).toBe(8)
+  expect(backup.schemaVersion).toBe(9)
   expect(backup.settings.userNickname).toBe('Backup User')
   expect(backup.tables.contacts).toHaveLength(1)
   expect(backup.tables.conversations).toHaveLength(1)
   expect(backup.tables.mediaAssets).toEqual([])
   expect(backup.tables.messages).toHaveLength(1)
   expect(Object.keys(backup.tables)).toEqual(
-    expect.arrayContaining(['stickers', 'moments', 'knowledgeEntries', 'libraryItems', 'savedWorldviews', 'worldbookEntries', 'contactMemories', 'shopPurchaseHistory', 'contactGenerationTasks']),
+    expect.arrayContaining(['stickers', 'moments', 'knowledgeEntries', 'libraryItems', 'savedWorldviews', 'worldbookEntries', 'contactMemories', 'shopPurchaseHistory', 'contactGenerationTasks', 'worldSnapshots']),
   )
 })
 
@@ -454,8 +454,8 @@ test('global prompt archives can be saved and explicitly copied to a contact', a
   await page.getByRole('button', { name: '确认覆盖' }).click()
 
   await page.goto('/#/contact/contact-a')
-  await expect(page.getByText(/来源：E2E 存档/)).toBeVisible()
   const snapshot = await page.evaluate(async () => (await import('/src/db/db.ts')).db.contacts.get('contact-a'))
+  expect(snapshot?.promptPresetSourceName).toBe('E2E 存档')
   expect(snapshot?.promptModulesSnapshot?.relationship.templates.chat).toContain('CONTACT_ARCHIVE_E2E')
 })
 
@@ -737,10 +737,8 @@ test('Nuwa AI initial warmth can be edited before contact creation', async ({ pa
   await page.reload()
   await page.getByRole('button', { name: '精细创建' }).click()
   await page.getByRole('button', { name: '生成AI初稿' }).click()
-  await expect(page).toHaveURL(/#\/contacts$/)
-  const completedDraftTask = page.getByRole('button').filter({ hasText: '初稿已完成，待确认' })
-  await expect(completedDraftTask).toBeVisible({ timeout: 15_000 })
-  await completedDraftTask.click()
+  await expect(page).toHaveURL(/#\/contact-generation\/[^/]+$/)
+  await expect(page.getByRole('heading', { name: '初稿已完成，待确认' })).toBeVisible({ timeout: 15_000 })
   await expect(page.getByLabel('女娲好感度数值')).toHaveValue('42')
   await page.getByLabel('女娲好感度数值').fill('-35')
   await expect(page.getByRole('slider', { name: '女娲好感度' })).toHaveValue('-35')

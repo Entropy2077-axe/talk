@@ -51,8 +51,7 @@
     "src/pages/StickersPage.tsx",
     "src/pages/WarehousePage.tsx",
     "src/pages/WorkPage.tsx",
-    "src/pages/WorldbookCollectionPage.tsx",
-    "src/pages/WorldSettingsPage.tsx"
+    "src/pages/WorldbookCollectionPage.tsx"
   ],
   "special": {
     "src/components/ImageCropper.tsx": "图片裁剪画布需要遮罩、缩放和裁剪框视觉",

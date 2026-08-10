@@ -8,13 +8,15 @@ import { useSettingsStore } from '../store/useSettingsStore'
 import { estimateWorldbookTokens, formatEstimatedTokens } from '../lib/worldbookTokens'
 import { materializeLibraryItem } from '../lib/worldviewImport'
 import { searchLibraryItems } from '../lib/library'
+import { deleteWorldSnapshots } from '../lib/worldSnapshots'
 import type { WorldbookEntry } from '../types'
 
 const EMPTY_ENTRIES: WorldbookEntry[] = []
 const EMPTY_LIBRARY_ITEMS: never[] = []
 
 export function WorldbookCollectionPage() {
-  const { collectionId = '' } = useParams()
+  const { collectionId: legacyCollectionId = '', worldId = '' } = useParams()
+  const collectionId = worldId || legacyCollectionId
   const navigate = useNavigate()
   const settings = useSettingsStore()
   const collection = useLiveQuery(() => db.worldbookCollections.get(collectionId), [collectionId])
@@ -70,16 +72,18 @@ export function WorldbookCollectionPage() {
 
   async function deleteWorld() {
     if (!collection) return
+    if (settings.activeWorldId === collectionId) return setMessage('当前世界不能删除，请先调用其他世界的存档完成切换。')
     if (boundContacts || boundGroups) return setMessage(`仍有 ${boundContacts} 个联系人和 ${boundGroups} 个群聊属于这个世界，不能删除。`)
     if (!window.confirm(`删除“${collection.name}”及其全部正史条目吗？资料库原件不会删除。`)) return
     await db.transaction('rw', db.worldbookCollections, db.worldbookEntries, async () => { await db.worldbookEntries.where('collectionId').equals(collectionId).delete(); await db.worldbookCollections.delete(collectionId) })
+    await deleteWorldSnapshots((await db.worldSnapshots.where('worldId').equals(collectionId).primaryKeys()) as string[])
     if (settings.defaultWorldviewId === collectionId) settings.setSettings({ defaultWorldviewId: undefined })
-    void navigate('/world-settings')
+    void navigate('/save-load')
   }
 
   if (!collection) return <div className="flex h-[var(--app-height)] flex-col bg-[#f4f4f6]"><TopBar title="世界观" showBack/><div className="flex flex-1 items-center justify-center text-sm text-gray-400">加载中或存档不存在</div></div>
   return <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
-    <TopBar title={collection.name} showBack onBack={() => navigate('/world-settings')}/>
+      <TopBar title={collection.name} showBack onBack={() => navigate(`/save-load/world/${collectionId}`)}/>
     <div className="flex-1 overflow-y-auto px-4 pb-8">
       <section className="mt-3 rounded-xl bg-white p-4"><div className="flex justify-between gap-3"><div><p className="font-medium text-gray-900">{entries.length} 个正史条目</p><p className="mt-1 text-xs text-gray-400">{boundContacts} 个联系人 · {boundGroups} 个群聊属于此世界</p></div><button type="button" onClick={async () => { const name = window.prompt('世界观名称', collection.name)?.trim(); if (name) await db.worldbookCollections.update(collection.id, { name, updatedAt: Date.now() }) }} className="text-xs text-blue-600">重命名</button></div><div className="mt-3 grid grid-cols-3 gap-2 text-center text-[10px]"><div className="rounded-lg bg-gray-50 p-2 text-gray-600">总内容<br/><b>{formatEstimatedTokens(estimateWorldbookTokens(entries))}</b></div><div className="rounded-lg bg-amber-50 p-2 text-amber-700">每轮常驻<br/><b>{formatEstimatedTokens(estimateWorldbookTokens(permanent))}</b></div><div className="rounded-lg bg-blue-50 p-2 text-blue-600">按需触发<br/><b>{formatEstimatedTokens(estimateWorldbookTokens(triggered))}</b></div></div>{estimateWorldbookTokens(permanent) > 4000 && <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">常驻内容超过4000 Token，可能明显挤占聊天记录和人物记忆。</p>}</section>
 

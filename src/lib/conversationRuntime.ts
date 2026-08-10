@@ -60,6 +60,7 @@ interface SequentialRevealOptions<T> {
   delayMs: (item: T, index: number) => number
   reveal: (item: T, index: number) => Promise<void>
   onError: (error: unknown) => void
+  onComplete?: () => void
 }
 
 /** Run reveal work strictly in order, including any asynchronous media work. */
@@ -85,5 +86,7 @@ export function revealSequentially<T>(options: SequentialRevealOptions<T>): void
       timers.push(timer)
     }))
   })
-  void sequence
+  void sequence.then(() => {
+    if (controller.isCurrent(conversationId, streamId)) options.onComplete?.()
+  })
 }

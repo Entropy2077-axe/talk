@@ -187,7 +187,7 @@ ${samplesText ? `- 说话样例:\n${samplesText}` : ''}`
   }) ?? ''
   const finalPrompt = `${editableGroupPrompt}
 
-【发送前最终检查】只输出群成员自然聊天正文；不要输出检查过程、解释或JSON。`
+【发送前最终检查】只输出群成员自然聊天正文；每条消息的心情必须用简短中文文字，不要使用 emoji；不要输出检查过程、解释或JSON。`
 
   return finalPrompt
 }

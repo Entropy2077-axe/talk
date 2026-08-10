@@ -38,7 +38,7 @@ import type { CreateSpecialTaskResult } from './agentTasks'
 import { createScheduleInternalTask } from './internalTasks'
 import { createMediaAsset, startMediaAsset } from './imageAssets'
 import { buildDirectOutputInstruction, parseDirectOutputReview } from './directOutput'
-import { auditAndRepairRawTurn, insertToolCallsIntoRawTurn } from './responseQuality'
+import { generatePrivateAgentTurn } from './chatAgentTools'
 import { traceTurnEvent } from './deepseek'
 import type { AiBubble, AppSettings, Contact, InternalTask, Message, MessageType, ScheduleOverride, Sticker } from '../types'
 
@@ -56,8 +56,6 @@ interface ConversationRuntimeState {
   aiTyping: boolean
   error: string
   typingLabel?: string
-  /** A reply produced no visible bubble before the hard safety deadline. */
-  timedOut?: boolean
 }
 
 // Exported as a stable reference — selectors that fall back to this for a
@@ -65,10 +63,7 @@ interface ConversationRuntimeState {
 // literal on the fly (e.g. `s.states[id] ?? { aiTyping: false, error: '' }`),
 // since a new reference every call trips React's useSyncExternalStore
 // infinite-loop detection and crashes the page.
-export const DEFAULT_RUNTIME_STATE: ConversationRuntimeState = { aiTyping: false, error: '', typingLabel: undefined, timedOut: false }
-
-const REPLY_TIMEOUT_MS = 30_000
-export const REPLY_TIMEOUT_MESSAGE = '这轮回复等待超过 30 秒，已自动停止。你可以重新生成这一轮。'
+export const DEFAULT_RUNTIME_STATE: ConversationRuntimeState = { aiTyping: false, error: '', typingLabel: undefined }
 
 /** Equal IndexedDB index keys have no stable order, so timestamps must be monotonic per conversation. */
 export async function nextMessageTimestamp(conversationId: string, requested = Date.now()): Promise<number> {
@@ -217,10 +212,10 @@ function parseAiTurnDebugPayload(opts: {
   }
 }
 
-/** Admin-only safe stop: cancels network work and unrevealed bubbles for one conversation. */
+/** Cancels network work and unrevealed bubbles for one conversation. */
 export function stopAiTurn(conversationId: string): void {
   turns.begin(conversationId, uuid())
-  useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined, error: '已由管理员停止本轮生成' })
+  useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined, error: '' })
 }
 
 export function resetAllChatTurns(): void {
@@ -265,7 +260,7 @@ export async function sendMessage(
 
   const streamId = uuid()
   turns.begin(conversationId, streamId)
-  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: displayName(contact), timedOut: false })
+  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: displayName(contact) })
 
   const now = await nextMessageTimestamp(conversationId)
   const previousUserMessages = await db.messages.where('conversationId').equals(conversationId).toArray()
@@ -301,7 +296,7 @@ export async function triggerAiTurn(
 ): Promise<void> {
   const streamId = uuid()
   turns.begin(conversationId, streamId)
-  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: displayName(contact), timedOut: false })
+  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: displayName(contact) })
   scheduleAiTurn(conversationId, contact, settings, stickers, streamId, '', proactiveContext)
 }
 
@@ -320,7 +315,7 @@ export async function regenerateAiTurn(
 
   const streamId = uuid()
   turns.begin(conversationId, streamId)
-  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: displayName(contact), timedOut: false })
+  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: displayName(contact) })
 
   const turnMessages = await db.messages
     .where('conversationId')
@@ -350,18 +345,8 @@ async function runAiTurn(
   const turnStartedAt = performance.now()
   const now = turnNow ?? Date.now()
   const activeMood = getActiveMood(contact, now)
-  engine.patch(conversationId, { aiTyping: true, error: '', typingLabel: displayName(contact), timedOut: false })
+  engine.patch(conversationId, { aiTyping: true, error: '', typingLabel: displayName(contact) })
   console.log(`[chat] 开始生成回复 对方=${displayName(contact)} conversationId=${conversationId}`)
-  let replyRevealed = false
-  const timeout = setTimeout(() => {
-    if (!turns.isCurrent(conversationId, streamId) || replyRevealed) return
-    console.warn(`[chat] 回复超时，对方=${displayName(contact)} conversationId=${conversationId}`)
-    // begin() invalidates this stream, aborts any request currently in flight,
-    // and clears unrevealed bubble timers before the retry becomes available.
-    turns.begin(conversationId, uuid())
-    engine.patch(conversationId, { aiTyping: false, typingLabel: undefined, error: REPLY_TIMEOUT_MESSAGE, timedOut: true })
-  }, REPLY_TIMEOUT_MS)
-  turns.addTimer(conversationId, timeout)
   try {
     const directOutput = isModuleEnabled('directOutput')
     const history = await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt')
@@ -421,7 +406,7 @@ async function runAiTurn(
       const leafLocations = actionLocations.filter((location) => !actionLocations.some((candidate) => candidate.parentId === location.id))
       const locationCatalog = leafLocations.map((location) => `${location.name}(${location.id})`).join('、')
       locationFactsForReview = `当前地点=${currentLocation?.name ?? '未知地点'}(${contact.currentLocationId ?? '未知'})\n可执行地点=${locationCatalog}`
-      locationActionContext = `【地点与特殊任务】你当前位于：${currentLocation?.name ?? '未知地点'}（${contact.currentLocationId ?? '未知'}）。你可以按照自己的人设和意愿同意或拒绝玩家的线下请求。若同意，请只用自然聊天明确说清日期、开始时间、持续多久和地点；不要输出JSON、工具名或协议标记。系统会在回复后独立判断并创建特殊任务。特殊任务一旦与某条默认任务重叠，那条默认任务会整项取消。以下列表是当前唯一可确认并执行的具体地点：${locationCatalog}。玩家提到列表外地点，或名称无法可靠对应列表时，不能假装去过、看过、知道它存在，也不能直接答应；请保持角色口吻自然询问位置或让对方进一步说明，不要提“系统”“目录”或地点ID。`
+      locationActionContext = `【地点与特殊任务】你当前位于：${currentLocation?.name ?? '未知地点'}（${contact.currentLocationId ?? '未知'}）。你可以按照自己的人设和意愿接受、拒绝，也可以主动提出线下安排。只有日期、整点开始和结束时间、地点都明确，且你已经作出具体承诺时，才调用 create_schedule；日程卡只是结构化记录，不能代替自然聊天，必须同时调用 send_text 说清你的回应。信息不全时自然追问，不要创建日程。特殊任务一旦与某条默认任务重叠，那条默认任务会整项取消。以下列表是当前唯一可确认并执行的具体地点：${locationCatalog}。玩家提到列表外地点，或名称无法可靠对应列表时，不能假装去过、看过、知道它存在，也不能直接答应；请保持角色口吻自然询问位置或让对方进一步说明，不要提“系统”“目录”或地点ID。`
     }
     const memoryPromptOn = promptModuleEnabled(contactPromptSettings, 'memory')
     const [recentMemories, financeContext, socialMemories, sharedOriginalContext, lifeEventText, experienceText, worldbookTrace] = await Promise.all([
@@ -517,50 +502,39 @@ async function runAiTurn(
     ])
     console.info(`[chat-perf] context-ready=${Math.round(performance.now() - turnStartedAt)}ms contact=${displayName(contact)}`)
 
-    // ---- Step 1: main model generates raw text (no JSON) ----
-    let rawText = await chatCompletion({
-      apiKey: settings.apiKey,
-      baseUrl: settings.baseUrl,
-      model: settings.model,
-      messages: chatMessages,
-      signal: controller.signal,
-      purpose: proactiveContext ? 'proactive' : 'chat',
-      automatic: !!proactiveContext,
-      thinking: 'disabled',
-      temperature: regenerationInstruction ? 0.55 : 0.9,
-      maxTokens: directOutput ? 1200 : proactiveContext ? 700 : 800,
-      jsonMode: directOutput,
-      trace: { turnId: streamId, stage: 'original_generation', conversationId },
-    })
+    // Native Agent turn: the model emits schema-bound tool calls for every
+    // visible message and action. Compatible relays without tool_calls use a
+    // single structured-plan fallback inside generatePrivateAgentTurn().
+    let rawText: string
+    let localTurn
+    if (directOutput) {
+      rawText = await chatCompletion({
+        apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model,
+        messages: chatMessages, signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat',
+        automatic: !!proactiveContext, thinking: 'disabled', temperature: regenerationInstruction ? 0.55 : 0.9,
+        maxTokens: 1200, jsonMode: true, trace: { turnId: streamId, stage: 'original_generation', conversationId },
+      })
+      localTurn = parseAiResponse(rawText)
+    } else {
+      const generated = await generatePrivateAgentTurn({
+        apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, utilityModel: settings.utilityModel,
+        messages: [...chatMessages, { role: 'system', content: `本轮必须通过提供的函数发送每一条消息或执行行动。create_schedule、转账、红包、借贷和礼物等动作卡不能单独作为回复：执行这些动作时必须同时调用 send_text 自然说话；图片已有必填配文，表情包可以单独发送。每个可见消息函数都要填写真实想法和中文文字心情；心情禁止使用 emoji。不要在普通 content 中输出 JSON、工具名或协议。${locationActionContext ? `\n${locationActionContext}` : ''}` }],
+        signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext,
+        trace: { turnId: streamId, stage: 'original_generation', conversationId },
+        stickerNames: stickers.map((sticker) => sticker.name), stickerSearchEnabled: isStickerProviderReady(settings),
+        imageEnabled: isImageProviderReady(settings) || !!settings.pexelsApiKey,
+        knowledgeEnabled: featureActive(contactPromptSettings, 'knowledgeBase'),
+        scheduleEnabled: isModuleEnabled('location'), locationIds: actionLocations.filter((location) => !actionLocations.some((candidate) => candidate.parentId === location.id)).map((location) => location.id),
+      })
+      rawText = generated.raw
+      localTurn = generated.parsed
+    }
 
     if (!turns.isCurrent(conversationId, streamId)) return
-    console.log(`[chat] 主模型回复(${rawText.length}字): ${rawText.slice(0, 100)}...`)
-
-    // ---- Step 2: utility model inserts executable tool markers. ----
-    if (!directOutput) {
-      const tooled = await insertToolCallsIntoRawTurn({
-        settings, rawDraft: rawText,
-        recentContext: formatRecentConversationForReview(recentHistory.slice(-4), contact),
-        locationContext: locationActionContext,
-        scene: 'private', imageGenerationEnabled: isImageProviderReady(settings),
-        signal: controller.signal, trace: { turnId: streamId, conversationId },
-      })
-      rawText = tooled.raw
-      if (!turns.isCurrent(conversationId, streamId)) return
-      // ---- Step 3: mandatory audit and direct JSON translation. ----
-      const audited = await auditAndRepairRawTurn({
-        settings, masterPrompt: chatMessages[0]?.content ?? contextSections,
-        rawDraft: rawText, scene: 'private', regenerationInstruction,
-        signal: controller.signal, trace: { turnId: streamId, conversationId },
-      })
-      rawText = audited.raw
-      if (!turns.isCurrent(conversationId, streamId)) return
-      if (parseAiResponse(rawText).bubbles.length === 0) throw new Error('审核及修改没有产出有效的私聊JSON')
-    }
+    console.log(`[chat] Agent回复(${rawText.length}字): ${rawText.slice(0, 100)}...`)
 
     // The audit model performs the final JSON translation; there is no third translator.
     console.info(`[chat-perf] model-ready=${Math.round(performance.now() - turnStartedAt)}ms contact=${displayName(contact)}`)
-    const localTurn = parseAiResponse(rawText)
     let conversionPrompt = '审核模型已同时完成原文格式审核和JSON翻译；未调用第三个翻译模型。'
     let jsonRaw = serializePrivateTurn(localTurn)
     let parsedTurn = localTurn
@@ -608,12 +582,16 @@ async function runAiTurn(
         const enrichedMessages = chatMessages.map((message, index) => index === 0
           ? { ...message, content: `${message.content}\n\n【针对陌生词汇的搜索结果】\n${knowledge.text}\n你刚才对陌生词汇自然表示了疑问。现在根据可靠搜索结果重新回答用户，语气要自然，不要写成搜索报告，也不要提审查流程。` }
           : message)
-        rawText = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, messages: enrichedMessages, signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext, thinking: 'disabled', temperature: regenerationInstruction ? 0.55 : 0.9, maxTokens: proactiveContext ? 700 : 800, trace: { turnId: streamId, stage: 'second_chat', conversationId } })
-        const enrichedTooled = await insertToolCallsIntoRawTurn({ settings, rawDraft: rawText, recentContext: formatRecentConversationForReview(recentHistory.slice(-4), contact), locationContext: locationActionContext, scene: 'private', imageGenerationEnabled: isImageProviderReady(settings), signal: controller.signal, trace: { turnId: streamId, conversationId } })
-        rawText = enrichedTooled.raw
-        const enrichedAudited = await auditAndRepairRawTurn({ settings, masterPrompt: chatMessages[0]?.content ?? contextSections, rawDraft: rawText, scene: 'private', regenerationInstruction, signal: controller.signal, trace: { turnId: streamId, conversationId } })
-        rawText = enrichedAudited.raw
-        const converted = parseAiResponse(rawText)
+        const regenerated = await generatePrivateAgentTurn({
+          apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, utilityModel: settings.utilityModel,
+          messages: [...enrichedMessages, { role: 'system', content: '根据查询结果重新决定回复，并且必须通过提供的函数发送消息或执行行动。create_schedule、转账、红包、借贷和礼物等动作卡不能单独作为回复，执行时必须同时调用 send_text 自然说话。心情使用中文文字，禁止 emoji。' }],
+          signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext,
+          trace: { turnId: streamId, stage: 'second_chat', conversationId }, stickerNames: stickers.map((sticker) => sticker.name),
+          stickerSearchEnabled: isStickerProviderReady(settings), imageEnabled: isImageProviderReady(settings) || !!settings.pexelsApiKey,
+          knowledgeEnabled: false, scheduleEnabled: isModuleEnabled('location'), locationIds: actionLocations.filter((location) => !actionLocations.some((candidate) => candidate.parentId === location.id)).map((location) => location.id),
+        })
+        rawText = regenerated.raw
+        const converted = regenerated.parsed
         if (converted.bubbles.length === 0) throw new Error('联网补全后的审核模型没有产出有效JSON')
         conversionPrompt = '联网补全后的审核模型已同时完成原文审核和JSON翻译。'
         jsonRaw = rawText
@@ -623,7 +601,6 @@ async function runAiTurn(
     }
     console.log(`[chat] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 mood=${turnMood || '无'} thought=${turnThought ? '有(' + turnThought.length + '字)' : '无'} 对方=${displayName(contact)}`)
     if (bubbles.length === 0) {
-      clearTimeout(timeout)
       console.warn(`[chat] 本轮没有正常回复 对方=${displayName(contact)} JSON内容: ${jsonRaw.slice(0, 200)}`)
       engine.patch(conversationId, { error: proactiveContext ? '' : '对方这次没有正常回复 可以再发一条试试', aiTyping: false, typingLabel: undefined })
       return
@@ -741,15 +718,9 @@ async function runAiTurn(
       now,
       directOutput,
       internalTask,
-      () => {
-        if (replyRevealed) return
-        replyRevealed = true
-        clearTimeout(timeout)
-      },
     )
     console.info(`[chat-perf] first-bubble-ready=${Math.round(performance.now() - turnStartedAt)}ms contact=${displayName(contact)}`)
   } catch (err) {
-    clearTimeout(timeout)
     if (!turns.isCurrent(conversationId, streamId)) return
     if (err instanceof DOMException && err.name === 'AbortError') return
     const message = err instanceof Error ? err.message : String(err)
@@ -786,6 +757,7 @@ function revealBubbles(
     // previous bubble (including remote media work) has actually landed.
     delayMs: (bubble, i) => i > 0 ? typingDelayMs(bubble) : 0,
     reveal: async (bubble, i) => {
+      let executionError = ''
       if (bubble.type === 'scheduleChange') {
         // Re-fetch rather than reusing the `contact` this whole turn was
         // handed — that snapshot predates this write, and stashing a stale
@@ -796,8 +768,8 @@ function revealBubbles(
         const location = bubble.locationId ? await db.locations.get(bubble.locationId) : undefined
         // Markers carry IDs, never free-form locations.  An invalid ID is a
         // rejected execution, not an invitation for a later model to guess.
-        if (bubble.locationId && !location) return
-        const override: ScheduleOverride = {
+        if (bubble.locationId && !location) executionError = '这个地点已经不可用了，日程没有创建成功。'
+        const override: ScheduleOverride | undefined = executionError ? undefined : {
           id: uuid(),
           date: bubble.date,
           startHour: bubble.startHour,
@@ -811,8 +783,10 @@ function revealBubbles(
           createdAt: turnNow,
         }
         // Multiple non-overlapping special tasks may coexist on the same day.
-        await db.contacts.update(contact.id, { scheduleOverrides: [...pruned, override] })
-        void traceTurnEvent({ turnId: streamId, conversationId, stage: 'schedule_change', output: `新建：${override.activity}｜${override.date} ${String(override.startHour).padStart(2, '0')}:00-${String(override.endHour).padStart(2, '0')}:00｜${override.location}` })
+        if (override) {
+          await db.contacts.update(contact.id, { scheduleOverrides: [...pruned, override] })
+          void traceTurnEvent({ turnId: streamId, conversationId, stage: 'schedule_change', output: `新建：${override.activity}｜${override.date} ${String(override.startHour).padStart(2, '0')}:00-${String(override.endHour).padStart(2, '0')}:00｜${override.location}` })
+        }
       }
       let imagePayload: Message['image']
       let imageFailed = false
@@ -824,22 +798,23 @@ function revealBubbles(
 
       let finance: Message['finance']
       if (bubble.type === 'transfer') {
-        try { const tx = await transferFunds({ from: contact.id, to: USER_WALLET_ID, amount: bubble.amount, kind: 'transfer', note: bubble.note, idempotencyKey: `ai:${streamId}:${i}` }); finance = { transactionId: tx.id, amount: tx.amount, note: bubble.note, status: 'completed' } } catch (err) { console.warn('[finance] AI转账被拒绝', err); return }
+        try { const tx = await transferFunds({ from: contact.id, to: USER_WALLET_ID, amount: bubble.amount, kind: 'transfer', note: bubble.note, idempotencyKey: `ai:${streamId}:${i}` }); finance = { transactionId: tx.id, amount: tx.amount, note: bubble.note, status: 'completed' } } catch (err) { console.warn('[finance] AI转账被拒绝', err); executionError = '转账没有成功，余额或交易状态不允许这次操作。' }
       } else if (bubble.type === 'redPacket') {
-        try { const tx = await reserveRedPacket(contact.id, bubble.amount, bubble.note, `ai-red-packet:${streamId}:${i}`); finance = { transactionId: tx.id, amount: tx.amount, note: bubble.note, status: 'pending' } } catch (err) { console.warn('[finance] AI红包被拒绝', err); return }
+        try { const tx = await reserveRedPacket(contact.id, bubble.amount, bubble.note, `ai-red-packet:${streamId}:${i}`); finance = { transactionId: tx.id, amount: tx.amount, note: bubble.note, status: 'pending' } } catch (err) { console.warn('[finance] AI红包被拒绝', err); executionError = '红包没有发成功，余额或交易状态不允许这次操作。' }
       } else if (bubble.type === 'loanRequest') {
         const loanId = uuid(); await db.loans.add({ id: loanId, lenderId: USER_WALLET_ID, borrowerId: contact.id, principal: bubble.amount, outstanding: bubble.amount, note: bubble.note, status: 'pending', createdAt: Date.now() }); finance = { loanId, amount: bubble.amount, note: bubble.note, status: 'pending' }
       } else if (bubble.type === 'loanDecision' && bubble.loanId) {
         const loan = await db.loans.get(bubble.loanId)
-        if (!loan || loan.status !== 'pending' || loan.borrowerId !== USER_WALLET_ID || loan.lenderId !== contact.id) return
-        if (bubble.decision === 'accept') { try { await transferFunds({ from: contact.id, to: USER_WALLET_ID, amount: loan.principal, kind: 'loan', note: loan.note, idempotencyKey: `loan:${loan.id}` }); await db.loans.update(loan.id,{status:'active',resolvedAt:Date.now()}); finance={loanId:loan.id,amount:loan.principal,note:loan.note,status:'accepted'} } catch { await db.loans.update(loan.id,{status:'rejected',resolvedAt:Date.now()}); finance={loanId:loan.id,amount:loan.principal,status:'rejected'} } } else { await db.loans.update(loan.id,{status:'rejected',resolvedAt:Date.now()}); finance={loanId:loan.id,amount:loan.principal,status:'rejected'} }
+        if (!loan || loan.status !== 'pending' || loan.borrowerId !== USER_WALLET_ID || loan.lenderId !== contact.id) executionError = '这笔借款已经不能处理了。'
+        else if (bubble.decision === 'accept') { try { await transferFunds({ from: contact.id, to: USER_WALLET_ID, amount: loan.principal, kind: 'loan', note: loan.note, idempotencyKey: `loan:${loan.id}` }); await db.loans.update(loan.id,{status:'active',resolvedAt:Date.now()}); finance={loanId:loan.id,amount:loan.principal,note:loan.note,status:'accepted'} } catch { await db.loans.update(loan.id,{status:'rejected',resolvedAt:Date.now()}); finance={loanId:loan.id,amount:loan.principal,status:'rejected'} } } else { await db.loans.update(loan.id,{status:'rejected',resolvedAt:Date.now()}); finance={loanId:loan.id,amount:loan.principal,status:'rejected'} }
       } else if (bubble.type === 'giftPurchase') {
-        if (!bubble.name) return
-        try { const tx = await transferFunds({ from: contact.id, amount: bubble.amount, kind: 'purchase', note: `送给用户：${bubble.name}`, idempotencyKey: `ai-gift:${streamId}:${i}` }); finance = { transactionId: tx.id, amount: tx.amount, note: bubble.description, status: 'completed' } } catch (err) { console.warn('[finance] AI购买礼物被拒绝', err); return }
+        if (!bubble.name) executionError = '礼物信息不完整，购买没有完成。'
+        else try { const tx = await transferFunds({ from: contact.id, amount: bubble.amount, kind: 'purchase', note: `送给用户：${bubble.name}`, idempotencyKey: `ai-gift:${streamId}:${i}` }); finance = { transactionId: tx.id, amount: tx.amount, note: bubble.description, status: 'completed' } } catch (err) { console.warn('[finance] AI购买礼物被拒绝', err); executionError = '礼物没有购买成功，余额或交易状态不允许这次操作。' }
       }
 
       let content: string
-      if (bubble.type === 'text') content = bubble.content
+      if (executionError) content = executionError
+      else if (bubble.type === 'text') content = bubble.content
       else if (bubble.type === 'sticker') content = stickerFailed ? '表情没找到…' : bubble.name
       else if (bubble.type === 'image') content = imageFailed ? '图片没发出来…' : bubble.caption || '[图片]'
       else if (bubble.type === 'scheduleChange') content = bubble.summary
@@ -871,7 +846,7 @@ function revealBubbles(
         id: messageId,
         conversationId,
         role: 'assistant',
-        type: bubble.type === 'loanDecision'
+        type: executionError ? 'text' : bubble.type === 'loanDecision'
           ? 'loanResult'
           : bubble.type === 'giftPurchase'
             ? 'gift'
@@ -881,7 +856,7 @@ function revealBubbles(
         content,
         link: bubble.type === 'link' ? { app: bubble.app, label: bubble.label, data: bubble.data } : undefined,
         scheduleChange:
-          bubble.type === 'scheduleChange'
+          !executionError && bubble.type === 'scheduleChange'
             ? {
                 date: bubble.date,
                 startHour: bubble.startHour,
@@ -958,6 +933,7 @@ function revealBubbles(
           }
     },
     onError: (error) => console.error('[chat] 气泡写入失败', error),
+    onComplete: () => useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined }),
   })
 }
 
