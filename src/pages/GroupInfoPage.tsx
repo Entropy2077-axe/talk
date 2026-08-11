@@ -133,14 +133,14 @@ export function GroupInfoPage() {
   const allContacts = (useLiveQuery(() => db.contacts.toArray(), []) ?? EMPTY_CONTACTS).filter((item) => !isAiTestId(item.id))
   const membersRaw = useLiveQuery(() => (group ? db.contacts.bulkGet(group.memberContactIds) : []), [group])
   const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? []
-  const groupWorldview = useLiveQuery(() => group?.worldviewId ? db.worldbookCollections.get(group.worldviewId) : undefined, [group?.worldviewId])
-  const members = useMemo(() => locationParticipants?.activeMembers.filter((contact) => (contact.worldviewId || settings.defaultWorldviewId) === (group?.worldviewId || settings.defaultWorldviewId)) ?? (membersRaw ?? []).filter((c): c is Contact => !!c), [group?.worldviewId, locationParticipants, membersRaw, settings.defaultWorldviewId])
+  const groupWorldview = useLiveQuery(() => settings.activeWorldId ? db.worldbookCollections.get(settings.activeWorldId) : undefined, [settings.activeWorldId])
+  const members = useMemo(() => locationParticipants?.activeMembers ?? (membersRaw ?? []).filter((c): c is Contact => !!c), [locationParticipants, membersRaw])
 
   const addableContacts = useMemo(() => {
     if (!group) return []
     const memberIds = new Set(group.memberContactIds)
-    return allContacts.filter((c) => !memberIds.has(c.id) && (c.worldviewId || settings.defaultWorldviewId) === (group.worldviewId || settings.defaultWorldviewId))
-  }, [allContacts, group, settings.defaultWorldviewId])
+    return allContacts.filter((c) => !memberIds.has(c.id))
+  }, [allContacts, group])
 
   const promptPreviewSpeakers = useMemo(() => {
     if (!group) return []

@@ -247,7 +247,7 @@ export async function sendGroupMessage(
   if (group.kind === 'location' && group.locationId) {
     await syncContactLocationsAt(new Date())
     const participants = await resolveLocationParticipants(group.locationId)
-    members = participants.activeMembers.filter((member) => (member.worldviewId || settings.defaultWorldviewId) === (group.worldviewId || settings.defaultWorldviewId))
+    members = participants.activeMembers
     group = { ...group, memberContactIds: members.map((member) => member.id) }
     await db.groups.update(group.id, { memberContactIds: group.memberContactIds })
   }
@@ -367,7 +367,7 @@ async function runGroupAiTurn(
     if (group.kind === 'location' && group.locationId) {
       await syncContactLocationsAt(new Date())
       locationParticipants = await resolveLocationParticipants(group.locationId)
-      members = locationParticipants.activeMembers.filter((member) => (member.worldviewId || settings.defaultWorldviewId) === (group.worldviewId || settings.defaultWorldviewId))
+      members = locationParticipants.activeMembers
       group = { ...group, memberContactIds: members.map((member) => member.id) }
       await db.groups.update(group.id, { memberContactIds: group.memberContactIds })
     }
@@ -395,7 +395,7 @@ async function runGroupAiTurn(
       // it here avoids paying twice for the same messages.
       excludeConversationId: conversationId,
     }) : ''
-    const worldbookText = featureActive(settings, 'worldview') ? await retrieveWorldbookContext([group.name, group.vibe, targetContext, history.slice(-10).map((m) => m.content).join(' '), members.map((m) => `${m.name} ${m.systemPrompt}`).join(' ')].filter(Boolean).join('\n'), { worldviewId: group.worldviewId }) : ''
+    const worldbookText = featureActive(settings, 'worldview') ? await retrieveWorldbookContext([group.name, group.vibe, targetContext, history.slice(-10).map((m) => m.content).join(' '), members.map((m) => `${m.name} ${m.systemPrompt}`).join(' ')].filter(Boolean).join('\n'), { worldviewId: settings.activeWorldId || settings.defaultWorldviewId }) : ''
 
     const speakerMemoriesMap = promptModuleEnabled(settings, 'memory') ? await loadSpeakerMemories(speakers) : new Map<string, string>()
     const aiRelationshipText = featureActive(settings, 'relationship') ? await aiRelationshipPrompt(members) : ''

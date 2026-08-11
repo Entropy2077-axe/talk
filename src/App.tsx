@@ -15,6 +15,7 @@ import { DesktopContactsPage } from './pages/DesktopContactsPage'
 import { ensureWallets } from './lib/finance'
 import { ensureLegacyWorldviewMigrated } from './lib/worldbook'
 import { ensureWorldSnapshotsMigrated } from './lib/worldSnapshots'
+import { managedBackParent, replaceHashRoute } from './lib/navigationHierarchy'
 import { syncContactLocationsAt } from './lib/locations'
 import { initializeContactGenerationTasks } from './lib/contactGenerationTasks'
 import { ensureContactPromptSnapshots } from './lib/promptPresets'
@@ -59,7 +60,6 @@ const ProfileEditPage = lazy(() => import('./pages/ProfileEditPage').then((m) =>
 const ModulesPage = lazy(() => import('./pages/ModulesPage').then((m) => ({ default: m.ModulesPage })))
 const SkyEyePage = lazy(() => import('./pages/SkyEyePage').then((m) => ({ default: m.SkyEyePage })))
 const SocialInboxPage = lazy(() => import('./pages/SocialInboxPage').then((m) => ({ default: m.SocialInboxPage })))
-const AlbumPage = lazy(() => import('./pages/AlbumPage').then((m) => ({ default: m.AlbumPage })))
 import { WebPrivacyNotice } from './components/WebPrivacyNotice'
 // Runs once at module load, regardless of admin mode — so there's already
 // log history by the time someone opens "天眼".
@@ -115,6 +115,12 @@ function useAutonomousBehaviorTimer() {
 function useAndroidBackButton() {
   useEffect(() => {
     const listenerPromise = CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+      const pathname = window.location.hash.slice(1).split('?')[0] || '/'
+      const managedParent = managedBackParent(pathname)
+      if (managedParent) {
+        replaceHashRoute(managedParent)
+        return
+      }
       if (canGoBack) {
         window.history.back()
       } else {
@@ -241,7 +247,6 @@ function App() {
         <Route path="/group/:groupId" element={<GroupInfoPage />} />
         <Route path="/moments" element={<MomentsPage />} />
         <Route path="/social-inbox" element={<SocialInboxPage />} />
-        <Route path="/album" element={<AlbumPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/other-interfaces" element={<OtherInterfacesPage />} />
         <Route path="/presets" element={<GlobalPromptModulesPage />} />

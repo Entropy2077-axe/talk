@@ -7,8 +7,66 @@ async function clearRelevantData(page: Page) {
     await db.worldbookEntries.clear()
     await db.worldbookCollections.clear()
     await db.worldSnapshots.clear()
+    await db.worldContactStates.clear()
   })
 }
+
+test('world picker stays in place, opens current backups, and batch-deletes only inactive worlds', async ({ page }) => {
+  await page.goto('/#/save-load')
+  await clearRelevantData(page)
+  await page.evaluate(async () => {
+    const { db } = await import('/src/db/db.ts')
+    const { createEmptyWorld } = await import('/src/lib/worldSnapshots.ts')
+    const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
+    const activeId = useSettingsStore.getState().activeWorldId || useSettingsStore.getState().defaultWorldviewId
+    if (activeId) await db.worldbookCollections.put({ id: activeId, name: '旧世界', enabled: true, sourceType: 'manual', createdAt: 1, updatedAt: 1 })
+    await createEmptyWorld('世界 A')
+    await createEmptyWorld('世界 B')
+  })
+  await page.getByRole('button', { name: /世界 A/ }).click()
+  await expect(page.getByRole('button', { name: /世界 A.*当前世界/ })).toBeVisible()
+  const worldCards = page.locator('button').filter({ hasText: '个备份' })
+  await expect(worldCards.first()).toContainText('世界 A')
+  await expect(worldCards.first()).toHaveClass(/border-\[var\(--ui-action\)\]/)
+  await page.getByRole('button', { name: /世界 B/ }).click()
+  await expect(page).toHaveURL(/#\/save-load$/)
+  await expect(page.getByRole('button', { name: /世界 B.*当前世界/ })).toBeVisible()
+  await expect(worldCards.first()).toContainText('世界 B')
+  await page.getByRole('button', { name: /世界 B.*当前世界/ }).click()
+  await expect(page).toHaveURL(/#\/save-load\/world\/[^/]+$/)
+
+  await page.getByRole('button', { name: '返回' }).click()
+  await page.getByRole('button', { name: '批量删除' }).click()
+  await expect(page.getByRole('button', { name: /世界 B.*当前世界/ })).toBeDisabled()
+  await page.getByRole('button', { name: /世界 A/ }).click()
+  await page.getByRole('button', { name: '删除' }).click()
+  await page.getByRole('dialog', { name: '删除世界' }).getByRole('button', { name: '确认删除' }).click()
+  await expect(page.getByRole('button', { name: /世界 A/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /世界 B.*当前世界/ })).toBeVisible()
+})
+
+test('desktop world editor remains in the settings section', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'talkDesktop', { configurable: true, value: {
+      minimize() {}, toggleMaximize() {}, close() {}, isMaximized: async () => false, onMaximizedChange: () => () => {},
+    } })
+  })
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.goto('/#/save-load')
+  await clearRelevantData(page)
+  await page.evaluate(async () => {
+    const { createEmptyWorld } = await import('/src/lib/worldSnapshots.ts')
+    const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
+    useSettingsStore.setState({ activeWorldId: undefined, defaultWorldviewId: undefined, worldSnapshotMigrationVersion: 3 })
+    await createEmptyWorld('桌面世界')
+  })
+  await page.getByRole('button', { name: /桌面世界/ }).click()
+
+  await page.getByRole('button', { name: '编辑当前世界观' }).click()
+  await expect(page).toHaveURL(/#\/library\/world\/[^/]+$/)
+  await expect(page.locator('.desktop-rail-button[title="设置"]')).toHaveClass(/active/)
+  await expect(page.locator('.desktop-sidebar')).toContainText('个人与设置')
+})
 
 for (const viewport of [
   { label: 'PC', width: 1280, height: 800 },
@@ -19,13 +77,13 @@ for (const viewport of [
     await page.goto('/#/save-load')
     await clearRelevantData(page)
 
-    await page.getByRole('button', { name: '新建世界观' }).click()
-    const worldDialog = page.getByRole('dialog', { name: '新建世界观' })
+    await page.getByRole('button', { name: '新建独立世界' }).click()
+    const worldDialog = page.getByRole('dialog', { name: '新建独立世界' })
     await expect(worldDialog).toBeVisible()
-    await worldDialog.getByPlaceholder('世界名称').fill(`${viewport.label} 测试世界`)
-    await worldDialog.getByRole('button', { name: '创建' }).click()
+    await worldDialog.getByPlaceholder('世界或分支名称').fill(`${viewport.label} 测试世界`)
+    await worldDialog.getByRole('button', { name: '确认创建' }).click()
 
-    await expect(page).toHaveURL(/#\/save-load\/world\/[^/]+$/)
+    await expect(page).toHaveURL(/#\/save-load$/)
     const world = await page.evaluate(async (name) => {
       const { db } = await import('/src/db/db.ts')
       return (await db.worldbookCollections.toArray()).find((item) => item.name === name)

@@ -109,7 +109,7 @@ export async function ensureOfflineExperiences(opts: {
 
   const [worldbook, candidatePlan, lifeState] = await Promise.all([
     Promise.all([
-      retrieveWorldbookContext(`${contact.name}\n${contact.systemPrompt}\n${contact.schedule?.map((block) => `${block.location} ${block.activity}`).join('\n') || ''}`, { worldviewId: contact.worldviewId, maxEntries: 8, maxChars: 5000, includeHighPriorityFallback: true }),
+      retrieveWorldbookContext(`${contact.name}\n${contact.systemPrompt}\n${contact.schedule?.map((block) => `${block.location} ${block.activity}`).join('\n') || ''}`, { worldviewId: settings.activeWorldId || settings.defaultWorldviewId, maxEntries: 8, maxChars: 5000, includeHighPriorityFallback: true }),
       selectedWorldbookEntriesText(contact.worldbookEntryIds ?? []),
     ]).then((parts) => parts.filter(Boolean).join('\n\n')),
     interactionCandidates(contact, from, to),

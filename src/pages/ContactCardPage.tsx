@@ -325,6 +325,7 @@ export function ContactCardPage() {
     await cascadeDeleteContactSocialData(contactId!)
     await removeContactFromAllGroups(contactId!)
     await db.contacts.delete(contactId!)
+    await db.worldContactStates.where('contactId').equals(contactId!).delete()
     void navigate('/contacts', { replace: true })
   }
 

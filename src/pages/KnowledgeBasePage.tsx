@@ -9,13 +9,20 @@ import { parseWorldbookFile } from '../lib/worldbookImport'
 import { searchLibraryItems, storeCharacterCardInLibrary, storeWorldbookInLibrary } from '../lib/library'
 import type { LibrarySourceType } from '../types'
 import { v4 as uuid } from 'uuid'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Archive, BookOpen, GitBranchPlus, Plus } from 'lucide-react'
+import { createEmptyWorld, createWorldBranch } from '../lib/worldSnapshots'
+import { AlbumLibraryView } from './AlbumPage'
 
 const SOURCE_LABELS: Record<LibrarySourceType, string> = {
-  'character-card': '角色卡', worldbook: '世界书', web: '联网', manual: '手写', legacy: '旧资料',
+  'character-card': '角色卡', worldbook: '导入世界书资料', web: '联网', manual: '手写', legacy: '旧资料',
 }
 const EMPTY_ITEMS: never[] = []
 
 export function KnowledgeBasePage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const worldviewView = searchParams.get('view') === 'worldview'
+  const albumView = searchParams.get('view') === 'album'
   const settings = useSettingsStore()
   const fileRef = useRef<HTMLInputElement>(null)
   const items = useLiveQuery(() => db.libraryItems.toArray(), []) ?? EMPTY_ITEMS
@@ -94,9 +101,13 @@ export function KnowledgeBasePage() {
     setManualOpen(true)
   }
 
+  if (worldviewView) return <WorldviewLibraryView onShowReferences={() => setSearchParams({ view: 'references' }, { replace: true })} onShowAlbum={() => setSearchParams({ view: 'album' }, { replace: true })} />
+
   return <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
     <TopBar title="资料库" showBack />
     <div className="flex-1 overflow-y-auto px-4 pb-8">
+      <LibraryTabs active={albumView ? 'album' : 'references'} onReferences={() => setSearchParams({ view: 'references' }, { replace: true })} onWorldviews={() => setSearchParams({ view: 'worldview' }, { replace: true })} onAlbum={() => setSearchParams({ view: 'album' }, { replace: true })}/>
+      {albumView ? <section className="mt-3"><AlbumLibraryView /></section> : <>
       <section className="mt-3 rounded-xl bg-white p-4">
         <p className="text-sm font-medium text-gray-900">收集资料</p>
         <p className="mt-1 text-xs leading-relaxed text-gray-400">角色卡、外部世界书和联网结果都会先保存在这里。资料不会自动成为世界正史。</p>
@@ -116,6 +127,7 @@ export function KnowledgeBasePage() {
         <div className="mt-2 flex flex-wrap gap-1.5 text-[10px]"><span className="rounded-full bg-gray-100 px-2 py-1 text-gray-500">{SOURCE_LABELS[item.sourceType]}</span>{item.keywords.slice(0, 4).map((keyword) => <span key={keyword} className="rounded-full bg-blue-50 px-2 py-1 text-blue-600">{keyword}</span>)}{item.sourceFileName && <span className="truncate rounded-full bg-gray-50 px-2 py-1 text-gray-400">{item.sourceFileName}</span>}</div>
         <button type="button" onClick={() => void db.libraryItems.delete(item.id)} className="mt-3 text-xs text-red-500">删除资料</button>
       </article>)}{visible.length === 0 && <p className="py-12 text-center text-sm text-gray-400">没有符合条件的资料</p>}</div>
+      </>}
     </div>
     {manualOpen && <div className="absolute inset-0 z-40 flex items-end bg-black/30 p-4 sm:items-center" role="dialog" aria-modal="true" aria-labelledby="manual-library-title" onMouseDown={(event) => { if (event.target === event.currentTarget && !savingManual) setManualOpen(false) }}>
       <form className="mx-auto max-h-[90%] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4 shadow-xl" onSubmit={(event) => { event.preventDefault(); void addManual() }}>
@@ -137,5 +149,60 @@ export function KnowledgeBasePage() {
         </div>
       </form>
     </div>}
+  </div>
+}
+
+function LibraryTabs({ active, onReferences, onWorldviews, onAlbum }: { active: 'references' | 'worldviews' | 'album'; onReferences: () => void; onWorldviews: () => void; onAlbum: () => void }) {
+  return <div className="mt-3 grid grid-cols-3 rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] bg-[var(--ui-surface)] p-1"><button type="button" onClick={onReferences} className={`rounded-[var(--ui-radius-control)] py-2 text-sm ${active === 'references' ? 'bg-[var(--ui-action)] text-[var(--ui-on-action)]' : 'text-[var(--ui-text-2)]'}`}>普通资料</button><button type="button" onClick={onWorldviews} className={`rounded-[var(--ui-radius-control)] py-2 text-sm ${active === 'worldviews' ? 'bg-[var(--ui-action)] text-[var(--ui-on-action)]' : 'text-[var(--ui-text-2)]'}`}>世界观</button><button type="button" onClick={onAlbum} className={`rounded-[var(--ui-radius-control)] py-2 text-sm ${active === 'album' ? 'bg-[var(--ui-action)] text-[var(--ui-on-action)]' : 'text-[var(--ui-text-2)]'}`}>相册</button></div>
+}
+
+function WorldviewLibraryView({ onShowReferences, onShowAlbum }: { onShowReferences: () => void; onShowAlbum: () => void }) {
+  const navigate = useNavigate()
+  const settings = useSettingsStore()
+  const worlds = useLiveQuery(() => db.worldbookCollections.toArray(), []) ?? []
+  const entries = useLiveQuery(() => db.worldbookEntries.toArray(), []) ?? []
+  const backups = useLiveQuery(() => db.worldSnapshots.toArray(), []) ?? []
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const activeId = settings.activeWorldId || settings.defaultWorldviewId
+  const sorted = [...worlds].sort((a, b) => Number(b.id === activeId) - Number(a.id === activeId) || b.updatedAt - a.updatedAt)
+
+  async function newWorld() {
+    const name = window.prompt('新世界名称', '新的世界')?.trim()
+    if (!name) return
+    setBusy(true); setMessage('')
+    try { const world = await createEmptyWorld(name); void navigate(`/library/world/${world.id}`) }
+    catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
+    finally { setBusy(false) }
+  }
+
+  async function branch(blank: boolean) {
+    const active = worlds.find((world) => world.id === activeId)
+    const name = window.prompt(blank ? '空白分支名称' : '分支名称', `${active?.name || '当前世界'} · ${blank ? '空白分支' : '新分支'}`)?.trim()
+    if (!name) return
+    setBusy(true); setMessage('')
+    try { await createWorldBranch(name, blank); void navigate('/', { replace: true }) }
+    catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
+    finally { setBusy(false) }
+  }
+
+  return <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[var(--ui-surface-2)]">
+    <TopBar title="资料库" showBack />
+    <div className="flex-1 overflow-y-auto px-4 pb-8">
+      <LibraryTabs active="worldviews" onReferences={onShowReferences} onWorldviews={() => {}} onAlbum={onShowAlbum}/>
+      <section className="mt-3 rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4">
+        <div className="flex items-start gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-[var(--ui-radius-control)] bg-[var(--ui-accent-soft)] text-[var(--ui-action)]"><BookOpen size={20}/></span><div><h2 className="text-sm font-medium text-[var(--ui-text)]">实际生效的世界观</h2><p className="mt-1 text-xs leading-relaxed text-[var(--ui-text-3)]">这里直接管理世界集合和条目。普通资料中的“导入世界书资料”只是参考原件，不会自动生效。</p></div></div>
+        <div className="mt-4 grid grid-cols-2 gap-2"><button type="button" disabled={busy} onClick={() => void newWorld()} className="flex items-center justify-center gap-2 rounded-[var(--ui-radius-control)] bg-[var(--ui-action)] py-2.5 text-sm text-[var(--ui-on-action)] disabled:opacity-40"><Plus size={17}/>新建独立世界</button><button type="button" disabled={busy || !activeId} onClick={() => void branch(false)} className="flex items-center justify-center gap-2 rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] py-2.5 text-sm text-[var(--ui-text-2)] disabled:opacity-40"><GitBranchPlus size={17}/>新建分支</button><button type="button" disabled={busy || !activeId} onClick={() => void branch(true)} className="col-span-2 flex items-center justify-center gap-2 rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] py-2.5 text-sm text-[var(--ui-text-2)] disabled:opacity-40"><Archive size={17}/>新建空白分支</button></div>
+      </section>
+      {message && <p role="alert" className="mt-3 text-xs text-[var(--ui-danger)]">{message}</p>}
+      <h2 className="mb-2 mt-5 text-sm font-medium text-[var(--ui-text)]">{activeId ? '当前世界' : '世界'}</h2>
+      <div className="space-y-2">{sorted.map((world) => {
+        const current = world.id === activeId
+        const entryCount = entries.filter((entry) => entry.collectionId === world.id).length
+        const backupCount = backups.filter((backup) => backup.worldId === world.id).length
+        return <button type="button" key={world.id} onClick={() => navigate(`/library/world/${world.id}`)} className={`flex w-full items-center gap-3 rounded-[var(--ui-radius-card)] border bg-[var(--ui-surface)] p-4 text-left ${current ? 'border-[var(--ui-action)]' : 'border-[var(--ui-border)]'}`}><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--ui-radius-control)] bg-[var(--ui-accent-soft)] text-[var(--ui-action)]"><BookOpen size={20}/></span><span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="ui-font-display truncate font-medium text-[var(--ui-text)]">{world.name}</span>{current && <span className="rounded-full bg-[var(--ui-accent-soft)] px-2 py-0.5 text-[10px] text-[var(--ui-action)]">当前世界</span>}</span><span className="mt-1 block text-xs text-[var(--ui-text-3)]">{entryCount} 个条目 · {backupCount} 个备份</span></span><span className="text-[var(--ui-text-3)]">›</span></button>
+      })}</div>
+      {!sorted.length && <p className="py-12 text-center text-sm text-[var(--ui-text-3)]">暂无世界观</p>}
+    </div>
   </div>
 }

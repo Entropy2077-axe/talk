@@ -13,6 +13,7 @@ import { isImageProviderReady } from '../lib/mediaProviders'
 import { db } from '../db/db'
 import { assertTalkBackup, backupFileName, createBackup, mergeSettingsPreservingSecrets, restoreBackup } from '../lib/backup'
 import { resumeMediaAssets } from '../lib/imageAssets'
+import { ensureWorldSnapshotsMigrated } from '../lib/worldSnapshots'
 import type { AppSettings } from '../types'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { USER_WALLET_ID, setUserBalance } from '../lib/finance'
@@ -22,6 +23,8 @@ import { ModelPicker } from '../components/ModelPicker'
 import { ToggleSwitch } from '../components/ToggleSwitch'
 import { AI_PROVIDERS, AI_PROVIDER_OPTIONS, resolveChatCompletionsUrl, resolveModelsUrl, type AiProviderId } from '../lib/aiProviders'
 import { cancelAllContactGenerationTasks, markPersistedContactGenerationTasksPaused } from '../lib/contactGenerationTasks'
+import { Capacitor } from '@capacitor/core'
+import { Directory, Encoding, Filesystem } from '@capacitor/filesystem'
 
 export function SettingsPage() {
   const navigate = useNavigate()
@@ -73,11 +76,29 @@ export function SettingsPage() {
     const settings = { ...useSettingsStore.getState() } as Partial<AppSettings> & { setSettings?: unknown }
     delete settings.setSettings
     const backup = await createBackup(settings)
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
+    const filename = backupFileName()
+    const contents = JSON.stringify(backup, null, 2)
+
+    if (Capacitor.getPlatform() === 'android') {
+      // Android WebView does not consistently hand blob: downloads to the
+      // system download manager. Write directly to the public Documents folder
+      // instead, which works on Android 11+ scoped storage (including Android 12).
+      await Filesystem.writeFile({
+        path: filename,
+        data: contents,
+        directory: Directory.Documents,
+        encoding: Encoding.UTF8,
+        recursive: true,
+      })
+      setBackupStatus(`备份已保存到“文件”应用的 Documents 文件夹：${filename}。API Key、令牌和密码不会写入备份文件。`)
+      return
+    }
+
+    const blob = new Blob([contents], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = backupFileName()
+    link.download = filename
     document.body.appendChild(link)
     link.click()
     link.remove()
@@ -98,8 +119,10 @@ export function SettingsPage() {
       await restoreBackup(parsed)
       await markPersistedContactGenerationTasksPaused()
       const restoredSettings = mergeSettingsPreservingSecrets(parsed.settings, useSettingsStore.getState())
+      if ((parsed.tables.worldSnapshots ?? []).some((row) => Number((row as { snapshotVersion?: number }).snapshotVersion ?? 1) < 2)) restoredSettings.worldSnapshotMigrationVersion = 1
       setSettings(restoredSettings)
       useSettingsStore.setState(restoredSettings)
+      await ensureWorldSnapshotsMigrated()
       await resumeMediaAssets()
       setBackupStatus('备份已恢复。建议返回消息页检查联系人和聊天记录。')
     } catch (err) {
@@ -626,7 +649,7 @@ export function SettingsPage() {
       <section className="mt-3 bg-white px-4 py-3">
         <h2 className="mb-2 text-xs font-medium text-gray-400">世界经济与资产</h2>
         <div className="flex items-center justify-between gap-4">
-          <div><p className="text-sm text-gray-800">各世界独立保存经济与资产</p><p className="mt-1 text-[11px] leading-relaxed text-gray-400">关闭时，用户余额、仓库、职业和商城记录在所有世界间共用；开启后随世界存档切换。首次开启时，旧世界会沿用当前共享状态作为初始值。</p></div>
+          <div><p className="text-sm text-gray-800">各世界独立保存经济与资产</p><p className="mt-1 text-[11px] leading-relaxed text-gray-400">关闭时，用户余额、仓库、职业和商城记录在所有世界间共用；开启后随世界备份切换。首次开启时，旧世界会沿用当前共享状态作为初始值。</p></div>
           <button type="button" role="switch" aria-checked={worldEconomyIsolated === true} onClick={() => setSettings({ worldEconomyIsolated: worldEconomyIsolated !== true })} className={`relative h-6 w-11 shrink-0 rounded-full ${worldEconomyIsolated === true ? 'bg-green-500' : 'bg-gray-200'}`}><span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${worldEconomyIsolated === true ? 'left-5.5' : 'left-0.5'}`} /></button>
         </div>
       </section>
@@ -656,7 +679,7 @@ export function SettingsPage() {
           }}
         />
         <p className="mt-2 text-[11px] leading-relaxed text-gray-400">
-          备份包含联系人、人设、聊天记录、朋友圈、表情包、仓库、资料库、世界观存档和当前设置。设置里如果保存过 API Key，备份文件里也会带上，请不要发给别人。
+          全量数据备份包含联系人、人设、聊天记录、朋友圈、表情包、仓库、资料库、世界备份和当前设置。为保护隐私，API Key、令牌和密码不会写入备份文件；恢复时将保留这台设备当前保存的密钥。
         </p>
         {backupStatus && <p className="mt-2 text-xs text-gray-500">{backupStatus}</p>}
       </section>

@@ -6,7 +6,7 @@ const WorldbookCollectionPage = lazy(() => import('../pages/WorldbookCollectionP
 
 export const saveLoadModule: FeatureModule = {
   id: 'saveLoad',
-  name: '存档回档',
+  name: '选择世界',
   icon: '💾',
   description: '以世界为核心保存和恢复完整状态',
   parentId: 'more-interaction',

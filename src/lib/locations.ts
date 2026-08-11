@@ -439,8 +439,8 @@ export async function enterLocation(locationId: string) {
   const participants = await resolveLocationParticipants(location.id)
   const now = Date.now()
   const existingGroup = await db.groups.get(LOCATION_GROUP_ID)
-  const worldviewId = existingGroup?.worldviewId || useSettingsStore.getState().defaultWorldviewId || participants.activeMembers[0]?.worldviewId
-  const worldMembers = participants.activeMembers.filter((contact) => (contact.worldviewId || useSettingsStore.getState().defaultWorldviewId) === worldviewId)
+  const worldviewId = useSettingsStore.getState().activeWorldId || useSettingsStore.getState().defaultWorldviewId
+  const worldMembers = participants.activeMembers
   await db.transaction('rw', db.groups, db.conversations, db.locationModuleState, async () => {
     await db.groups.put({
       id: LOCATION_GROUP_ID, name: '地点群聊', avatar: '📍', avatarColor: '#7c3aed',

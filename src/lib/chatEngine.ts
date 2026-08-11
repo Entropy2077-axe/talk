@@ -431,7 +431,7 @@ async function runAiTurn(
       featureActive(contactPromptSettings, 'worldview') ? retrieveWorldbookTrace([
         _triggeringUserText, proactiveContext, contact.name, contact.systemPrompt, contact.memoryFacts,
         history.slice(-8).map((m) => m.content).join(' '),
-      ].filter(Boolean).join('\n'), { worldviewId: contact.worldviewId }) : Promise.resolve({ text: '', matches: [] }),
+      ].filter(Boolean).join('\n'), { worldviewId: contactPromptSettings.activeWorldId || contactPromptSettings.defaultWorldviewId }) : Promise.resolve({ text: '', matches: [] }),
     ])
     const worldbookText = worldbookTrace.text
     const contactAge = contact.birthday ? ageFromBirthday(contact.birthday) : null

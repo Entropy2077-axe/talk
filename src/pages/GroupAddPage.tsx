@@ -17,8 +17,7 @@ const MIN_MEMBERS = 2
 export function GroupAddPage() {
   const navigate = useNavigate()
   const contacts = (useLiveQuery(() => db.contacts.toArray(), []) ?? []).filter((item) => !isAiTestId(item.id))
-  const worldviews = useLiveQuery(() => db.worldbookCollections.toArray(), []) ?? []
-  const defaultWorldviewId = useSettingsStore((state) => state.defaultWorldviewId)
+  const activeWorldId = useSettingsStore((state) => state.activeWorldId || state.defaultWorldviewId)
 
   const [name, setName] = useState('')
   const [avatar, setAvatar] = useState(GROUP_AVATAR_DEFAULT)
@@ -29,11 +28,7 @@ export function GroupAddPage() {
   function toggleMember(id: string) {
     setSelected((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id)
-      const candidate = contacts.find((contact) => contact.id === id)
-      const first = contacts.find((contact) => contact.id === prev[0])
-      const candidateWorld = candidate?.worldviewId || defaultWorldviewId
-      const selectedWorld = first?.worldviewId || defaultWorldviewId
-      return prev.length > 0 && candidateWorld !== selectedWorld ? prev : [...prev, id]
+      return [...prev, id]
     })
   }
 
@@ -44,14 +39,13 @@ export function GroupAddPage() {
     try {
       const now = Date.now()
       const groupId = uuid()
-      const firstMember = contacts.find((contact) => contact.id === selected[0])
       await db.groups.add({
         id: groupId,
         name: trimmedName,
         avatar,
         avatarColor: randomAvatarColor(),
         memberContactIds: selected,
-        worldviewId: firstMember?.worldviewId || defaultWorldviewId,
+        worldviewId: activeWorldId,
         createdAt: now,
         memoryMessageCursor: 0,
       })
@@ -95,15 +89,11 @@ export function GroupAddPage() {
           <div className="space-y-1">
             {contacts.map((c) => {
               const checked = selected.includes(c.id)
-              const selectedFirst = contacts.find((contact) => contact.id === selected[0])
-              const incompatible = selected.length > 0 && !checked && (c.worldviewId || defaultWorldviewId) !== (selectedFirst?.worldviewId || defaultWorldviewId)
-              const worldName = worldviews.find((world) => world.id === (c.worldviewId || defaultWorldviewId))?.name || '未设置世界'
               return (
                 <button
                   key={c.id}
                   onClick={() => toggleMember(c.id)}
-                  disabled={incompatible}
-                  className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left active:bg-gray-50 disabled:opacity-40"
+                  className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left active:bg-gray-50"
                 >
                   <div
                     className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
@@ -113,7 +103,7 @@ export function GroupAddPage() {
                     {checked && '✓'}
                   </div>
                   <Avatar avatar={c.avatar} color={c.avatarColor} size={36} />
-                  <span className="min-w-0 flex-1 text-sm text-gray-800">{displayName(c)}<span className="ml-2 text-[10px] text-gray-400">{worldName}</span></span>
+                  <span className="min-w-0 flex-1 text-sm text-gray-800">{displayName(c)}</span>
                 </button>
               )
             })}

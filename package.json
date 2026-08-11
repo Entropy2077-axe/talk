@@ -3,7 +3,7 @@
   "description": "A local-first AI companion app for Android, Windows and the web.",
   "author": "Entropy2077-axe",
   "private": true,
-  "version": "0.1.52",
+  "version": "0.1.53",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -36,6 +36,7 @@
     "@capacitor/android": "^8.4.1",
     "@capacitor/app": "^8.1.0",
     "@capacitor/core": "^8.4.1",
+    "@capacitor/filesystem": "^8.1.2",
     "dexie": "^4.4.4",
     "dexie-react-hooks": "^4.4.0",
     "fflate": "^0.8.3",

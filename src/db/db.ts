@@ -21,7 +21,7 @@ import type {
   SocialEvent, GroupPlan, AdminLogRecord, AdminAiTrace, SaveSlot, ContactStoryline, ContactSaveSnapshot, GlobalSaveSnapshot, WorldSnapshot, SavedPersona, PersonaCreationRecord, ShopPurchaseHistory, ContactGenerationTask,
   Sticker, SpeechCacheRecord,
   WalletAccount, WalletTransaction, Loan, JobListing, InterviewSession,
-  LocationNode, WorldMapRecord, LocationModuleState, AcousticEdge, InternalTask, MediaAsset,
+  LocationNode, WorldMapRecord, LocationModuleState, AcousticEdge, InternalTask, MediaAsset, WorldContactState,
 } from '../types'
 
 export class TalkDB extends Dexie {
@@ -62,6 +62,7 @@ export class TalkDB extends Dexie {
   contactSaveSnapshots!: Table<ContactSaveSnapshot, string>
   globalSaveSnapshots!: Table<GlobalSaveSnapshot, string>
   worldSnapshots!: Table<WorldSnapshot, string>
+  worldContactStates!: Table<WorldContactState, string>
   savedPersonas!: Table<SavedPersona, string>
   personaCreationRecords!: Table<PersonaCreationRecord, string>
   shopPurchaseHistory!: Table<ShopPurchaseHistory, string>
@@ -438,6 +439,12 @@ export class TalkDB extends Dexie {
     })
     this.version(39).stores({
       worldSnapshots: 'id, worldId, kind, createdAt, updatedAt, [worldId+updatedAt]',
+    })
+    // Compatibility index for per-world contact story fields. Complete
+    // contacts now live in world snapshots and only the active world's set is
+    // materialized in `contacts`.
+    this.version(40).stores({
+      worldContactStates: 'id, worldId, contactId, [worldId+contactId], updatedAt',
     })
   }
 }

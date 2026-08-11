@@ -77,10 +77,10 @@ export function ChatPage() {
     void (async () => {
       await syncContactLocationsAt(new Date())
       const participants = await resolveLocationParticipants(group.locationId!)
-      if (!cancelled) await db.groups.update(group.id, { memberContactIds: participants.activeMembers.filter((contact) => (contact.worldviewId || settings.defaultWorldviewId) === (group.worldviewId || settings.defaultWorldviewId)).map((contact) => contact.id) })
+      if (!cancelled) await db.groups.update(group.id, { memberContactIds: participants.activeMembers.map((contact) => contact.id) })
     })()
     return () => { cancelled = true }
-  }, [group?.id, group?.kind, group?.locationId, group?.worldviewId, settings.defaultWorldviewId])
+  }, [group?.id, group?.kind, group?.locationId])
   const groupMembersRaw = useLiveQuery(
     () => (group ? db.contacts.bulkGet(group.memberContactIds) : []),
     [group],

@@ -49,14 +49,7 @@ function nextState(contact: Contact, current: ContactLifeState | undefined, even
 async function polishVisible(events: LifeEvent[], settings: AppSettings): Promise<Map<string, string>> {
   const fallback = new Map(events.map((e) => [e.id, e.summary]))
   if (!settings.apiKey || events.length === 0 || !featureActive(settings, 'lifeSimulation')) return fallback
-  const contactIds = [...new Set(events.map((event) => event.contactId))]
-  const contacts = await db.contacts.bulkGet(contactIds)
-  const worldByContact = new Map(contacts.filter((contact): contact is Contact => !!contact).map((contact) => [contact.id, contact.worldviewId]))
-  const batches = new Map<string, LifeEvent[]>()
-  for (const event of events) {
-    const worldId = worldByContact.get(event.contactId) || settings.defaultWorldviewId || ''
-    batches.set(worldId, [...(batches.get(worldId) ?? []), event])
-  }
+  const batches = new Map([[settings.activeWorldId || settings.defaultWorldviewId || '', events]])
   for (const [worldviewId, batch] of batches) try {
     const world = featureActive(settings, 'worldview') ? await retrieveWorldbookContext(batch.map((event) => event.summary).join('\n'), { maxEntries: 3, maxChars: 1600, worldviewId }) : ''
     const worldPrompt = world ? getPromptTemplate(settings, 'worldview', 'lifeRuntime', { worldbookEntries: world }) : ''

@@ -35,6 +35,8 @@ export interface Contact {
   /** Absent until the 好感度 module is enabled and the first evaluation runs, or a personality trait with an initial value is assigned. */
   warmth?: number
   relationshipBase: string // label the user picked at creation: 恋人/朋友/家人/... — only changes by explicit user action or explicit model assessment (e.g. "已经分手了")
+  /** Global creation-time relationship anchor used when a world has no story yet. */
+  initialRelationshipBase?: string
   relationshipDynamic: string // short natural-language summary of what the relationship currently feels like, updated by the utility model on every memory update
   personalityTrait?: string // 病娇/天然呆/傲娇/无. Affects warmth change rate via traitWarmthModifier; missing/无 = normal.
   /** Short-term emotional state, assessed by the model each turn. Expires after ~30 min. Separate from warmth (long-term relationship). */
@@ -52,6 +54,8 @@ export interface Contact {
   lastProactiveMessageAt?: number // last time this contact proactively opened a chat, used for the per-contact cooldown
   // ---- schedule (see lib/schedule.ts) ----
   schedule?: ScheduleBlock[] // fixed weekly pattern, generated at creation and administrator-editable
+  /** Global creation-time routine; per-world edits live in `schedule`. */
+  initialSchedule?: ScheduleBlock[]
   scheduleOverrides?: ScheduleOverride[] // one-off special tasks negotiated in chat; each overlapping default task is cancelled as a whole for that occurrence
   // ---- MBTI (assigned by the persona-generation AI, not user-picked) ----
   mbti?: string // e.g. "INFP" — a stable personality anchor injected into every chat prompt
@@ -76,7 +80,7 @@ export interface Contact {
   taskUpdatedAt?: number
   /** Worldbook entries explicitly bound when this contact was created. */
   worldbookEntryIds?: string[]
-  /** The single canonical world used for this contact's private runtime. */
+  /** World that owns this contact in the currently materialized contact set. */
   worldviewId?: string
   /** End of the latest time range already covered by offline experience completion. */
   experienceCursorAt?: number
@@ -1051,16 +1055,34 @@ export interface GlobalSaveSnapshot {
 
 export type WorldSnapshotKind = 'manual' | 'automatic'
 
+/** Compatibility index for per-world mutable fields. Complete world-local
+ * contacts are stored in world snapshots and materialized when switching. */
+export interface WorldContactState {
+  id: string
+  worldId: string
+  contactId: string
+  schemaVersion: number
+  state: Partial<Contact>
+  updatedAt: number
+}
+
 export interface WorldSnapshotData {
   schemaVersion: number
-  world: WorldbookCollection
-  worldbookEntries: WorldbookEntry[]
+  /** Complete contacts belonging to this world when the backup was created. */
+  contacts?: Contact[]
+  contactIds?: string[]
+  contactStates?: Record<string, Partial<Contact>>
   tables: Record<string, unknown[]>
+  /** Legacy v1 payload only. Worldview data is ignored during normal restore. */
+  world?: WorldbookCollection
+  /** Legacy v1 payload only. New backups never duplicate worldview entries. */
+  worldbookEntries?: WorldbookEntry[]
   /** User economy/career settings are included only when per-world economy is enabled. */
   economySettings?: Pick<AppSettings, 'userOccupation' | 'userMonthlySalary' | 'userJobStartedDate' | 'userLastSalaryDate'>
 }
 
-/** A complete, restorable state of one world. */
+/** A restorable backup of one world's contacts and story state. Worldview
+ * entries remain independent and are never rolled back by reading a backup. */
 export interface WorldSnapshot {
   id: string
   worldId: string

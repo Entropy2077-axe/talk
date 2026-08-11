@@ -26,7 +26,6 @@ type DragState =
   | { type: 'image'; startX: number; startY: number; origin: { x: number; y: number } }
   | { type: 'move'; startX: number; startY: number; origin: Rect }
   | { type: 'resize'; corner: 'nw' | 'ne' | 'sw' | 'se'; startX: number; startY: number; origin: Rect }
-  | { type: 'draw'; startX: number; startY: number }
 
 export function ImageCropper({
   src,
@@ -34,7 +33,9 @@ export function ImageCropper({
   onCancel,
   aspectRatio = 1,
   title = '裁剪图片',
-  mode = 'image',
+  // The standard crop interaction is a resizable frame over the original image.
+  // Keep the old move-and-zoom interaction available only for explicit callers.
+  mode = 'frame',
 }: ImageCropperProps) {
   const imgRef = useRef<HTMLImageElement>(null)
   const [natural, setNatural] = useState({ w: 1, h: 1 })
@@ -220,25 +221,27 @@ function FrameCropper({
   }
 
   function onStagePointerDown(e: React.PointerEvent) {
-    if ((e.target as HTMLElement).dataset.cropHandle || (e.target as HTMLElement).dataset.cropBox) return
+    // Determine the hit area from the crop rectangle itself. On desktop a
+    // transparent crop box can otherwise let pointer events fall through to
+    // the image, making a move gesture accidentally start a new selection.
+    if ((e.target as HTMLElement).closest('[data-crop-handle]')) return
     const p = localPoint(e)
-    const start = clampPoint(p, imageLeft, imageTop, displayedW, displayedH)
-    dragging.current = { type: 'draw', startX: start.x, startY: start.y }
-    setCrop(clampRect({ x: start.x, y: start.y, w: MIN_CROP_SIZE, h: MIN_CROP_SIZE / aspectRatio }, imageLeft, imageTop, displayedW, displayedH, aspectRatio))
-    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    if (p.x >= crop.x && p.x <= crop.x + crop.w && p.y >= crop.y && p.y <= crop.y + crop.h) {
+      dragging.current = { type: 'move', startX: e.clientX, startY: e.clientY, origin: crop }
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+      return
+    }
+    // The image outside the crop rectangle is deliberately inert. A crop is
+    // adjusted only by moving the existing rectangle or its corner handles.
   }
 
   function onPointerMove(e: React.PointerEvent) {
     const state = dragging.current
     if (!state) return
-    const p = localPoint(e)
-    const point = clampPoint(p, imageLeft, imageTop, displayedW, displayedH)
     if (state.type === 'move') {
       setCrop(clampRect({ ...state.origin, x: state.origin.x + e.clientX - state.startX, y: state.origin.y + e.clientY - state.startY }, imageLeft, imageTop, displayedW, displayedH, aspectRatio))
     } else if (state.type === 'resize') {
       setCrop(resizeRect(state.origin, state.corner, e.clientX - state.startX, e.clientY - state.startY, imageLeft, imageTop, displayedW, displayedH, aspectRatio))
-    } else if (state.type === 'draw') {
-      setCrop(rectFromPoints(state.startX, state.startY, point.x, point.y, imageLeft, imageTop, displayedW, displayedH, aspectRatio))
     }
   }
 
@@ -283,11 +286,6 @@ function FrameCropper({
           data-crop-box="true"
           className="absolute cursor-move border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
           style={{ left: crop.x, top: crop.y, width: crop.w, height: crop.h }}
-          onPointerDown={(e) => {
-            e.stopPropagation()
-            dragging.current = { type: 'move', startX: e.clientX, startY: e.clientY, origin: crop }
-            ;(e.currentTarget.parentElement as HTMLElement).setPointerCapture(e.pointerId)
-          }}
         >
           {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
             <button
@@ -307,7 +305,7 @@ function FrameCropper({
           ))}
         </div>
       </div>
-      <p className="mt-2 text-xs text-white/70">拖拽框选区域 拖动角点调整大小</p>
+      <p className="mt-2 text-xs text-white/70">拖动裁剪框调整位置，拖动角点调整大小</p>
       <CropActions onCancel={onCancel} onConfirm={handleConfirm} />
     </div>
   )
@@ -329,18 +327,34 @@ function CropImage({
   transform: string
 }) {
   return (
-    <img
-      ref={imgRef}
-      src={src}
-      alt=""
-      draggable={false}
-      onLoad={(e) => {
-        const el = e.currentTarget
-        setNatural({ w: el.naturalWidth, h: el.naturalHeight })
-      }}
-      className="absolute left-1/2 top-1/2 select-none"
-      style={{ width, height, transform }}
-    />
+    <>
+      {/* Kept only for reading pixels into the exported canvas. The visible
+          preview is a CSS background so browsers cannot start a native image
+          drag (the translucent image ghost seen on desktop). */}
+      <img
+        ref={imgRef}
+        src={src}
+        alt=""
+        className="hidden"
+        onLoad={(e) => {
+          const el = e.currentTarget
+          setNatural({ w: el.naturalWidth, h: el.naturalHeight })
+        }}
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute left-1/2 top-1/2 select-none"
+        style={{
+          width,
+          height,
+          maxWidth: 'none',
+          transform,
+          backgroundImage: `url("${src}")`,
+          backgroundSize: '100% 100%',
+          backgroundRepeat: 'no-repeat',
+        }}
+      />
+    </>
   )
 }
 
@@ -376,21 +390,11 @@ function drawCrop(
   onConfirm(canvas.toDataURL('image/jpeg', 0.9))
 }
 
-function clampPoint(p: { x: number; y: number }, left: number, top: number, width: number, height: number) {
-  return {
-    x: Math.min(left + width, Math.max(left, p.x)),
-    y: Math.min(top + height, Math.max(top, p.y)),
-  }
-}
-
 function clampRect(rect: Rect, left: number, top: number, width: number, height: number, aspectRatio: number): Rect {
-  const maxH = height
-  let w = Math.max(MIN_CROP_SIZE, rect.w)
+  const maxW = Math.min(width, height * aspectRatio)
+  const minW = Math.min(MIN_CROP_SIZE, maxW)
+  let w = Math.max(minW, Math.min(maxW, rect.w))
   let h = w / aspectRatio
-  if (h > maxH) {
-    h = maxH
-    w = h * aspectRatio
-  }
   let x = Math.min(left + width - w, Math.max(left, rect.x))
   let y = Math.min(top + height - h, Math.max(top, rect.y))
   if (!Number.isFinite(x)) x = left
@@ -423,24 +427,3 @@ function resizeRect(
   return clampRect({ x, y, w, h }, left, top, width, height, aspectRatio)
 }
 
-function rectFromPoints(
-  startX: number,
-  startY: number,
-  endX: number,
-  endY: number,
-  left: number,
-  top: number,
-  width: number,
-  height: number,
-  aspectRatio: number,
-): Rect {
-  const signX = endX >= startX ? 1 : -1
-  const signY = endY >= startY ? 1 : -1
-  let w = Math.max(MIN_CROP_SIZE, Math.abs(endX - startX))
-  let h = w / aspectRatio
-  if (h > Math.abs(endY - startY) && Math.abs(endY - startY) >= MIN_CROP_SIZE / aspectRatio) {
-    h = Math.abs(endY - startY)
-    w = h * aspectRatio
-  }
-  return clampRect({ x: signX > 0 ? startX : startX - w, y: signY > 0 ? startY : startY - h, w, h }, left, top, width, height, aspectRatio)
-}

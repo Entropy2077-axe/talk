@@ -152,7 +152,7 @@ async function planReactors(poster: Contact, contactsById: Map<string, Contact>)
   for (const link of links) {
     const otherId = link.fromContactId === poster.id ? link.toContactId : link.fromContactId
     const other = contactsById.get(otherId)
-    if (other && other.worldviewId === poster.worldviewId) candidates.push({ contact: other, relationLabel: link.label || '普通朋友', link })
+    if (other) candidates.push({ contact: other, relationLabel: link.label || '普通朋友', link })
   }
 
   const plans: ReactorPlan[] = []
@@ -308,7 +308,7 @@ export async function runMomentTestSandbox(contact: Contact, settings: AppSettin
   ])
   const contexts = new Map([[contact.id, [originalContext, privateMemories, socialMemories, events, `【本次测试主题】${testInstruction}`].filter(Boolean).join('\n\n').slice(0, 10_500)]])
   const worldbookPrompt = featureActive(settings, 'worldview')
-    ? (getPromptTemplate(settings, 'worldview', 'momentsRuntime', { worldbookEntries: await retrieveWorldbookContext(`${contact.name} ${contact.systemPrompt} ${contact.memoryFacts} ${testInstruction}`, { worldviewId: contact.worldviewId }) }) ?? '')
+    ? (getPromptTemplate(settings, 'worldview', 'momentsRuntime', { worldbookEntries: await retrieveWorldbookContext(`${contact.name} ${contact.systemPrompt} ${contact.memoryFacts} ${testInstruction}`, { worldviewId: settings.activeWorldId || settings.defaultWorldviewId }) }) ?? '')
     : ''
   const entries = [{ poster: contact, commenters: [] as ReactorPlan[], willHavePhoto: true }]
   const raw = await chatCompletion({
@@ -344,8 +344,8 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
 
   const count = pickPosterCount(eligible.length, contacts.length, settings.proactiveMomentsMax)
   const shuffled = shuffle(eligible)
-  const selectedWorldviewId = shuffled[0]?.worldviewId
-  const posters = shuffled.filter((contact) => contact.worldviewId === selectedWorldviewId).slice(0, count)
+  const selectedWorldviewId = settings.activeWorldId || settings.defaultWorldviewId
+  const posters = shuffled.slice(0, count)
   const contactsById = new Map(contacts.map((c) => [c.id, c]))
 
   const entries: { poster: Contact; commenters: ReactorPlan[]; willHavePhoto: boolean }[] = []
@@ -659,7 +659,7 @@ export async function postUserMoment(content: string, settings: AppSettings): Pr
       const commentWorldbookPrompt =
         featureActive(settings, 'worldview')
           ? (getPromptTemplate(settings, 'worldview', 'momentsRuntime', {
-              worldbookEntries: await retrieveWorldbookContext(content, { worldviewId: settings.defaultWorldviewId }),
+              worldbookEntries: await retrieveWorldbookContext(content, { worldviewId: settings.activeWorldId || settings.defaultWorldviewId }),
             }) ?? '')
           : ''
       const raw = await chatCompletion({
@@ -797,7 +797,7 @@ export async function generateMomentReply(
     const stickerNames = stickers.map((s) => s.name)
     const replyWorldbookEntries =
       featureActive(settings, 'worldview')
-        ? await retrieveWorldbookContext(`${poster.name}\n${poster.systemPrompt}\n${moment.content}\n${threadLines.join('\n')}`, { worldviewId: poster.worldviewId })
+        ? await retrieveWorldbookContext(`${poster.name}\n${poster.systemPrompt}\n${moment.content}\n${threadLines.join('\n')}`, { worldviewId: settings.activeWorldId || settings.defaultWorldviewId })
         : ''
     const replyWorldbookPrompt = replyWorldbookEntries
       ? (getPromptTemplate(settings, 'worldview', 'momentsRuntime', { worldbookEntries: replyWorldbookEntries }) ?? '')
@@ -873,13 +873,12 @@ export async function generateMomentDiscussion(
       : undefined
     const primaryId = addressedAuthorId && addressedAuthorId !== 'user' ? addressedAuthorId : moment.contactId
     const primary = byId.get(primaryId)
-    const sameWorld = contacts.filter((contact) => contact.worldviewId === primary?.worldviewId)
-    const available = sameWorld.filter((contact) => isPhoneAvailable(contact, new Date()))
+    const available = contacts.filter((contact) => isPhoneAvailable(contact, new Date()))
     // Identity is selected in code. The model receives only this responder's
     // persona, so a visible author can never accidentally speak as somebody else.
     const responder = primary && isPhoneAvailable(primary, new Date())
       ? primary
-      : available[Math.floor(Math.random() * available.length)] || sameWorld[Math.floor(Math.random() * sameWorld.length)] || primary
+      : available[Math.floor(Math.random() * available.length)] || contacts[Math.floor(Math.random() * contacts.length)] || primary
     if (responder) {
       await generateMomentReply(momentId, responder, triggeringCommentId, settings)
       return
@@ -892,14 +891,13 @@ export async function generateMomentDiscussion(
       ...comments.slice(-8).map((comment) => comment.authorContactId),
     ].filter((id): id is string => !!id && id !== 'user' && byId.has(id)))).slice(0, 3)
     if (candidateIds.length === 0) return
-    const poster = posterContactId ? byId.get(posterContactId) : undefined
-    const candidates = candidateIds.map((id) => byId.get(id)!).filter((contact) => !!contact && contact.worldviewId === poster?.worldviewId)
+    const candidates = candidateIds.map((id) => byId.get(id)!).filter((contact) => !!contact)
     const names = new Map(candidates.map((contact) => [contact.id, displayName(contact)]))
     const thread = comments.slice(-12).map((comment) => ({ id: comment.id, author: comment.authorContactId === 'user' ? settings.userNickname || '用户' : names.get(comment.authorContactId) || byId.get(comment.authorContactId)?.name || '某人', content: comment.content, replyTo: comment.replyToCommentId }))
     const discussionWorldbookPrompt =
       featureActive(settings, 'worldview')
         ? (getPromptTemplate(settings, 'worldview', 'momentsRuntime', {
-            worldbookEntries: await retrieveWorldbookContext(`${moment.content}\n${JSON.stringify(thread)}`, { worldviewId: poster?.worldviewId }),
+            worldbookEntries: await retrieveWorldbookContext(`${moment.content}\n${JSON.stringify(thread)}`, { worldviewId: settings.activeWorldId || settings.defaultWorldviewId }),
           }) ?? '')
         : ''
     const discussionContext = `动态：${moment.content}
