@@ -107,13 +107,14 @@ export const useSettingsStore = create<SettingsState>()(
       animationsEnabled: true,
       customCurrencyEmoji: '💎',
       moodExpiryMs: 30 * 60 * 1000,
+      chatResponseTimeoutMs: 60 * 1000,
       adminModeEnabled: false,
       enabledModules: ['shop', 'warehouse', 'saveLoad', 'knowledgeBase', 'relationship', 'personalityTraits', 'intent', 'storyOutline', 'career', 'location'],
       setSettings: (patch) => set(patch),
     }),
     {
       name: 'talk-settings',
-      version: 23,
+      version: 24,
       migrate: (persisted, version) => {
         const next = persisted as Partial<SettingsState>
         if (next.experienceMode !== 'immersive' && next.experienceMode !== 'free') next.experienceMode = 'free'
@@ -152,6 +153,8 @@ export const useSettingsStore = create<SettingsState>()(
         if (!['pexels', 'anime', 'generated'].includes(String(next.avatarImageSource))) next.avatarImageSource = 'anime'
         if (!['pexels', 'anime', 'generated'].includes(String(next.momentsImageSource))) next.momentsImageSource = 'generated'
         if (typeof next.animationsEnabled !== 'boolean') next.animationsEnabled = true
+        if (typeof next.chatResponseTimeoutMs !== 'number' || !Number.isFinite(next.chatResponseTimeoutMs)) next.chatResponseTimeoutMs = 60 * 1000
+        else next.chatResponseTimeoutMs = Math.max(0, Math.min(10 * 60 * 1000, Math.round(next.chatResponseTimeoutMs)))
         next.chatPageSize = normalizeChatPageSize(next.chatPageSize)
         if (typeof next.stickerApiUrl !== 'string') next.stickerApiUrl = ''
         if (typeof next.stickerApiKey !== 'string') next.stickerApiKey = ''

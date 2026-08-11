@@ -358,9 +358,18 @@ async function runGroupAiTurn(
   regenerationInstruction = '',
 ): Promise<void> {
   const engine = useChatEngineStore.getState()
+  let responseTimeout: ReturnType<typeof setTimeout> | undefined
   const directOutput = isModuleEnabled('directOutput')
   const turnStartedAt = performance.now()
   engine.patch(conversationId, { aiTyping: true, error: '', typingLabel: '群成员' })
+  const timeoutMs = Math.max(0, Math.min(10 * 60 * 1000, Math.round(settings.chatResponseTimeoutMs ?? 60 * 1000)))
+  if (timeoutMs > 0) {
+    responseTimeout = setTimeout(() => {
+      if (!turns.isCurrent(conversationId, streamId)) return
+      turns.begin(conversationId, uuid())
+      engine.patch(conversationId, { aiTyping: false, typingLabel: undefined, error: `回复等待超过 ${Math.round(timeoutMs / 1000)} 秒，已停止生成。` })
+    }, timeoutMs)
+  }
   console.log(`[group] 开始生成回复 群=${group.name} conversationId=${conversationId}`)
   try {
     let locationParticipants: LocationParticipants | undefined
@@ -587,6 +596,8 @@ async function runGroupAiTurn(
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[group] 生成回复出错 群=${group.name}:`, message)
     engine.patch(conversationId, { error: message, aiTyping: false, typingLabel: undefined })
+  } finally {
+    if (responseTimeout) clearTimeout(responseTimeout)
   }
 }
 

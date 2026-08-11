@@ -962,6 +962,8 @@ export interface AppSettings {
   animationsEnabled?: boolean
   /** How long an AI mood lasts before expiring (ms). Default 30 min. */
   moodExpiryMs: number
+  /** Maximum time to wait for a chat reply before cancelling it. 0 disables the limit. */
+  chatResponseTimeoutMs: number
   /** Feature-module toggles — see src/features/. Every module id listed here is active. */
   enabledModules: string[]
 }

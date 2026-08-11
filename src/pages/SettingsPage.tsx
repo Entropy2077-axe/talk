@@ -24,7 +24,7 @@ import { ToggleSwitch } from '../components/ToggleSwitch'
 import { AI_PROVIDERS, AI_PROVIDER_OPTIONS, resolveChatCompletionsUrl, resolveModelsUrl, type AiProviderId } from '../lib/aiProviders'
 import { cancelAllContactGenerationTasks, markPersistedContactGenerationTasksPaused } from '../lib/contactGenerationTasks'
 import { Capacitor } from '@capacitor/core'
-import { Directory, Encoding, Filesystem } from '@capacitor/filesystem'
+import { BackupDirectory } from '../lib/backupDirectory'
 
 export function SettingsPage() {
   const navigate = useNavigate()
@@ -41,6 +41,7 @@ export function SettingsPage() {
     animationsEnabled,
     chatBackground,
     chatPageSize,
+    chatResponseTimeoutMs,
     currencyIconMode,
     customCurrencyEmoji,
     adminModeEnabled,
@@ -80,17 +81,8 @@ export function SettingsPage() {
     const contents = JSON.stringify(backup, null, 2)
 
     if (Capacitor.getPlatform() === 'android') {
-      // Android WebView does not consistently hand blob: downloads to the
-      // system download manager. Write directly to the public Documents folder
-      // instead, which works on Android 11+ scoped storage (including Android 12).
-      await Filesystem.writeFile({
-        path: filename,
-        data: contents,
-        directory: Directory.Documents,
-        encoding: Encoding.UTF8,
-        recursive: true,
-      })
-      setBackupStatus(`备份已保存到“文件”应用的 Documents 文件夹：${filename}。API Key、令牌和密码不会写入备份文件。`)
+      await BackupDirectory.save({ filename, contents })
+      setBackupStatus(`备份已保存：${filename}。首次导出时可在系统文件选择器中指定文件夹；API Key、令牌和密码不会写入备份文件。`)
       return
     }
 
@@ -342,6 +334,41 @@ export function SettingsPage() {
             {CHAT_PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size} 条</option>)}
           </select>
           <button type="button" onClick={() => setSettings({ chatPageSize: 40 })} className="rounded-lg bg-gray-100 px-3 py-2 text-xs text-gray-600">恢复默认</button>
+        </div>
+        <div className="mt-4 border-t border-gray-100 pt-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm text-gray-800">回复等待超时</p>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-gray-400">超时会停止本轮生成，保留已显示的消息，并可手动重试。</p>
+            </div>
+            <ToggleSwitch
+              checked={chatResponseTimeoutMs > 0}
+              onChange={(checked) => setSettings({ chatResponseTimeoutMs: checked ? 60 * 1000 : 0 })}
+              ariaLabel="切换回复等待超时"
+              size="sm"
+              activeTone="dark"
+            />
+          </div>
+          {chatResponseTimeoutMs > 0 && (
+            <label className="mt-3 block text-xs text-gray-500" htmlFor="chat-response-timeout">
+              超时时间（秒）
+              <input
+                id="chat-response-timeout"
+                aria-label="回复等待超时时间（秒）"
+                type="number"
+                min="5"
+                max="600"
+                step="1"
+                value={Math.round(chatResponseTimeoutMs / 1000)}
+                onChange={(event) => {
+                  const seconds = Number(event.target.value)
+                  if (!Number.isFinite(seconds)) return
+                  setSettings({ chatResponseTimeoutMs: Math.max(5, Math.min(600, Math.round(seconds))) * 1000 })
+                }}
+                className="mt-1.5 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800"
+              />
+            </label>
+          )}
         </div>
       </section>
       {adminModeEnabled && <section className="mt-3 bg-white px-4 py-3"><h2 className="text-sm font-medium text-gray-900">设定我的余额</h2><p className="mt-1 text-xs text-gray-400">当前 {formatCurrency(wallet?.balance ?? 0, useSettingsStore.getState())}</p><div className="mt-2 flex gap-2"><input type="number" min="0" value={adminBalance} onChange={e=>setAdminBalance(e.target.value)} placeholder="目标余额" className="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm"/><button onClick={async()=>{const n=Number(adminBalance);if(Number.isFinite(n)&&n>=0&&confirm(`确认将余额设为 ${Math.round(n)}？`)){await setUserBalance(n);setAdminBalance('')}}} className="rounded-lg bg-gray-900 px-4 text-sm text-white">设定</button></div></section>}

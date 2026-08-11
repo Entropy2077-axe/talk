@@ -19,6 +19,7 @@ import { managedBackParent, replaceHashRoute } from './lib/navigationHierarchy'
 import { syncContactLocationsAt } from './lib/locations'
 import { initializeContactGenerationTasks } from './lib/contactGenerationTasks'
 import { ensureContactPromptSnapshots } from './lib/promptPresets'
+import { ensureContactConversations } from './lib/contactConversations'
 import { resumeMediaAssets } from './lib/imageAssets'
 // Tab pages are the landing screen — keep them eager. Everything else is
 // route-level code-split (lazy) so the initial bundle stays small; matches
@@ -176,6 +177,10 @@ function App() {
   }, [])
   useEffect(() => { if (worldReady) void initializeContactGenerationTasks() }, [worldReady])
   useEffect(() => { if (worldReady) void ensureContactPromptSnapshots(useSettingsStore.getState()) }, [worldReady])
+  // Repair contacts brought in by older/world snapshot data that did not
+  // retain their one-to-one conversation rows. MessagesPage is conversation
+  // based, so without this a contact only appears on the Contacts tab.
+  useEffect(() => { if (worldReady) void ensureContactConversations() }, [worldReady])
   useEffect(() => {
     if (!desktop) return
     // Warm the routes people open most often after the desktop shell settles.

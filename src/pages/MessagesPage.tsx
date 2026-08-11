@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useNavigate } from 'react-router-dom'
 import { db } from '../db/db'
@@ -14,6 +14,7 @@ import { previewForMessage } from '../lib/messagePreview'
 import { useLastMessageByConversation, useUnreadByConversation } from '../lib/unread'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { isAiTestId } from '../lib/aiTestIsolation'
+import { ensureContactConversations } from '../lib/contactConversations'
 
 const EMPTY_ARRAY: never[] = []
 
@@ -30,6 +31,11 @@ export function MessagesPage() {
   const locations = useLiveQuery(() => db.locations.toArray(), []) ?? EMPTY_ARRAY
   const unreadByConversation = useUnreadByConversation()
   const lastMessageByConversation = useLastMessageByConversation()
+
+  // The startup repair handles persisted data. Re-run after a live world
+  // switch too, because this tab can stay mounted while Dexie replaces the
+  // active world's contact rows.
+  useEffect(() => { void ensureContactConversations() }, [contacts, conversations])
 
   const rows = useMemo(() => {
     const contactById = new Map(contacts.map((c) => [c.id, c]))

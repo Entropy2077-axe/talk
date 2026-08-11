@@ -342,10 +342,21 @@ async function runAiTurn(
   regenerationInstruction = '',
 ): Promise<void> {
   const engine = useChatEngineStore.getState()
+  let responseTimeout: ReturnType<typeof setTimeout> | undefined
   const turnStartedAt = performance.now()
   const now = turnNow ?? Date.now()
   const activeMood = getActiveMood(contact, now)
   engine.patch(conversationId, { aiTyping: true, error: '', typingLabel: displayName(contact) })
+  const timeoutMs = Math.max(0, Math.min(10 * 60 * 1000, Math.round(settings.chatResponseTimeoutMs ?? 60 * 1000)))
+  if (timeoutMs > 0) {
+    responseTimeout = setTimeout(() => {
+      if (!turns.isCurrent(conversationId, streamId)) return
+      // Invalidate before aborting so queued bubbles are cancelled, while
+      // messages already persisted in IndexedDB remain visible.
+      turns.begin(conversationId, uuid())
+      engine.patch(conversationId, { aiTyping: false, typingLabel: undefined, error: `回复等待超过 ${Math.round(timeoutMs / 1000)} 秒，已停止生成。` })
+    }, timeoutMs)
+  }
   console.log(`[chat] 开始生成回复 对方=${displayName(contact)} conversationId=${conversationId}`)
   try {
     const directOutput = isModuleEnabled('directOutput')
@@ -726,6 +737,8 @@ async function runAiTurn(
     const message = err instanceof Error ? err.message : String(err)
     console.error(`[chat] 生成回复出错 对方=${displayName(contact)}:`, message)
     engine.patch(conversationId, { error: message, aiTyping: false, typingLabel: undefined })
+  } finally {
+    if (responseTimeout) clearTimeout(responseTimeout)
   }
 }
 
