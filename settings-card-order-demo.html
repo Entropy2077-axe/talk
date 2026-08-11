@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>通用设置 · 卡片顺序 Demo</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #e9eaee; color: #1f2329; font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .phone { width: min(100%, 430px); min-height: 100vh; margin: auto; background: #f5f5f7; padding-bottom: 28px; }
+    header { display: flex; align-items: center; height: 62px; padding: 0 18px; background: rgba(255,255,255,.92); border-bottom: 1px solid #ececef; position: sticky; top: 0; z-index: 2; backdrop-filter: blur(12px); }
+    header .back { font-size: 24px; width: 34px; color:#30333a; } header h1 { flex: 1; text-align:center; font-size:17px; margin:0 34px 0 0; font-weight:650; }
+    .intro { padding: 18px 18px 12px; } .intro h2 { font-size: 19px; margin:0 0 4px; letter-spacing:-.2px; } .intro p { color:#7b8089; margin:0; font-size:12px; }
+    .status { margin: 0 14px 12px; padding: 13px 14px; border-radius: 14px; color:#fff; background: linear-gradient(135deg,#252a35,#4d596d); box-shadow: 0 8px 18px rgba(35,41,51,.15); }
+    .status small { color:#cdd4df; } .status strong { display:block; font-size:15px; margin:3px 0 8px; } .pills { display:flex; gap:6px; flex-wrap:wrap; } .pill { background:rgba(255,255,255,.13); border:1px solid rgba(255,255,255,.12); padding:3px 7px; border-radius:999px; font-size:11px; }
+    .section-title { margin: 19px 18px 7px; color:#8c9199; font-size:11px; font-weight:600; letter-spacing:.07em; text-transform:uppercase; }
+    .card { margin: 0 14px 10px; border-radius:14px; overflow:hidden; background:#fff; box-shadow:0 1px 0 rgba(0,0,0,.025); }
+    .row { width:100%; min-height:64px; display:flex; align-items:center; gap:12px; padding:11px 14px; border:0; background:#fff; color:inherit; text-align:left; font:inherit; cursor:pointer; }
+    .row + .row { border-top:1px solid #f0f0f2; } .icon { width:34px; height:34px; border-radius:10px; display:grid; place-items:center; font-size:17px; flex:0 0 auto; } .ink { background:#f0f2f7; } .blue { background:#eaf3ff; } .purple { background:#f2edff; } .green { background:#eaf8ef; } .orange { background:#fff3e8; } .red { background:#fff0f0; }
+    .copy { flex:1; min-width:0; } .copy b { display:block; font-weight:560; font-size:14px; } .copy span { display:block; margin-top:2px; color:#9297a0; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .chevron { color:#c2c5cb; font-size:20px; font-weight:300; } .toggle { width:42px; height:25px; border-radius:999px; background:#d9dce1; padding:3px; flex:0 0 auto; transition:.18s; } .toggle i { display:block; width:19px; height:19px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.16); transition:.18s; } .toggle.on { background:#252a35; } .toggle.on i { transform:translateX(17px); }
+    .details { display:none; padding:0 14px 13px 60px; color:#666d77; font-size:12px; border-top:1px solid #f0f0f2; background:#fcfcfd; } .details.show { display:block; } .details p { margin:10px 0 0; } .details button { margin-top:10px; border:0; border-radius:8px; background:#eef0f4; color:#424751; font-size:12px; padding:7px 10px; }
+    .danger { margin-top:24px; } .danger .row { color:#d74e4e; } .note { margin:9px 18px; color:#a0a4ab; font-size:11px; text-align:center; }
+    .annotation { width:min(100% - 24px, 760px); margin:24px auto; padding:17px 20px; border-radius:14px; background:white; color:#4c525b; } .annotation b{ color:#252a35; } .annotation ol{ margin:9px 0 0; padding-left:20px; } .annotation li{ margin:5px 0; }
+    @media (min-width: 760px) { body { display:flex; align-items:flex-start; gap:24px; padding:24px; } .phone { min-height:calc(100vh - 48px); border-radius:22px; box-shadow:0 16px 48px rgba(25,30,40,.16); overflow:hidden; } .annotation { max-width:410px; margin:0; } }
+  </style>
+</head>
+<body>
+  <main class="phone">
+    <header><span class="back">‹</span><h1>通用设置</h1></header>
+    <div class="intro"><h2>把常用设置放在手边</h2><p>先确认连接状态，再调整聊天体验和系统管理项。</p></div>
+    <section class="status"><small>当前 AI 服务</small><strong>DeepSeek · deepseek-chat</strong><div class="pills"><span class="pill">● 已连接</span><span class="pill">自动任务：每日 30 次</span></div></section>
+
+    <p class="section-title">AI 与创作</p>
+    <section class="card">
+      <button class="row" data-detail="connection"><span class="icon blue">✦</span><span class="copy"><b>AI 服务与模型</b><span>DeepSeek · API Key 已配置 · 连接正常</span></span><span class="chevron">›</span></button>
+      <div class="details" id="connection"><p>供应商、API Key、Base URL、聊天模型与多功能模型集中在这里。</p><button>测试连接</button><button>获取模型</button></div>
+      <button class="row" data-detail="preset"><span class="icon purple">⌘</span><span class="copy"><b>预设与提示词</b><span>生成参数、全局提示词、联系人覆写</span></span><span class="chevron">›</span></button>
+      <div class="details" id="preset"><p>这是跳转入口，避免占据设置首页的纵向空间。</p></div>
+      <button class="row"><span class="icon orange">◌</span><span class="copy"><b>AI 调用预算</b><span>自动任务每日上限：30 次</span></span><span class="chevron">›</span></button>
+    </section>
+
+    <p class="section-title">聊天体验</p>
+    <section class="card">
+      <button class="row" data-detail="chat"><span class="icon green">☵</span><span class="copy"><b>聊天与回复</b><span>每次加载 40 条 · 回复超时已开启</span></span><span class="chevron">›</span></button>
+      <div class="details" id="chat"><p>消息加载数量、回复等待超时等与聊天行为有关的设置。</p></div>
+      <button class="row" data-detail="appearance"><span class="icon ink">◐</span><span class="copy"><b>外观与动效</b><span>聊天背景、顶部显示区域、界面动效</span></span><span class="chevron">›</span></button>
+      <div class="details" id="appearance"><p>把较少调整的背景和显示设置折叠为二级页面，首页更轻。</p></div>
+      <button class="row"><span class="icon orange">¥</span><span class="copy"><b>货币图标</b><span>当前使用：金币</span></span><span class="chevron">›</span></button>
+    </section>
+
+    <p class="section-title">世界与数据</p>
+    <section class="card">
+      <button class="row"><span class="icon purple">◎</span><span class="copy"><b>世界经济与资产</b><span>各世界独立保存经济与资产</span></span><span class="toggle on"><i></i></span></button>
+      <button class="row" data-detail="backup"><span class="icon blue">↥</span><span class="copy"><b>数据备份与恢复</b><span>导出、导入本机数据</span></span><span class="chevron">›</span></button>
+      <div class="details" id="backup"><p>API Key、令牌和密码不会写入备份文件。</p><button>导出备份</button><button>导入恢复</button></div>
+    </section>
+
+    <p class="section-title">高级</p>
+    <section class="card"><button class="row"><span class="icon ink">⌁</span><span class="copy"><b>管理员模式</b><span>查看运行进程与调试信息</span></span><span class="toggle"><i></i></span></button></section>
+    <section class="card danger"><button class="row"><span class="icon red">!</span><span class="copy"><b>清空联系人与聊天记录</b><span>此操作不可恢复</span></span><span class="chevron">›</span></button></section>
+    <p class="note">危险操作与日常设置保持足够距离</p>
+  </main>
+  <aside class="annotation"><b>这版重排的原则</b><ol><li>顶部状态卡先回答“现在是否可用”，让模型与凭据不再埋在长页面中部。</li><li>将“预设”提升到 AI 配置旁边：它是模型使用方式的一部分。</li><li>把密集的表单内容收进二级卡片，首页以当前值做摘要。</li><li>数据管理放在世界设置之后；管理员与清空数据独立置底，降低误触。</li></ol></aside>
+  <script>
+    document.querySelectorAll('[data-detail]').forEach((row) => row.addEventListener('click', () => document.getElementById(row.dataset.detail).classList.toggle('show')));
+    document.querySelectorAll('.toggle').forEach((toggle) => toggle.addEventListener('click', (event) => { event.stopPropagation(); toggle.classList.toggle('on'); }));
+  </script>
+</body>
+</html>

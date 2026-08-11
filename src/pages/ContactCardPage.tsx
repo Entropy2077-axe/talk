@@ -408,55 +408,29 @@ export function ContactCardPage() {
   return (
     <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
       <TopBar title="联系人名片" showBack />
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex flex-1 flex-col overflow-y-auto">
 
-      <section className="mt-3 flex flex-col items-center gap-1 bg-white px-4 py-8">
-        <button onClick={() => setPickingAvatar(true)}>
-          <Avatar avatar={contact.avatar} color={contact.avatarColor} size={80} />
-        </button>
-        <h2 className="ui-font-display mt-1 text-lg font-medium text-gray-900">{displayName(contact)}</h2>
-        {contact.remark && <p className="text-xs text-gray-400">本名 {contact.name}</p>}
-        {contact.avatarPhotographer && (
-          <p className="text-[11px] text-gray-300">
-            头像照片来自 Pexels ·{' '}
-            {contact.avatarPhotographerUrl ? (
-              <a href={contact.avatarPhotographerUrl} target="_blank" rel="noreferrer" className="underline">
-                {contact.avatarPhotographer}
-              </a>
-            ) : (
-              contact.avatarPhotographer
-            )}
-          </p>
-        )}
+      <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-5 py-6 shadow-[var(--ui-shadow)]">
+        <div className="flex items-center gap-4"><button type="button" onClick={() => setPickingAvatar(true)} aria-label="修改头像"><Avatar avatar={contact.avatar} color={contact.avatarColor} size={72} /></button><div className="min-w-0 flex-1"><h2 className="ui-font-display truncate text-xl font-semibold text-[var(--ui-text)]">{displayName(contact)}</h2><p className="mt-0.5 truncate text-xs text-[var(--ui-text-3)]">{contact.remark ? `备注：${contact.remark}` : `本名：${contact.name}`}</p>{contact.relationshipBase && <span className="mt-2 inline-block rounded-full bg-[var(--ui-accent-soft)] px-2.5 py-1 text-[11px] text-[var(--ui-action)]">{contact.relationshipBase}{contact.relationshipDynamic ? ` · ${contact.relationshipDynamic}` : ''}</span>}</div></div>
+        {contact.avatarPhotographer && <p className="mt-3 text-[11px] text-[var(--ui-text-3)]">头像照片来自 Pexels · {contact.avatarPhotographerUrl ? <a href={contact.avatarPhotographerUrl} target="_blank" rel="noreferrer" className="underline">{contact.avatarPhotographer}</a> : contact.avatarPhotographer}</p>}
+        <div className="mt-5 grid grid-cols-3 gap-2"><button type="button" onClick={handleChat} className="rounded-[var(--ui-radius-control)] bg-[var(--ui-action)] py-2.5 text-xs font-medium text-[var(--ui-on-action)]">发消息</button><button type="button" onClick={() => navigate(`/moments?contact=${contactId}`)} className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] py-2.5 text-xs text-[var(--ui-text-2)]">朋友圈（{momentCount}）</button><button type="button" onClick={() => setMenuOpen(true)} className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] py-2.5 text-xs text-[var(--ui-text-2)]">管理联系人</button></div>
       </section>
 
-      <section className="mt-3 bg-white px-4 py-4">
-        <div className="flex items-start justify-between gap-3">
-          <div><h3 className="text-xs font-medium text-gray-400">联系人语音</h3><p className="mt-1 text-[11px] leading-relaxed text-gray-400">音色只属于这位联系人，不会套用到其他人。</p></div>
-          <span className="shrink-0 text-xs text-gray-500">{speechProviderName(activeSpeechProvider)}</span>
-        </div>
-        {activeSpeechProvider === 'none' || !isSpeechProviderReady(settings) ? (
-          <button type="button" onClick={() => navigate('/settings/speech-generation')} className="mt-3 w-full rounded-lg border border-dashed border-gray-300 px-3 py-3 text-sm text-gray-600">先配置语音生成服务</button>
-        ) : (
-          <div className="mt-3 space-y-3">
-            {!activeSpeechVoice && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">暂时没有对号入座。请选择一个音色，否则聊天里生成语音时会提醒回来设置。</p>}
-            <label className="block text-xs text-gray-500">音色
-              <select value={activeSpeechVoice?.voiceId ?? ''} onChange={(event) => void saveSpeechVoice(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-800">
-                <option value="" disabled>请选择适合这位联系人的音色</option>
-                {activeSpeechOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
-              </select>
-            </label>
-            {activeSpeechProvider === 'mimo' && activeSpeechVoice && <label className="block text-xs text-gray-500">声音演绎方式
-              <textarea defaultValue={activeSpeechVoice.styleInstruction ?? ''} onBlur={(event) => void saveSpeechStyle(event.target.value)} placeholder="例如：低沉克制、语速稍慢，熟悉后更温柔" rows={2} className="mt-1 w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 outline-none" />
-            </label>}
-            {activeSpeechVoice && <button type="button" disabled={testingSpeechVoice} onClick={() => void testSpeechVoice()} className="w-full rounded-lg bg-gray-900 py-2.5 text-sm text-white disabled:opacity-50">{testingSpeechVoice ? '生成试听中…' : '试听这位联系人的声音'}</button>}
-            {speechVoiceStatus && <p className="text-xs leading-5 text-gray-500">{speechVoiceStatus}</p>}
-          </div>
-        )}
+      <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
+        <h3 className="mb-3 text-xs font-medium text-[var(--ui-text-3)]">此刻的 TA</h3>
+        <div className="grid grid-cols-2 gap-2 text-sm"><div className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] px-3 py-2.5"><p className="text-[11px] text-[var(--ui-text-3)]">状态</p><p className="mt-1 text-[var(--ui-text-2)]">{isPhoneAvailable(contact, new Date(contactNow)) ? '可联系' : '暂时不便联系'} · {describeCurrentSchedule(contact, new Date(contactNow)).replace(/^现在在/, '') || '空闲'}</p></div>{moodEnabled && <div className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] px-3 py-2.5"><p className="text-[11px] text-[var(--ui-text-3)]">心情</p><p className="mt-1 text-[var(--ui-text-2)]">{contact.mood?.text && contactNow < contact.mood.expiresAt ? normalizeMood(contact.mood.text) : '暂无'}</p></div>}{currentLocation && <div className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] px-3 py-2.5"><p className="text-[11px] text-[var(--ui-text-3)]">当前位置</p><p className="mt-1 text-[var(--ui-text-2)]">{currentLocation.name}</p></div>}{!immersiveMode && relEnabled && <div className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] px-3 py-2.5"><p className="text-[11px] text-[var(--ui-text-3)]">好感度</p><p className="mt-1 text-[var(--ui-text-2)]">{contact.warmth !== undefined ? `${contact.warmth} · ${warmthLabel(contact.warmth)}` : '未评估'}</p></div>}</div>
       </section>
+
+      <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
+        <div className="mb-2 flex items-center justify-between"><h3 className="text-xs font-medium text-[var(--ui-text-3)]">关系与资料</h3><button type="button" onClick={() => { setRemarkDraft(contact.remark ?? ''); setEditingRemark(true) }} className="text-xs text-[var(--ui-special-ink)]">修改备注</button></div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2 border-b border-[var(--ui-border)] pb-3 text-xs text-[var(--ui-text-3)]"><p>性别：{contact.gender || contact.creatorProfile?.gender || '未填写'}</p><p>真名：{contact.realName || contact.name}</p><p>网名：{contact.nickname || contact.name}</p><p>生日：{contact.birthday || '未填写'}</p></div>
+        <div className="mt-1"><button type="button" onClick={() => setPickingRelationshipType(true)} className="flex w-full items-center justify-between py-3 text-left active:opacity-70"><span className="text-[15px] text-[var(--ui-text)]">关系定位</span><span className="text-sm text-[var(--ui-text-3)]">{contact.relationshipBase || '未设置'}</span></button>{!immersiveMode && personalityEnabled && <button type="button" onClick={() => setPickingPersonalityTrait(true)} className="flex w-full items-center justify-between border-t border-[var(--ui-border)] py-3 text-left active:opacity-70"><span className="text-[15px] text-[var(--ui-text)]">性格特质</span><span className="text-right text-sm text-[var(--ui-text-3)]">{contact.personalityTrait || '无'}{contact.personalityTrait && contact.personalityTrait !== '无' && relEnabled ? ` · ${personalityIntimacyStage(contact.warmth ?? 0)}` : ''}</span></button>}{careerEnabled && <button type="button" onClick={immersiveMode ? undefined : assignCareer} disabled={assigningCareer} className="flex w-full items-center justify-between border-t border-[var(--ui-border)] py-3 text-left disabled:opacity-50"><span className="text-[15px] text-[var(--ui-text)]">职业</span><span className="text-sm text-[var(--ui-text-3)]">{immersiveMode ? contact.occupation || '暂时不了解' : assigningCareer ? '生成中…' : contact.occupation ? `${contact.occupation} · 月薪 ${formatCurrency(contact.monthlySalary ?? 0, settings)}` : '赋予职业'}</span></button>}{!immersiveMode && careerEnabled && <button type="button" onClick={adminEnabled ? async () => { const raw = prompt('设定该AI的钱包余额', String(contactWallet?.balance ?? 0)); if (raw !== null && Number.isFinite(Number(raw)) && Number(raw) >= 0) await setWalletBalance(contact.id, Number(raw)) } : undefined} className="flex w-full items-center justify-between border-t border-[var(--ui-border)] py-3 text-left"><span className="text-[15px] text-[var(--ui-text)]">钱包</span><span className="text-sm text-[var(--ui-text-3)]">{formatCurrency(contactWallet?.balance ?? 0, settings)}{adminEnabled ? ' · 点击设定' : ''}</span></button>}</div>
+      </section>
+
+      <SchedulePlanner contact={contact} settings={settings} memories={structuredMemories} />
 
       {lifeSimulationEnabled && (
-        <section className="mt-3 bg-white px-4 py-4">
+        <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-white px-4 py-4 shadow-[var(--ui-shadow)]">
           <h3 className="mb-2 flex items-center gap-1.5 text-xs font-medium text-gray-400">
             <UiIcon name="🌙" size={14} />
             生活回顾
@@ -477,8 +451,8 @@ export function ContactCardPage() {
         </section>
       )}
 
-      {!immersiveMode && experiences.length > 0 && <section className="mt-3 bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
-        <h3 className="mb-2 text-xs font-medium text-[var(--ui-text-3)]">经历</h3>
+      {!immersiveMode && experiences.length > 0 && <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
+        <h3 className="mb-2 text-xs font-medium text-[var(--ui-text-3)]">你们的故事</h3>
         <div className="space-y-2">{[...experiences].sort((a, b) => (b.endedAt ?? b.createdAt) - (a.endedAt ?? a.createdAt)).slice(0, 12).map((experience) => <div key={experience.id} className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] px-3 py-2">
           <div className="flex items-center justify-between gap-2"><p className="text-sm font-medium text-[var(--ui-text)]">{experience.title}</p><span className="shrink-0 text-[10px] text-[var(--ui-text-3)]">{experience.kind === 'past' ? '过去' : experience.memoryTier === 'long' ? '长期记忆' : '短期记忆'}</span></div>
           <p className="mt-1 text-xs leading-relaxed text-[var(--ui-text-2)]">{experience.summary}</p>
@@ -486,69 +460,12 @@ export function ContactCardPage() {
         </div>)}</div>
       </section>}
 
-      <div className="mt-3 bg-white">
-        <div className="grid grid-cols-2 gap-x-4 gap-y-2 border-b border-gray-100 px-4 py-3 text-xs text-gray-500"><p>性别：{contact.gender || contact.creatorProfile?.gender || '未填写'}</p><p>真名：{contact.realName || contact.name}</p><p>网名：{contact.nickname || contact.name}</p><p>生日：{contact.birthday || '未填写'}</p></div>
-        <button
-          onClick={() => {
-            setRemarkDraft(contact.remark ?? '')
-            setEditingRemark(true)
-          }}
-          className="flex w-full items-center justify-between border-b border-gray-100 px-4 py-3.5 text-left active:bg-gray-50"
-        >
-          <span className="text-[15px] text-gray-900">备注</span>
-          <span className="text-sm text-gray-400">{contact.remark || '未设置'}</span>
-        </button>
-        <button
-          onClick={() => setPickingRelationshipType(true)}
-          className="flex w-full items-center justify-between border-b border-gray-100 px-4 py-3.5 text-left active:bg-gray-50"
-        >
-          <span className="text-[15px] text-gray-900">关系定位</span>
-          <span className="text-sm text-gray-400">{contact.relationshipBase || '未设置'}</span>
-        </button>
-        {!immersiveMode && personalityEnabled && (
-          <button
-            onClick={() => setPickingPersonalityTrait(true)}
-            className="flex w-full items-center justify-between px-4 py-3.5 text-left active:bg-gray-50"
-          >
-            <span className="text-[15px] text-gray-900">性格特质</span>
-            <span className="text-right text-sm text-gray-400">{contact.personalityTrait || '无'}{contact.personalityTrait && contact.personalityTrait !== '无' && relEnabled ? ` · ${personalityIntimacyStage(contact.warmth ?? 0)}` : ''}</span>
-          </button>
-        )}
-        {moodEnabled && (
-          <div className="flex w-full items-center justify-between px-4 py-3.5">
-            <span className="text-[15px] text-gray-900">心情</span>
-            <span className="text-sm text-gray-400">
-            {contact.mood?.text && contactNow < contact.mood.expiresAt ? normalizeMood(contact.mood.text) : '暂无'}
-            </span>
-          </div>
-        )}
-        <div className="flex w-full items-center justify-between px-4 py-3.5">
-          <span className="text-[15px] text-gray-900">状态</span>
-          <span className="flex items-center gap-1.5 text-sm text-gray-400">
-            {isPhoneAvailable(contact, new Date(contactNow)) ? <Phone size={14} /> : <PhoneOff size={14} />}{describeCurrentSchedule(contact, new Date(contactNow)).replace(/^现在在/, '') || '空闲'}
-          </span>
-        </div>
-        {currentLocation && <div className="flex w-full items-center justify-between px-4 py-3.5"><span className="text-[15px] text-gray-900">当前位置</span><span className="text-sm text-gray-400">{currentLocation.name}</span></div>}
-        {!immersiveMode && relEnabled && (
-          <div className="flex w-full items-center justify-between px-4 py-3.5">
-            <span className="text-[15px] text-gray-900">好感度</span>
-            <span className="text-sm text-gray-400">
-              {contact.warmth !== undefined
-                ? `${contact.warmth}（${warmthLabel(contact.warmth)}）${contact.relationshipDynamic ? ` · ${contact.relationshipDynamic}` : ''}`
-                : '未评估（下次聊天时自动评估）'}
-            </span>
-          </div>
-        )}
-        {careerEnabled && <button onClick={immersiveMode ? undefined : assignCareer} disabled={assigningCareer} className="flex w-full items-center justify-between px-4 py-3.5 text-left active:bg-gray-50 disabled:opacity-50"><span className="text-[15px] text-gray-900">职业</span><span className="text-sm text-gray-400">{immersiveMode ? contact.occupation || '暂时不了解' : assigningCareer?'生成中…':contact.occupation?`${contact.occupation} · 月薪 ${formatCurrency(contact.monthlySalary??0,settings)}`:'赋予职业'}</span></button>}
-        {!immersiveMode && careerEnabled && <button onClick={adminEnabled ? async()=>{const raw=prompt('设定该AI的钱包余额',String(contactWallet?.balance??0));if(raw!==null&&Number.isFinite(Number(raw))&&Number(raw)>=0)await setWalletBalance(contact.id,Number(raw))}:undefined} className="flex w-full items-center justify-between px-4 py-3.5 text-left"><span className="text-[15px] text-gray-900">钱包</span><span className="text-sm text-gray-400">{formatCurrency(contactWallet?.balance??0,settings)}{adminEnabled?' · 点击设定':''}</span></button>}
-      </div>
-
-      {!immersiveMode && <section className="mt-3 bg-white px-4 py-4">
+      {!immersiveMode && <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-white px-4 py-4 shadow-[var(--ui-shadow)]">
         <h3 className="mb-2 text-xs font-medium text-gray-400">最近社交动态</h3>
         {socialTimeline.length === 0 ? <p className="text-sm text-gray-400">暂时还没有公开互动。</p> : <div className="space-y-2">{socialTimeline.map((event) => <button key={event.id} type="button" onClick={() => event.groupId ? navigate(`/group/${event.groupId}`) : event.momentId ? navigate(`/moments?focus=${event.momentId}`) : event.conversationId ? navigate(`/chat/${event.conversationId}`) : undefined} className="block w-full border-l-2 border-[var(--ui-success)] pl-2 text-left"><p className="text-sm text-gray-700">{event.summary}</p><p className="mt-0.5 text-[10px] text-gray-400">{new Date(event.createdAt).toLocaleString()}</p></button>)}</div>}
       </section>}
 
-      {!immersiveMode && <section className="mt-3 bg-white px-4 py-4">
+      {!immersiveMode && <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-white px-4 py-4 shadow-[var(--ui-shadow)]">
         <div className="mb-2 flex items-center justify-between">
           <div><h3 className="text-xs font-medium text-gray-400">AI之间的关系</h3><p className="mt-1 text-[11px] text-gray-400">关系会影响朋友圈点赞、评论和群聊互动，可随时自定义。</p></div>
           <button type="button" onClick={openRelationEditor} className="text-xs text-[var(--ui-special-ink)]">编辑关系</button>
@@ -556,7 +473,12 @@ export function ContactCardPage() {
         {relationLinks.length === 0 ? <p className="text-sm text-gray-400">还没有设置与其他联系人的关系</p> : <div className="space-y-1.5">{relationLinks.map((link) => <div key={link.id} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm"><span>{link.name}</span><span className="text-xs text-gray-500">{link.label}</span></div>)}</div>}
       </section>}
 
-      <section className="mt-3 bg-white px-4 py-4">
+      <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
+        <div className="flex items-start justify-between gap-3"><div><h3 className="text-xs font-medium text-[var(--ui-text-3)]">联系人语音</h3><p className="mt-1 text-[11px] leading-relaxed text-[var(--ui-text-3)]">音色只属于这位联系人，不会套用到其他人。</p></div><span className="shrink-0 text-xs text-[var(--ui-text-2)]">{speechProviderName(activeSpeechProvider)}</span></div>
+        {activeSpeechProvider === 'none' || !isSpeechProviderReady(settings) ? <button type="button" onClick={() => navigate('/settings/speech-generation')} className="mt-3 w-full rounded-[var(--ui-radius-control)] border border-dashed border-[var(--ui-border)] px-3 py-3 text-sm text-[var(--ui-text-2)]">先配置语音生成服务</button> : <div className="mt-3 space-y-3">{!activeSpeechVoice && <p className="rounded-[var(--ui-radius-control)] bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">暂时没有对号入座。请选择一个音色，否则聊天里生成语音时会提醒回来设置。</p>}<label className="block text-xs text-[var(--ui-text-2)]">音色<select value={activeSpeechVoice?.voiceId ?? ''} onChange={(event) => void saveSpeechVoice(event.target.value)} className="mt-1 w-full rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2.5 text-sm text-[var(--ui-text)]"><option value="" disabled>请选择适合这位联系人的音色</option>{activeSpeechOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select></label>{activeSpeechProvider === 'mimo' && activeSpeechVoice && <label className="block text-xs text-[var(--ui-text-2)]">声音演绎方式<textarea defaultValue={activeSpeechVoice.styleInstruction ?? ''} onBlur={(event) => void saveSpeechStyle(event.target.value)} placeholder="例如：低沉克制、语速稍慢，熟悉后更温柔" rows={2} className="mt-1 w-full resize-none rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] px-3 py-2 text-sm text-[var(--ui-text)] outline-none" /></label>}{activeSpeechVoice && <button type="button" disabled={testingSpeechVoice} onClick={() => void testSpeechVoice()} className="w-full rounded-[var(--ui-radius-control)] bg-[var(--ui-action)] py-2.5 text-sm text-[var(--ui-on-action)] disabled:opacity-50">{testingSpeechVoice ? '生成试听中…' : '试听这位联系人的声音'}</button>}{speechVoiceStatus && <p className="text-xs leading-5 text-[var(--ui-text-2)]">{speechVoiceStatus}</p>}</div>}
+      </section>
+
+      <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-white px-4 py-4 shadow-[var(--ui-shadow)]">
         <div className="mb-2 flex items-center justify-between">
           <h3 className="text-xs font-medium text-gray-400">AI记忆（随聊天自动积累）</h3>
           {hasMemory && (
@@ -622,8 +544,6 @@ export function ContactCardPage() {
         )}
       </section>
 
-      <SchedulePlanner contact={contact} settings={settings} memories={structuredMemories} />
-
       {adminEnabled && (
         <section className="mt-3 bg-white px-4 py-4">
           <div className="mb-2 flex items-center justify-between">
@@ -680,7 +600,7 @@ export function ContactCardPage() {
       )}
 
       {adminEnabled && (
-        <section className="mt-3 bg-white px-4 py-4">
+        <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-white px-4 py-4 shadow-[var(--ui-shadow)]">
           <div className="mb-3 flex items-center justify-between gap-3"><div><h3 className="text-xs font-medium text-gray-400">提示词预览（管理员模式）</h3><p className="mt-1 text-[10px] text-gray-400">来源：{contact.promptPresetSourceName || '升级前提示词'}{contact.promptSnapshotUpdatedAt ? ` · ${new Date(contact.promptSnapshotUpdatedAt).toLocaleString()}` : ''}</p></div><button type="button" onClick={() => navigate(`/contact/${contactId}/admin`)} className="shrink-0 rounded-lg bg-gray-900 px-3 py-2 text-xs text-white">编辑全部资料</button></div>
 
           <div className="space-y-4">
@@ -731,17 +651,6 @@ export function ContactCardPage() {
         </section>
       )}
 
-      <div className="mt-3 flex flex-col gap-2 bg-white px-4 py-4">
-        <button onClick={handleChat} className="w-full rounded-lg bg-gray-900 py-2.5 text-sm text-white">
-          发消息
-        </button>
-        <button onClick={() => navigate(`/moments?contact=${contactId}`)} className="w-full rounded-lg bg-gray-100 py-2.5 text-sm text-gray-700">
-          TA的朋友圈（{momentCount}）
-        </button>
-        <button onClick={() => setMenuOpen(true)} className="w-full rounded-lg bg-gray-100 py-2.5 text-sm text-red-500">
-          删除联系人
-        </button>
-      </div>
       </div>
 
       {menuOpen && (

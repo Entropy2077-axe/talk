@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>联系人名片 · 信息层级 Demo</title>
+  <style>
+    :root { --ink:#202124; --muted:#858a92; --line:#eceef1; --bg:#f4f5f7; --card:#fff; --accent:#3b6f60; --soft:#edf5f1; }
+    * { box-sizing:border-box; } body { margin:0; background:#e6e8eb; color:var(--ink); font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+    .phone { width:min(100%,430px); min-height:100vh; margin:auto; background:var(--bg); box-shadow:0 0 30px #0001; padding-bottom:30px; }
+    .top { height:56px; display:flex; align-items:center; justify-content:space-between; padding:0 18px; background:#fff; font-size:16px; font-weight:650; }
+    .back,.more { color:#50545a; font-size:22px; font-weight:400; } .more { letter-spacing:2px; }
+    .hero { background:linear-gradient(145deg,#fff 0%,#f3f8f5 100%); padding:24px 20px 20px; border-bottom:1px solid #e5eee9; }
+    .hero-top { display:flex; gap:15px; align-items:center; } .avatar { width:70px; height:70px; border-radius:22px; display:grid; place-items:center; background:linear-gradient(135deg,#d6ad94,#8a6256); color:#fff; font-size:28px; font-weight:700; box-shadow:0 7px 18px #7050472b; }
+    h1,h2,p { margin:0; } h1 { font-size:21px; letter-spacing:.2px; } .sub { color:var(--muted); font-size:12px; margin-top:3px; }
+    .pill { display:inline-flex; align-items:center; gap:5px; border-radius:999px; padding:5px 9px; background:#e8f3ed; color:var(--accent); font-size:12px; margin-top:9px; }
+    .quick { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:20px; } .quick button { min-height:46px; border:0; border-radius:13px; background:#fff; color:#4d5258; font:inherit; box-shadow:0 2px 8px #21332a0b; } .quick b { display:block; color:#24272a; font-size:13px; margin-top:1px; }
+    .section { margin-top:10px; padding:17px 16px; background:var(--card); } .section-title { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; } h2 { font-size:14px; } .hint,.link { font-size:12px; color:var(--muted); } .link { color:var(--accent); border:0; background:transparent; padding:0; }
+    .now { display:grid; grid-template-columns:1fr 1fr; gap:9px; } .tile { min-height:73px; padding:11px; border-radius:13px; background:#f7f8f8; } .tile .label { color:var(--muted); font-size:11px; } .tile .value { margin-top:5px; font-size:14px; font-weight:600; } .online { color:#278158; }
+    .rows { border-top:1px solid var(--line); } .row { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:48px; border-bottom:1px solid var(--line); } .row:last-child { border-bottom:0; } .row span:last-child { color:var(--muted); text-align:right; font-size:13px; } .chev { color:#b3b6ba!important; font-size:19px!important; }
+    .timeline { border-left:2px solid #d8e7df; margin:5px 0 0 6px; padding-left:14px; } .event { position:relative; padding:0 0 15px; } .event:last-child { padding-bottom:0; } .event:before { content:""; position:absolute; width:8px; height:8px; border-radius:50%; background:#76a48f; left:-19px; top:5px; } .event b { font-size:13px; } .event p { color:#5f646b; font-size:12px; margin-top:3px; } .date { color:#9a9ea5!important; font-size:11px!important; }
+    .memory { padding:11px 12px; border-radius:12px; background:#f7f8f8; margin-bottom:8px; color:#4f555c; font-size:13px; } .tag { color:var(--accent); font-size:11px; margin-top:5px; }
+    details { border-top:1px solid var(--line); } summary { list-style:none; cursor:pointer; display:flex; justify-content:space-between; align-items:center; padding:15px 0; font-weight:600; } summary::-webkit-details-marker { display:none; } summary:after { content:'⌄'; color:#8f9499; font-size:18px; } details[open] summary:after { transform:rotate(180deg); } .settings { padding-bottom:5px; }
+    .note { width:min(100% - 32px,430px); margin:18px auto 0; color:#697078; font-size:12px; line-height:1.65; } .note b { color:#3b4147; }
+    @media (min-width:520px) { .phone { min-height:900px; } }
+  </style>
+</head>
+<body>
+  <main class="phone">
+    <header class="top"><span class="back">‹</span><span>联系人名片</span><span class="more">···</span></header>
+
+    <!-- 1. 先确认“是谁、和我什么关系”，并提供最高频动作。 -->
+    <section class="hero">
+      <div class="hero-top"><div class="avatar">晚</div><div><h1>林晚</h1><p class="sub">备注：晚晚 · 真名：林晚</p><span class="pill">● 青梅竹马 · 默契升温</span></div></div>
+      <div class="quick"><button>💬<b>发消息</b></button><button>◉<b>TA 的朋友圈</b></button><button>•••<b>更多操作</b></button></div>
+    </section>
+
+    <!-- 2. “现在”独立成一屏即可扫读的状态卡，避免混在冗长资料中。 -->
+    <section class="section"><div class="section-title"><h2>此刻的 TA</h2><span class="hint">刚刚更新</span></div><div class="now"><div class="tile"><div class="label">状态</div><div class="value online">● 空闲，可联系</div></div><div class="tile"><div class="label">心情</div><div class="value">平静 · 有点想你</div></div><div class="tile"><div class="label">当前位置</div><div class="value">家 · 书房</div></div><div class="tile"><div class="label">亲密度</div><div class="value">72 · 熟稔</div></div></div></section>
+
+    <!-- 3. 能编辑的身份与关系资料紧接状态，便于用户理解和调整。 -->
+    <section class="section"><div class="section-title"><h2>关系与资料</h2><button class="link">编辑</button></div><div class="rows"><div class="row"><span>关系定位</span><span>青梅竹马 <i class="chev">›</i></span></div><div class="row"><span>性格特质</span><span>温柔克制 · 慢热 <i class="chev">›</i></span></div><div class="row"><span>职业</span><span>独立插画师</span></div><div class="row"><span>生日</span><span>9 月 17 日</span></div></div></section>
+
+    <!-- 4. 再呈现“为什么会变成现在这样”：共同经历优先于系统日志。 -->
+    <section class="section"><div class="section-title"><h2>你们的故事</h2><button class="link">查看全部</button></div><div class="timeline"><div class="event"><b>雨夜的旧唱片店</b><p>你们躲雨时一起挑中了同一张专辑，后来成了每年都会重听的歌。</p><p class="date">2023 年秋 · 共同经历</p></div><div class="event"><b>答应一起去海边</b><p>她把这次约定记在了日程里，等待和你确定时间。</p><p class="date">下周六 · 约定</p></div></div></section>
+
+    <!-- 5. 长内容留给主动查看，仍在一页中但不打断主线。 -->
+    <section class="section"><div class="section-title"><h2>记得关于你的事</h2><button class="link">管理记忆</button></div><div class="memory">你不喜欢太甜的饮料，工作忙时会忘记吃晚饭。<div class="tag">#偏好习惯 #日常</div></div><div class="memory">她知道你最近在准备一次重要的面试。<div class="tag">#近况 #支持</div></div></section>
+
+    <section class="section"><div class="section-title"><h2>TA 的社交与关系</h2><button class="link">查看关系网</button></div><div class="rows"><div class="row"><span>最近社交动态</span><span>2 条 <i class="chev">›</i></span></div><div class="row"><span>与其他 AI 的关系</span><span>3 人 <i class="chev">›</i></span></div></div></section>
+
+    <!-- 6. 低频的功能设置收纳到底部，避免在“认识这个人”之前出现。 -->
+    <section class="section"><details><summary>语音与互动设置</summary><div class="settings rows"><div class="row"><span>专属音色</span><span>温柔女声 <i class="chev">›</i></span></div><div class="row"><span>生活回顾</span><span>开启 <i class="chev">›</i></span></div></div></details><details><summary>日程与更多资料</summary><div class="settings rows"><div class="row"><span>日程安排</span><span><i class="chev">›</i></span></div><div class="row"><span>完整设定</span><span><i class="chev">›</i></span></div></div></details></section>
+  </main>
+  <p class="note"><b>建议的卡片顺序：</b>身份与快捷操作 → 此刻状态 → 关系与资料 → 共同故事 → 记忆 → 社交关系 → 低频设置。这样首屏优先回答“TA 是谁、现在怎样、我可以做什么”。</p>
+</body>
+</html>
