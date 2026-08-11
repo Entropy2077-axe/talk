@@ -612,11 +612,11 @@ export function SettingsPage() {
       </section>
 
       <section className="mt-3 bg-white">
-        <button type="button" onClick={() => navigate('/settings/global-prompts')} className="flex w-full items-center gap-3 px-4 py-4 text-left">
+        <button type="button" onClick={() => navigate('/presets')} className="flex w-full items-center gap-3 px-4 py-4 text-left">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-[var(--ui-special-ink)]"><FileSliders size={20} /></div>
           <div className="min-w-0 flex-1">
-            <p className="text-sm text-gray-900">全局提示词模块</p>
-            <p className="mt-0.5 text-xs text-gray-400">管理固定提示词存档、新联系人默认值和联系人覆盖</p>
+            <p className="text-sm text-gray-900">预设</p>
+            <p className="mt-0.5 text-xs text-gray-400">生成参数、全局提示词存档与联系人覆盖</p>
           </div>
           <span className="text-lg text-gray-300">›</span>
         </button>

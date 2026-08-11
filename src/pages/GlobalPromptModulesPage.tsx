@@ -8,7 +8,7 @@ import { PROMPT_MODULE_DEFINITIONS, unknownPromptPlaceholders } from '../lib/pro
 import { clonePromptModules, normalizePromptPresets, SYSTEM_DEFAULT_PROMPT_PRESET_ID } from '../lib/promptPresets'
 import { displayName } from '../lib/contact'
 import { useSettingsStore } from '../store/useSettingsStore'
-import type { PromptModuleId, PromptModuleSettings, PromptPreset } from '../types'
+import type { PromptModuleId, PromptModuleSettings, PromptPreset, SamplingParameters } from '../types'
 
 export function GlobalPromptModulesPage() {
   const settings = useSettingsStore()
@@ -17,6 +17,7 @@ export function GlobalPromptModulesPage() {
   const [selectedId, setSelectedId] = useState(settings.activePromptPresetId || SYSTEM_DEFAULT_PROMPT_PRESET_ID)
   const selected = presets.find((preset) => preset.id === selectedId) ?? presets[0]
   const [draft, setDraft] = useState<PromptModuleSettings>(() => clonePromptModules(selected.modules))
+  const [samplingDraft, setSamplingDraft] = useState<SamplingParameters>(() => ({ ...selected.sampling }))
   const [editing, setEditing] = useState<{ moduleId: PromptModuleId; templateId: string } | null>(null)
   const [validationError, setValidationError] = useState('')
   const [applyingPreset, setApplyingPreset] = useState<PromptPreset | null>(null)
@@ -26,6 +27,7 @@ export function GlobalPromptModulesPage() {
   function loadPreset(preset: PromptPreset) {
     setSelectedId(preset.id)
     setDraft(clonePromptModules(preset.modules))
+    setSamplingDraft({ ...preset.sampling })
     setEditing(null)
     setValidationError('')
   }
@@ -46,7 +48,7 @@ export function GlobalPromptModulesPage() {
     const name = window.prompt('给这份提示词存档命名')?.trim()
     if (!name) return
     const now = Date.now()
-    const preset: PromptPreset = { id: uuid(), name, modules: clonePromptModules(draft), createdAt: now, updatedAt: now }
+    const preset: PromptPreset = { id: uuid(), name, modules: clonePromptModules(draft), sampling: { ...samplingDraft }, createdAt: now, updatedAt: now }
     settings.setSettings({ promptPresets: [...presets, preset] })
     setSelectedId(preset.id)
     setValidationError('')
@@ -93,11 +95,20 @@ export function GlobalPromptModulesPage() {
   }
 
   return <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
-    <TopBar title="全局提示词模块" showBack />
+    <TopBar title="预设" showBack />
     <div className="flex-1 overflow-y-auto pb-8">
       <section className="mt-3 bg-white px-4 py-4">
-        <button type="button" onClick={saveArchive} className="w-full rounded-xl bg-gray-900 py-3 text-sm font-medium text-white">保存当前提示词</button>
-        <p className="mt-2 text-[11px] leading-relaxed text-gray-400">这里保存固定提示词，不开放聊天 JSON 协议。修改存档不会自动改变旧联系人；新联系人会复制“当前默认”的独立快照。</p>
+        <h2 className="text-sm font-medium text-gray-900">生成参数</h2>
+        <p className="mt-1 text-[11px] leading-relaxed text-gray-400">这些值会覆盖应用内各功能原有的温度默认值；留空则保持原有行为。Top P / Top K 仅在填写后发送给接口。</p>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <label className="text-xs text-gray-500">Temperature<input aria-label="Temperature" type="number" min="0" max="2" step="0.01" value={samplingDraft.temperature ?? ''} onChange={(event) => setSamplingDraft((current) => ({ ...current, ...(event.target.value === '' ? { temperature: undefined } : { temperature: Number(event.target.value) }) }))} placeholder="默认" className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-2 text-sm text-gray-800" /></label>
+          <label className="text-xs text-gray-500">Top P<input aria-label="Top P" type="number" min="0" max="1" step="0.01" value={samplingDraft.topP ?? ''} onChange={(event) => setSamplingDraft((current) => ({ ...current, ...(event.target.value === '' ? { topP: undefined } : { topP: Number(event.target.value) }) }))} placeholder="默认" className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-2 text-sm text-gray-800" /></label>
+          <label className="text-xs text-gray-500">Top K<input aria-label="Top K" type="number" min="1" step="1" value={samplingDraft.topK ?? ''} onChange={(event) => setSamplingDraft((current) => ({ ...current, ...(event.target.value === '' ? { topK: undefined } : { topK: Number(event.target.value) }) }))} placeholder="默认" className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-2 text-sm text-gray-800" /></label>
+        </div>
+      </section>
+      <section className="mt-3 bg-white px-4 py-4">
+        <button type="button" onClick={saveArchive} className="w-full rounded-xl bg-gray-900 py-3 text-sm font-medium text-white">保存为新预设</button>
+        <p className="mt-2 text-[11px] leading-relaxed text-gray-400">预设会同时保存生成参数和全局提示词模块。启用后，生成参数立即生效；新联系人会复制当前预设的提示词模块快照。</p>
         {validationError && <p className="mt-2 text-xs text-red-500">{validationError}</p>}
       </section>
 
@@ -108,7 +119,7 @@ export function GlobalPromptModulesPage() {
             <div className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900">{preset.name}</span>{preset.systemDefault && <span className="text-[10px] text-gray-400">系统默认</span>}{settings.activePromptPresetId === preset.id && <span className="rounded-full bg-gray-900 px-2 py-0.5 text-[10px] text-white">当前默认</span>}</div>
           </button>
           <div className="mt-2 flex flex-wrap gap-2 text-xs">
-            <button type="button" onClick={() => makeDefault(preset)} className="rounded-lg bg-gray-100 px-2.5 py-1.5 text-gray-600">设为新联系人默认</button>
+            <button type="button" onClick={() => makeDefault(preset)} className="rounded-lg bg-gray-100 px-2.5 py-1.5 text-gray-600">启用此预设</button>
             <button type="button" onClick={() => { setApplyingPreset(preset); setSelectedContactIds([]) }} className="rounded-lg bg-gray-100 px-2.5 py-1.5 text-gray-600">应用到联系人</button>
             {!preset.systemDefault && <button type="button" onClick={() => deletePreset(preset)} className="ml-auto rounded-lg px-2.5 py-1.5 text-red-500">删除</button>}
           </div>
@@ -116,7 +127,7 @@ export function GlobalPromptModulesPage() {
       </section>
 
       <section className="mt-3 bg-white px-4 py-4">
-        <div className="mb-3"><h2 className="text-sm font-medium text-gray-900">正在编辑：{selected.name}</h2><p className="mt-1 text-[11px] text-gray-400">编辑后点击顶部“保存当前提示词”创建新存档；系统默认存档本身不会被覆盖。</p></div>
+        <div className="mb-3"><h2 className="text-sm font-medium text-gray-900">全局提示词设置 · 正在编辑：{selected.name}</h2><p className="mt-1 text-[11px] text-gray-400">编辑后点击顶部“保存为新预设”创建新存档；系统默认预设本身不会被覆盖。</p></div>
         <div className="space-y-3">{visibleDefinitions.map((definition) => {
           const config = draft[definition.id]
           if (!config) return null

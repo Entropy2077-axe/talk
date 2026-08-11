@@ -984,10 +984,19 @@ export interface PromptModuleConfig {
 
 export type PromptModuleSettings = Record<PromptModuleId, PromptModuleConfig>
 
+/** Optional decoding controls stored alongside a reusable AI preset. */
+export interface SamplingParameters {
+  temperature?: number
+  topP?: number
+  topK?: number
+}
+
 export interface PromptPreset {
   id: string
   name: string
   modules: PromptModuleSettings
+  /** Empty values preserve the feature-specific defaults used by the app. */
+  sampling?: SamplingParameters
   systemDefault?: boolean
   createdAt: number
   updatedAt: number

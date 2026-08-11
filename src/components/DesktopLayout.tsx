@@ -27,7 +27,7 @@ function sectionForPath(path: string): DesktopSection {
   if (path === '/' || path.startsWith('/chat/')) return 'messages'
   if (path.startsWith('/contact') || path.startsWith('/group')) return 'contacts'
   if (path === '/sky-eye') return 'sky-eye'
-  if (path === '/me' || path === '/appearance' || path === '/experience-mode' || path.startsWith('/settings') || path.startsWith('/profile') || path.startsWith('/stickers') || path === '/modules' || path.startsWith('/save-load')) return 'settings'
+  if (path === '/me' || path === '/presets' || path === '/appearance' || path === '/experience-mode' || path.startsWith('/settings') || path.startsWith('/profile') || path.startsWith('/stickers') || path === '/modules' || path.startsWith('/save-load')) return 'settings'
   return 'discover'
 }
 
@@ -265,6 +265,7 @@ function SettingsList({ query }: { query: string }) {
     { to: '/experience-mode', label: '体验模式', note: settings.experienceMode === 'immersive' ? '沉浸模式' : '自由模式', icon: '◈' },
     { to: '/appearance', label: '软件风格切换', note: `${uiThemeName(settings.uiTheme)} · ${settings.themeMode === 'dark' ? '深色' : '浅色'}`, icon: '◐' },
     { to: '/settings', label: '通用设置', note: '模型、数据与隐私', icon: '⚙' },
+    { to: '/presets', label: '预设', note: '生成参数与全局提示词', icon: '◌' },
     { to: '/settings/other-interfaces', label: '其他接口', note: '图像、语音、Pexels、Tavily 与动漫图库', icon: '◌' },
     { to: '/modules', label: '功能模块', note: '启用或关闭扩展功能', icon: '▦' },
     { to: '/stickers', label: '表情包', note: '管理本地和远程表情', icon: '☺' },

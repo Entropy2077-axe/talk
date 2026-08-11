@@ -27,6 +27,7 @@ import { db } from '../db/db'
 import type { AdminAiTraceStage, AiUsagePurpose } from '../types'
 import { friendlyConnectionError, httpFailureMessage, parseJsonText, requireApiKey, requireHttpUrl } from './connectionError'
 import { useSettingsStore } from '../store/useSettingsStore'
+import { activePromptPreset } from './promptPresets'
 import { appFetch } from './appFetch'
 import {
   AI_PROVIDERS,
@@ -309,8 +310,11 @@ function requestBody(opts: ChatCompletionOptions, messages: ChatMessage[], provi
     : adapter.tokenParameter
   const body: Record<string, unknown> = { model: opts.model, messages }
   if (opts.jsonMode && !overrides.disableJson && adapter.responseFormat !== 'ignored') body.response_format = { type: 'json_object' }
-  const temperature = clampProviderTemperature(provider, opts.temperature ?? 1.1)
+  const sampling = activePromptPreset(useSettingsStore.getState()).sampling
+  const temperature = clampProviderTemperature(provider, sampling?.temperature ?? opts.temperature ?? 1.1)
   if (temperature !== undefined) body.temperature = temperature
+  if (sampling?.topP !== undefined) body.top_p = sampling.topP
+  if (sampling?.topK !== undefined) body.top_k = sampling.topK
   if (opts.maxTokens) body[tokenParameter] = overrides.emptyRetry ? Math.ceil(opts.maxTokens * 1.35) : opts.maxTokens
   if (opts.tools?.length && !overrides.disableTools) {
     body.tools = opts.tools

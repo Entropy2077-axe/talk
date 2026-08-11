@@ -244,6 +244,7 @@ function App() {
         <Route path="/album" element={<AlbumPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/other-interfaces" element={<OtherInterfacesPage />} />
+        <Route path="/presets" element={<GlobalPromptModulesPage />} />
         <Route path="/settings/global-prompts" element={<GlobalPromptModulesPage />} />
         <Route path="/appearance" element={<AppearancePage />} />
         <Route path="/experience-mode" element={<ExperienceModePage />} />
