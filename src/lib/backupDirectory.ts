@@ -1,12 +1,10 @@
 import { registerPlugin } from '@capacitor/core'
 
 interface BackupDirectoryPlugin {
-  /**
-   * Prompts for a folder only when one has not been selected before. The
-   * native side retains Android's SAF grant, so later backups go there
-   * without another prompt.
-   */
-  save(options: { filename: string; contents: string }): Promise<{ uri: string }>
+  /** Writes the large backup payload before the system document picker opens. */
+  stage(options: { contents: string }): Promise<{ token: string }>
+  /** Opens Android's standard "Save as" picker for a staged backup. */
+  saveStaged(options: { token: string; filename: string }): Promise<{ uri: string }>
 }
 
 export const BackupDirectory = registerPlugin<BackupDirectoryPlugin>('BackupDirectory')

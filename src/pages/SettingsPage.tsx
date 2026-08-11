@@ -74,28 +74,35 @@ export function SettingsPage() {
 
   async function handleExportBackup() {
     setBackupStatus('')
-    const settings = { ...useSettingsStore.getState() } as Partial<AppSettings> & { setSettings?: unknown }
-    delete settings.setSettings
-    const backup = await createBackup(settings)
-    const filename = backupFileName()
-    const contents = JSON.stringify(backup, null, 2)
+    try {
+      setBackupStatus('正在生成备份…')
+      const settings = { ...useSettingsStore.getState() } as Partial<AppSettings> & { setSettings?: unknown }
+      delete settings.setSettings
+      const backup = await createBackup(settings)
+      const filename = backupFileName()
+      const contents = JSON.stringify(backup, null, 2)
 
-    if (Capacitor.getPlatform() === 'android') {
-      await BackupDirectory.save({ filename, contents })
-      setBackupStatus(`备份已保存：${filename}。首次导出时可在系统文件选择器中指定文件夹；API Key、令牌和密码不会写入备份文件。`)
-      return
+      if (Capacitor.getPlatform() === 'android') {
+        const { token } = await BackupDirectory.stage({ contents })
+        setBackupStatus('请选择备份文件的保存位置…')
+        await BackupDirectory.saveStaged({ token, filename })
+        setBackupStatus(`备份已保存：${filename}。API Key、令牌和密码不会写入备份文件。`)
+        return
+      }
+
+      const blob = new Blob([contents], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      setBackupStatus('备份已导出。API Key、令牌和密码不会写入备份文件。')
+    } catch (error) {
+      setBackupStatus(error instanceof Error ? `备份失败：${error.message}` : '备份失败，请重试。')
     }
-
-    const blob = new Blob([contents], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = filename
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(url)
-    setBackupStatus('备份已导出。API Key、令牌和密码不会写入备份文件。')
   }
 
   async function handleImportBackup(file: File) {
