@@ -28,7 +28,7 @@ export function SpeechProviderSettingsPage() {
   }, [])
 
   if (!provider) {
-    return <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]"><TopBar title="语音服务" showBack /><div className="p-6 text-center text-sm text-gray-500">不支持这个语音服务</div></div>
+    return <div className="ui-page"><TopBar title="语音服务" showBack /><div className="ui-page-scroll"><div className="ui-empty-state"><p>不支持这个语音服务</p></div></div></div>
   }
 
   const info = SPEECH_PROVIDER_INFO.find((item) => item.id === provider)!
@@ -79,16 +79,17 @@ export function SpeechProviderSettingsPage() {
   const mimo = providers.mimo
 
   return (
-    <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="ui-page">
       <TopBar title={info.name} showBack />
-      <div className="flex-1 overflow-y-auto pb-6">
-        <section className="mt-3 bg-white px-4 py-4">
+      <div className="ui-page-scroll">
+        <header className="ui-page-intro"><p className="ui-page-kicker">语音服务</p><h1 className="ui-page-title">{info.name}</h1><p className="ui-page-summary">先确认当前服务与启用状态，再配置鉴权、声音和连接参数。</p></header>
+        <section className="ui-section-card px-4 py-4">
           <div className="flex items-center justify-between gap-3"><div><p className="text-sm text-gray-900">服务状态</p><p className={`mt-1 text-xs ${active && configured ? 'text-green-600' : 'text-gray-400'}`}>{active ? configured ? '使用中' : '使用中，但配置不完整' : configured ? '配置已保存，尚未启用' : '尚未完成配置'}</p></div><button type="button" onClick={activate} disabled={active && configured} className="rounded-lg bg-gray-900 px-4 py-2 text-xs text-white disabled:opacity-40">{active ? '已启用' : '启用'}</button></div>
         </section>
 
         {provider === 'doubao' ? (
           <>
-            <section className="mt-3 bg-white px-4 py-4">
+            <section className="ui-section-card ui-section-spaced px-4 py-4">
               <h2 className="mb-3 text-xs font-medium text-gray-400">鉴权与接口</h2>
               <label className="mb-1 block text-xs text-gray-500">控制台类型</label>
               <select value={doubao.authMode} onChange={(e) => updateProvider('doubao', { authMode: e.target.value as 'apiKey' | 'accessKey' })} className={`${inputClass} mb-3`}><option value="apiKey">新版控制台 · API Key</option><option value="accessKey">旧版控制台 · App ID + Access Key</option></select>
@@ -96,7 +97,7 @@ export function SpeechProviderSettingsPage() {
               <label className="mb-1 block text-xs text-gray-500">接口地址</label><input value={doubao.baseUrl} onChange={(e) => updateProvider('doubao', { baseUrl: e.target.value })} className={`${inputClass} mb-3`} />
               <label className="mb-1 block text-xs text-gray-500">Resource ID</label><input value={doubao.resourceId} onChange={(e) => updateProvider('doubao', { resourceId: e.target.value })} placeholder="seed-tts-2.0" className={inputClass} />
             </section>
-            <section className="mt-3 bg-white px-4 py-4">
+            <section className="ui-section-card ui-section-spaced px-4 py-4">
               <h2 className="mb-1 text-xs font-medium text-gray-400">合成参数与连接测试</h2>
               <p className="mb-3 text-[11px] leading-relaxed text-gray-400">这里的音色只用于连接测试，也会作为可选音色加入联系人名片；实际聊天必须为每位联系人单独选择。</p>
               <label className="mb-1 block text-xs text-gray-500">测试音色 ID / Speaker</label><input value={doubao.speaker} onChange={(e) => updateProvider('doubao', { speaker: e.target.value })} list="doubao-speakers" className={`${inputClass} mb-3`} /><datalist id="doubao-speakers"><option value="zh_female_vv_uranus_bigtts">Vivi 2.0</option><option value="zh_female_xiaohe_uranus_bigtts">小何</option><option value="zh_male_dayi_saturn_bigtts">大壹</option></datalist>
@@ -109,13 +110,13 @@ export function SpeechProviderSettingsPage() {
           </>
         ) : (
           <>
-            <section className="mt-3 bg-white px-4 py-4">
+            <section className="ui-section-card ui-section-spaced px-4 py-4">
               <h2 className="mb-3 text-xs font-medium text-gray-400">鉴权与接口</h2>
               <label className="mb-1 block text-xs text-gray-500">API Key</label><div className="relative mb-3"><input value={mimo.apiKey} onChange={(e) => updateProvider('mimo', { apiKey: e.target.value })} type={visible ? 'text' : 'password'} placeholder="MiMo API Key" className={`${inputClass} pr-16`} /><button type="button" onClick={() => setVisible((value) => !value)} className="absolute inset-y-0 right-0 px-3 text-xs text-gray-500">{visible ? '隐藏' : '显示'}</button></div>
               <label className="mb-1 block text-xs text-gray-500">Base URL</label><input value={mimo.baseUrl} onChange={(e) => updateProvider('mimo', { baseUrl: e.target.value })} className={`${inputClass} mb-3`} />
               <label className="mb-1 block text-xs text-gray-500">模型</label><input value={mimo.model} readOnly className={`${inputClass} bg-gray-50 text-gray-500`} />
             </section>
-            <section className="mt-3 bg-white px-4 py-4">
+            <section className="ui-section-card ui-section-spaced px-4 py-4">
               <h2 className="mb-1 text-xs font-medium text-gray-400">合成参数与连接测试</h2>
               <p className="mb-3 text-[11px] leading-relaxed text-gray-400">测试音色不会统一套给联系人。新联系人会由人物生成 AI 自动匹配，已有联系人可在各自名片里修改。</p>
               <label className="mb-1 block text-xs text-gray-500">测试音色</label><select value={mimo.voice} onChange={(e) => updateProvider('mimo', { voice: e.target.value })} className={`${inputClass} mb-3`}>{MIMO_VOICES.map((voice) => <option key={voice.id} value={voice.id}>{voice.name}</option>)}</select>
@@ -126,7 +127,7 @@ export function SpeechProviderSettingsPage() {
           </>
         )}
 
-        <section className="mt-3 bg-white px-4 py-4">
+        <section className="ui-section-card ui-section-spaced px-4 py-4">
           <button type="button" onClick={() => void testConnection()} disabled={testing} className="w-full rounded-lg bg-gray-900 py-2.5 text-sm text-white disabled:opacity-50">{testing ? '正在生成试听…' : '测试连接并试听'}</button>
           <p className="mt-2 text-[11px] text-gray-400">测试文本：“你好，语音连接成功。”真实生成成功后会自动播放。</p>
           {status && <p className={`mt-2 text-xs ${status.ok ? 'text-green-600' : 'text-red-500'}`}>{status.text}</p>}

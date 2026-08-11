@@ -15,15 +15,14 @@ export function StickerProviderListPage() {
   const ready = isStickerProviderReady({ stickerProvider, stickerProviders })
 
   return (
-    <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="ui-page">
       <TopBar title="远程表情包" showBack />
-      <div className="flex-1 overflow-y-auto pb-6">
-        <section className="mt-3 bg-white px-4 py-4">
+      <div className="ui-page-scroll">
+        <section className="ui-page-intro"><p className="ui-page-kicker">当前远程服务</p><h1 className="ui-page-title">{stickerProviderName(stickerProvider)}</h1>
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-900">当前服务</p>
               <p className={`mt-1 text-xs ${ready ? 'text-green-600' : 'text-gray-400'}`}>
-                {stickerProviderName(stickerProvider)} · {ready ? '已就绪' : stickerProvider === 'none' ? '未启用' : '还需完成配置'}
+                {ready ? '已就绪' : stickerProvider === 'none' ? '未启用' : '还需完成配置'}
               </p>
             </div>
             {stickerProvider !== 'none' && (
@@ -41,8 +40,7 @@ export function StickerProviderListPage() {
           </p>
         </section>
 
-        <section className="mt-3 bg-white">
-          <h2 className="px-4 pt-4 text-xs font-medium text-gray-400">选择服务</h2>
+        <h2 className="ui-section-label">选择服务</h2><section className="ui-list-card">
           <div className="mt-1">
             {STICKER_PROVIDER_INFO.map((item) => {
               const selected = stickerProvider === item.id
@@ -51,7 +49,7 @@ export function StickerProviderListPage() {
                   key={item.id}
                   type="button"
                   onClick={() => navigate(`/stickers/remote/${item.id}`)}
-                  className="flex w-full items-center gap-3 border-b border-gray-100 px-4 py-3 text-left last:border-0"
+                  className="ui-list-row"
                 >
                   <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-semibold ${selected ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>
                     {item.name.slice(0, 2)}
@@ -78,4 +76,3 @@ export function StickerProviderListPage() {
     </div>
   )
 }
-

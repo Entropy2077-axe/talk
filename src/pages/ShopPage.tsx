@@ -85,15 +85,18 @@ export function ShopPage() {
   }
 
   return (
-    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[var(--ui-bg)]">
       <TopBar
         title="商城"
         showBack
-        right={<span className="pr-1 text-sm text-gray-500">{formatCurrency(wallet?.balance ?? 0, settings)}</span>}
       />
       <div className="flex-1 overflow-y-auto">
 
-      <div className="flex gap-2 px-4 pt-3">
+      <section className="border-b border-[var(--ui-border-soft)] bg-[var(--ui-surface)] px-4 pb-4 pt-5">
+        <p className="text-xs font-medium text-[var(--ui-text-3)]">我的余额</p>
+        <div className="mt-1 flex items-end justify-between gap-3"><h1 className="ui-font-display text-xl font-semibold text-[var(--ui-text)]">{formatCurrency(wallet?.balance ?? 0, settings)}</h1><span className="text-xs text-[var(--ui-text-3)]">购买后进入仓库</span></div>
+        <p className="mt-4 text-sm font-medium text-[var(--ui-text)]">想买点什么？</p>
+      <div className="mt-2 flex gap-2">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -104,33 +107,35 @@ export function ShopPage() {
             }
           }}
           placeholder="搜索想买的东西"
-          className="flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
+          className="min-w-0 flex-1 rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-3 py-2.5 text-sm"
         />
         <button
           onClick={() => generate(query.trim() || null)}
           disabled={loading}
-          className="rounded-lg bg-gray-900 px-4 py-2 text-sm text-white disabled:opacity-40"
+          className="rounded-[var(--ui-radius-control)] bg-[var(--ui-action)] px-4 py-2 text-sm text-[var(--ui-on-action)] disabled:opacity-40"
         >
           {loading ? '生成中…' : '搜索'}
         </button>
       </div>
 
-      <div className="mx-4 mt-3 grid grid-cols-2 gap-2">
-        <button onClick={() => generate(null)} disabled={loading} className="rounded-lg bg-white py-2.5 text-sm text-gray-600 shadow-sm disabled:opacity-40">
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button onClick={() => generate(null)} disabled={loading} className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] py-2.5 text-sm text-[var(--ui-text-2)] disabled:opacity-40">
           {loading && !query.trim() ? '生成中…' : '随便逛逛'}
         </button>
-        <button onClick={() => setRepurchaseOpen(true)} className="rounded-lg bg-white py-2.5 text-sm text-gray-600 shadow-sm">
+        <button onClick={() => setRepurchaseOpen(true)} className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] py-2.5 text-sm text-[var(--ui-text-2)]">
           复购
         </button>
       </div>
+      </section>
 
       {error && <p className="mx-4 mt-3 text-xs text-red-500">{error}</p>}
 
-      <div className="mt-3 flex-1 px-4 pb-4">
+      <div className="mt-4 flex-1 px-4 pb-4">
+        <div className="mb-3 flex items-center justify-between"><h2 className="ui-font-display text-sm font-semibold text-[var(--ui-text)]">{products.length ? '为你找到的商品' : '商品推荐'}</h2>{products.length > 0 && <span className="text-xs text-[var(--ui-text-3)]">{products.length} 件</span>}</div>
         {products.length > 0 && (
           <div className="grid grid-cols-2 gap-3">
             {products.map((p, i) => (
-              <div key={i} className="rounded-xl bg-white p-3">
+              <div key={i} className="rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] p-3 shadow-[var(--ui-shadow)]">
                 <div className="mb-2 flex h-16 items-center justify-center rounded-lg bg-gray-50 text-3xl">
                   {p.icon}
                 </div>
@@ -149,6 +154,7 @@ export function ShopPage() {
             ))}
           </div>
         )}
+        {products.length === 0 && !loading && <div className="rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-5 py-10 text-center shadow-[var(--ui-shadow)]"><p className="text-sm text-[var(--ui-text-2)]">输入想买的东西，或者先随便逛逛</p><p className="mt-1 text-xs text-[var(--ui-text-3)]">商城会根据当前世界生成一批商品。</p></div>}
       </div>
       </div>
 

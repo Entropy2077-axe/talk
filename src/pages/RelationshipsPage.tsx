@@ -26,16 +26,14 @@ export function RelationshipsPage() {
   const contactById = useMemo(() => new Map(contacts.map((c) => [c.id, c])), [contacts])
 
   return (
-    <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
-      <TopBar title="关系网" showBack />
-      <div className="flex-1 overflow-y-auto">
+    <div className="ui-page">
+      <TopBar title="好感度" showBack />
+      <div className="ui-page-scroll">
 
-      <p className="px-4 pt-3 pb-1 text-xs text-gray-400">
-        好感度从聊天互动中自动评估 · -100(敌视) 到 +100(亲密)
-      </p>
+      <section className="ui-page-intro"><p className="ui-page-kicker">与你的好感度</p><h1 className="ui-page-title">{contacts.length} 位联系人的好感度</h1><p className="ui-page-summary">从高到低查看每位联系人对你的好感阶段；展开后可继续查看基础关系与人物连接。</p></section>
 
       {contacts.length === 0 ? (
-        <p className="px-4 py-10 text-center text-sm text-gray-400">还没有联系人</p>
+        <div className="ui-empty-state">还没有联系人，建立人物后好感度会在这里逐渐变化。</div>
       ) : (
         <div className="mt-1 flex-1 space-y-2 px-4 pb-4">
           {contacts.map((c) => (
@@ -80,7 +78,7 @@ function RelationshipCard({
   const barPercent = Math.round(((warmth + 100) / 200) * 100)
 
   return (
-    <div className="rounded-xl bg-white p-3">
+    <div className="rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] p-3 shadow-[var(--ui-shadow)]">
       <button onClick={onToggle} className="flex w-full items-center gap-3 text-left">
         <Avatar avatar={c.avatar} color={c.avatarColor} size={40} />
         <div className="min-w-0 flex-1">

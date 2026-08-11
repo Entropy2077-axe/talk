@@ -82,9 +82,9 @@ export function AlbumLibraryView() {
 
   return (
     <>
-        <p className="mb-3 px-1 text-xs text-gray-400">已收集聊天、朋友圈和联系人中使用过的动漫图、实拍图与生图。</p>
+        <div className="mb-4"><h2 className="ui-section-title">图片相册</h2><p className="ui-section-summary">自动收集聊天、朋友圈和联系人中使用过的动漫图、实拍图与生图。</p></div>
         {images.length === 0 ? (
-          <div className="flex min-h-64 items-center justify-center text-sm text-gray-400">还没有可收集的图片</div>
+          <div className="ui-empty-state ui-section-flush">还没有可收集的图片；使用过的图片会自动出现在这里。</div>
         ) : (
           <div className="grid grid-cols-3 gap-1.5">
             {images.map((image) => <button key={image.url} type="button" onClick={() => setSelected(image)} className="aspect-square overflow-hidden rounded-lg bg-gray-200"><img src={image.url} alt={image.caption ?? image.source} className="h-full w-full object-cover" loading="lazy" /></button>)}

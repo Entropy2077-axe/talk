@@ -215,10 +215,11 @@ export function AiTestCardsPage() {
   const allRated = selectedSuite?.cards.every((card) => card.status === 'completed' && card.rating) ?? false
 
   return (
-    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="ui-page relative">
       <TopBar title="AI 自动测试" showBack />
-      <div className="flex-1 overflow-y-auto px-4 pb-8">
-        <section className="mt-3 rounded-xl bg-white p-4">
+      <div className="ui-page-scroll">
+        <header className="ui-page-intro"><p className="ui-page-kicker">管理员工具</p><h1 className="ui-page-title">AI 自动测试</h1><p className="ui-page-summary">先创建一套明确的测试任务，再查看运行进度、结果和测试副本。</p></header>
+        <section className="ui-section-card px-4 py-4">
           <h2 className="text-sm font-medium text-gray-900">创建测试</h2>
           <p className="mt-1 text-xs leading-relaxed text-gray-500">AI 生成用例并保存完整诊断上下文，最终语义是否正确由管理员判断。</p>
 
@@ -253,7 +254,7 @@ export function AiTestCardsPage() {
 
         {notice && <p className="mt-3 rounded-lg bg-white px-3 py-2 text-xs leading-relaxed text-gray-500">{notice}</p>}
 
-        <section className="mt-3 rounded-xl bg-white p-4">
+        <section className="ui-section-card ui-section-spaced px-4 py-4">
           <div className="flex items-center justify-between"><h2 className="text-sm font-medium text-gray-900">测试记录</h2><button type="button" onClick={() => void handleCleanup()} className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">清理所有测试副本</button></div>
           {suites.length > 0 ? <select value={selectedSuite?.id ?? ''} onChange={(event) => setSelectedSuiteId(event.target.value)} className="mt-3 w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm">{suites.map((suite) => <option key={suite.id} value={suite.id}>{suite.title} · {STATUS_LABEL[suite.status]}</option>)}</select> : <p className="mt-3 text-xs text-gray-400">还没有保存的测试记录。</p>}
         </section>

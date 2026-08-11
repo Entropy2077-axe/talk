@@ -110,25 +110,29 @@ export function MePage() {
   }
 
   return (
-    <div className="relative flex min-h-full flex-col bg-[#f4f4f6]">
+    <div className="relative flex min-h-full flex-col bg-[var(--ui-bg)] pb-5">
       <TopBar title="我" />
 
-      <button
-        onClick={() => navigate('/profile/edit')}
-        className="mt-3 flex items-center justify-between bg-white px-4 py-4 active:bg-gray-50"
-      >
-        <Avatar avatar={userAvatar} size={60} />
-        <div className="flex flex-col items-end gap-1">
-          <span className="text-[16px] font-medium text-gray-900">{userNickname}</span>
-          <span className="text-xs text-gray-400">{formatCurrency(wallet?.balance ?? 0, settings)}</span>
+      <section className="border-b border-[var(--ui-border-soft)] bg-[var(--ui-surface)] px-4 pb-5 pt-4">
+        <button type="button" onClick={() => navigate('/profile/edit')} className="flex w-full items-center gap-4 text-left active:opacity-70">
+          <Avatar avatar={userAvatar} size={68} />
+          <span className="min-w-0 flex-1">
+            <span className="ui-font-display block truncate text-xl font-semibold text-[var(--ui-text)]">{userNickname}</span>
+            <span className="mt-1 block text-xs text-[var(--ui-text-3)]">{settings.userOccupation || '还没有设置职业'} · 点击编辑个人资料</span>
+          </span>
+          <span className="text-lg text-[var(--ui-text-3)]">›</span>
+        </button>
+        <div className="mt-4 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface-2)] px-4 py-3">
+          <p className="text-[11px] text-[var(--ui-text-3)]">我的余额</p>
+          <p className="ui-font-display mt-1 text-lg font-semibold text-[var(--ui-text)]">{formatCurrency(wallet?.balance ?? 0, settings)}</p>
         </div>
-      </button>
+      </section>
 
       {careerEnabled && (
-        <section className="mt-3 bg-[var(--ui-surface)] px-4 py-3 shadow-[var(--ui-shadow)]">
+        <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-[15px] text-[var(--ui-text)]">每日工资</p>
+              <p className="ui-font-display font-semibold text-[var(--ui-text)]">今日工资</p>
               <p className="mt-0.5 text-xs text-[var(--ui-text-3)]">领取时会同时为所有已入职 AI 发薪</p>
             </div>
             <button type="button" onClick={() => void claimSalary()} disabled={claimingSalary || !!salaryClaim || !settings.userOccupation} className="shrink-0 rounded-[var(--ui-radius-control)] bg-[var(--ui-action)] px-3 py-2 text-sm text-[var(--ui-on-action)] disabled:opacity-45">
@@ -139,11 +143,12 @@ export function MePage() {
         </section>
       )}
 
-      <div className="mt-3">
+      <h2 className="px-4 pb-2 pt-5 text-xs font-medium text-[var(--ui-text-3)]">使用体验</h2>
+      <section className="mx-3 overflow-hidden rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow)]">
         <button
           type="button"
           onClick={() => navigate('/experience-mode')}
-          className="flex w-full items-center justify-between border-b border-gray-100 bg-white px-4 py-3.5 text-left active:bg-gray-50"
+          className="flex w-full items-center justify-between border-b border-[var(--ui-border-soft)] px-4 py-3.5 text-left active:bg-gray-50"
         >
           <span className="text-[15px] text-gray-900">体验模式</span>
           <span className="flex items-center gap-2 text-xs text-gray-400">{settings.experienceMode === 'immersive' ? '沉浸模式' : '自由模式'}<span>›</span></span>
@@ -151,7 +156,7 @@ export function MePage() {
         <button
           type="button"
           onClick={handleFullscreen}
-          className="flex w-full items-center justify-between bg-white px-4 py-3.5 text-left active:bg-gray-50"
+          className="flex w-full items-center justify-between border-b border-[var(--ui-border-soft)] px-4 py-3.5 text-left active:bg-gray-50"
         >
           <span className="text-[15px] text-gray-900">{isFullscreen ? '退出全屏' : '进入全屏'}</span>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -162,14 +167,11 @@ export function MePage() {
             )}
           </svg>
         </button>
-        {fullscreenError && <p className="bg-white px-4 pb-3 text-xs text-red-500">{fullscreenError}</p>}
-      </div>
-
-      <div className="mt-3">
+        {fullscreenError && <p className="border-b border-[var(--ui-border-soft)] px-4 pb-3 text-xs text-[var(--ui-danger-ink)]">{fullscreenError}</p>}
         <button
           type="button"
           onClick={() => navigate('/appearance')}
-          className="flex w-full items-center justify-between bg-white px-4 py-3.5 text-left active:bg-gray-50"
+          className="flex w-full items-center justify-between px-4 py-3.5 text-left active:bg-gray-50"
         >
           <span className="text-[15px] text-gray-900">软件风格切换</span>
           <span className="flex items-center gap-2 text-xs text-gray-400">
@@ -179,36 +181,21 @@ export function MePage() {
             </svg>
           </span>
         </button>
-      </div>
+      </section>
 
-      <div className="mt-3">
+      <h2 className="px-4 pb-2 pt-5 text-xs font-medium text-[var(--ui-text-3)]">AI 与内容</h2>
+      <section className="mx-3 overflow-hidden rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow)]">
         <button
           type="button"
           onClick={() => navigate('/presets')}
-          className="flex w-full items-center justify-between border-b border-gray-100 bg-white px-4 py-3.5 text-left active:bg-gray-50"
+          className="flex w-full items-center justify-between border-b border-[var(--ui-border-soft)] px-4 py-3.5 text-left active:bg-gray-50"
         >
           <span className="text-[15px] text-gray-900">预设</span>
           <span className="flex items-center gap-2 text-xs text-gray-400">生成参数与提示词<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg></span>
         </button>
         <button
-          onClick={() => navigate('/settings')}
-          className="flex w-full items-center justify-between border-b border-gray-100 bg-white px-4 py-3.5 text-left active:bg-gray-50"
-        >
-          <span className="text-[15px] text-gray-900">设置</span>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-            <path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-        <button
-          onClick={() => navigate('/settings/other-interfaces')}
-          className="flex w-full items-center justify-between border-b border-gray-100 bg-white px-4 py-3.5 text-left active:bg-gray-50"
-        >
-          <span className="text-[15px] text-gray-900">其他接口</span>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-        </button>
-        <button
           onClick={() => navigate('/modules')}
-          className="flex w-full items-center justify-between border-b border-gray-100 bg-white px-4 py-3.5 text-left active:bg-gray-50"
+          className="flex w-full items-center justify-between border-b border-[var(--ui-border-soft)] px-4 py-3.5 text-left active:bg-gray-50"
         >
           <span className="text-[15px] text-gray-900">模组</span>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -217,25 +204,31 @@ export function MePage() {
         </button>
         <button
           onClick={() => navigate('/stickers')}
-          className="flex w-full items-center justify-between border-b border-gray-100 bg-white px-4 py-3.5 text-left active:bg-gray-50"
+          className="flex w-full items-center justify-between border-b border-[var(--ui-border-soft)] px-4 py-3.5 text-left active:bg-gray-50"
         >
           <span className="text-[15px] text-gray-900">表情包管理</span>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
             <path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
-        {saveLoadEnabled && <button onClick={() => navigate('/save-load')} className="flex w-full items-center justify-between border-b border-gray-100 bg-white px-4 py-3.5 text-left active:bg-gray-50"><span className="text-[15px] text-gray-900">选择世界</span><span>›</span></button>}
+        {saveLoadEnabled && <button onClick={() => navigate('/save-load')} className="flex w-full items-center justify-between px-4 py-3.5 text-left active:bg-gray-50"><span className="text-[15px] text-gray-900">选择世界</span><span className="text-[var(--ui-text-3)]">›</span></button>}
+      </section>
+
+      <h2 className="px-4 pb-2 pt-5 text-xs font-medium text-[var(--ui-text-3)]">应用管理</h2>
+      <section className="mx-3 overflow-hidden rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow)]">
+        <button onClick={() => navigate('/settings')} className="flex w-full items-center justify-between border-b border-[var(--ui-border-soft)] px-4 py-3.5 text-left active:bg-gray-50"><span className="text-[15px] text-[var(--ui-text)]">通用设置</span><span className="text-[var(--ui-text-3)]">›</span></button>
+        <button onClick={() => navigate('/settings/other-interfaces')} className="flex w-full items-center justify-between border-b border-[var(--ui-border-soft)] px-4 py-3.5 text-left active:bg-gray-50"><span className="text-[15px] text-[var(--ui-text)]">其他接口</span><span className="text-[var(--ui-text-3)]">›</span></button>
         <button
           onClick={updateUrl ? () => window.open(updateUrl, '_blank') : handleCheckUpdate}
           disabled={checking}
-          className="flex w-full items-center justify-between bg-white px-4 py-3.5 text-left active:bg-gray-50 disabled:opacity-50"
+          className="flex w-full items-center justify-between px-4 py-3.5 text-left active:bg-gray-50 disabled:opacity-50"
         >
           <span className="text-[15px] text-gray-900">检查更新</span>
           <span className="text-xs text-gray-400">
             {checking ? '检查中…' : updateMessage || `当前 v${__APP_VERSION__}`}
           </span>
         </button>
-      </div>
+      </section>
     </div>
   )
 }

@@ -261,30 +261,35 @@ function SettingsList({ query }: { query: string }) {
     }
   }
 
-  const entries = [
-    { to: '/profile/edit', label: settings.userNickname, note: '编辑个人信息', avatar: settings.userAvatar },
-    { to: '/experience-mode', label: '体验模式', note: settings.experienceMode === 'immersive' ? '沉浸模式' : '自由模式', icon: '◈' },
-    { to: '/appearance', label: '软件风格切换', note: `${uiThemeName(settings.uiTheme)} · ${settings.themeMode === 'dark' ? '深色' : '浅色'}`, icon: '◐' },
-    { to: '/settings', label: '通用设置', note: '模型、数据与隐私', icon: '⚙' },
-    { to: '/presets', label: '预设', note: '生成参数与全局提示词', icon: '◌' },
-    { to: '/settings/other-interfaces', label: '其他接口', note: '图像、语音、Pexels、Tavily 与动漫图库', icon: '◌' },
-    { to: '/modules', label: '功能模块', note: '启用或关闭扩展功能', icon: '▦' },
-    { to: '/stickers', label: '表情包', note: '管理本地和远程表情', icon: '☺' },
-    ...(saveLoadEnabled ? [{ to: '/save-load', label: '选择世界', note: '切换世界、创建分支与读取备份', icon: '💾' }] : []),
-  ].filter((entry) => entry.label.toLowerCase().includes(query.trim().toLowerCase()))
   const normalizedQuery = query.trim().toLowerCase()
+  const entries = [
+    { group: '体验', to: '/experience-mode', label: '体验模式', note: settings.experienceMode === 'immersive' ? '沉浸模式' : '自由模式', icon: '◈' },
+    { group: '体验', to: '/appearance', label: '软件风格', note: `${uiThemeName(settings.uiTheme)} · ${settings.themeMode === 'dark' ? '深色' : '浅色'}`, icon: '◐' },
+    { group: 'AI 与服务', to: '/settings', label: '通用设置', note: '模型、生成与隐私', icon: '⚙' },
+    { group: 'AI 与服务', to: '/presets', label: '提示词预设', note: '生成参数与全局提示词', icon: '◌' },
+    { group: 'AI 与服务', to: '/settings/other-interfaces', label: '接口服务', note: '图像、语音与联网服务', icon: '◌' },
+    { group: '内容与数据', to: '/modules', label: '功能模块', note: '启用或关闭扩展功能', icon: '▦' },
+    { group: '内容与数据', to: '/stickers', label: '表情包', note: '管理本地和远程表情', icon: '☺' },
+    ...(saveLoadEnabled ? [{ group: '内容与数据', to: '/save-load', label: '世界与备份', note: '切换世界、分支与备份', icon: '💾' }] : []),
+  ].filter((entry) => `${entry.label} ${entry.note}`.toLowerCase().includes(normalizedQuery))
   const showSalary = careerEnabled && '每日工资'.includes(normalizedQuery)
   const showUpdate = '检查更新'.includes(normalizedQuery)
-  const profileEntry = entries.find((entry) => entry.to === '/profile/edit')
-  const otherEntries = entries.filter((entry) => entry.to !== '/profile/edit')
-  const renderEntry = (entry: (typeof entries)[number]) => <button type="button" key={entry.to} className={`desktop-list-row ${location.pathname === entry.to ? 'active' : ''}`} onClick={() => navigate(entry.to)}>{entry.avatar ? <Avatar avatar={entry.avatar} size={48} /> : <span className="desktop-menu-avatar"><UiIcon name={entry.icon ?? 'settings'} size={20} /></span>}<span className="desktop-list-copy"><strong>{entry.label}</strong><small>{entry.note}</small></span></button>
+  const renderEntry = (entry: (typeof entries)[number]) => <button type="button" key={entry.to} className={`desktop-list-row ${location.pathname === entry.to ? 'active' : ''}`} onClick={() => navigate(entry.to)}><span className="desktop-menu-avatar"><UiIcon name={entry.icon} size={20} /></span><span className="desktop-list-copy"><strong>{entry.label}</strong><small>{entry.note}</small></span></button>
 
-  return <>
-    {profileEntry && renderEntry(profileEntry)}
-    {showSalary && <button type="button" className="desktop-list-row" onClick={() => void claimSalary()} disabled={claimingSalary || !!salaryClaim || !settings.userOccupation}><span className="desktop-menu-avatar"><UiIcon name="💼" size={20} /></span><span className="desktop-list-copy"><strong>每日工资</strong><small>{salaryMessage || (claimingSalary ? '发放中…' : salaryClaim ? '今日已领取' : settings.userOccupation ? '点击领取，并为所有已入职 AI 发薪' : '尚未入职')}</small></span></button>}
-    {otherEntries.map(renderEntry)}
-    {showUpdate && <button type="button" className="desktop-list-row" onClick={() => void handleCheckUpdate()} disabled={checkingUpdate}><span className="desktop-menu-avatar"><UiIcon name="download" size={20} /></span><span className="desktop-list-copy"><strong>检查更新</strong><small>{checkingUpdate ? '检查中…' : updateMessage || `当前 v${__APP_VERSION__}`}</small></span></button>}
-  </>
+  const groups = ['体验', 'AI 与服务', '内容与数据'].map((label) => ({ label, entries: entries.filter((entry) => entry.group === label) })).filter((group) => group.entries.length)
+  const showProfile = `${settings.userNickname} 个人资料 编辑个人信息`.toLowerCase().includes(normalizedQuery)
+
+  return <div className="desktop-settings-list">
+    {(showProfile || showSalary) && <section className="desktop-settings-group desktop-settings-account">
+      <p className="desktop-settings-label">账户</p>
+      <div className="desktop-settings-card">
+        {showProfile && <button type="button" className={`desktop-settings-profile ${location.pathname === '/profile/edit' ? 'active' : ''}`} onClick={() => navigate('/profile/edit')}><Avatar avatar={settings.userAvatar} size={52} /><span className="desktop-list-copy"><strong>{settings.userNickname || '我'}</strong><small>查看和编辑个人资料</small></span><span className="desktop-settings-chevron">›</span></button>}
+        {showSalary && <button type="button" className="desktop-list-row" onClick={() => void claimSalary()} disabled={claimingSalary || !!salaryClaim || !settings.userOccupation}><span className="desktop-menu-avatar"><UiIcon name="💼" size={20} /></span><span className="desktop-list-copy"><strong>每日工资</strong><small>{salaryMessage || (claimingSalary ? '发放中…' : salaryClaim ? '今日已领取' : settings.userOccupation ? '点击领取，并为所有已入职 AI 发薪' : '尚未入职')}</small></span></button>}
+      </div>
+    </section>}
+    {groups.map((group) => <section className="desktop-settings-group" key={group.label}><p className="desktop-settings-label">{group.label}</p><div className="desktop-settings-card">{group.entries.map(renderEntry)}</div></section>)}
+    {showUpdate && <section className="desktop-settings-group"><p className="desktop-settings-label">系统</p><div className="desktop-settings-card"><button type="button" className="desktop-list-row" onClick={() => void handleCheckUpdate()} disabled={checkingUpdate}><span className="desktop-menu-avatar"><UiIcon name="download" size={20} /></span><span className="desktop-list-copy"><strong>检查更新</strong><small>{checkingUpdate ? '检查中…' : updateMessage || `当前 v${__APP_VERSION__}`}</small></span></button></div></section>}
+  </div>
 }
 
 function DesktopSidebarEmpty({ text }: { text: string }) {

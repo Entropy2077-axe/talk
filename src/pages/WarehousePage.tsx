@@ -68,17 +68,21 @@ export function WarehousePage() {
   }
 
   return (
-    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[var(--ui-bg)]">
       <TopBar title="仓库" showBack />
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex-1 overflow-y-auto pb-6">
+        <section className="border-b border-[var(--ui-border-soft)] bg-[var(--ui-surface)] px-4 pb-4 pt-5">
+          <p className="text-xs font-medium text-[var(--ui-text-3)]">我的物品</p>
+          <h1 className="ui-font-display mt-1 text-lg font-semibold text-[var(--ui-text)]">仓库里有 {items.length} 件东西</h1>
+          <p className="mt-2 text-xs leading-relaxed text-[var(--ui-text-3)]">购买的物品会保存在这里。赠送后会进入对应聊天，丢弃不会退还金币。</p>
+        </section>
+        <div className="px-4 pt-4">
         {items.length === 0 ? (
-          <p className="py-10 text-center text-sm text-gray-400">
-                {shopEnabled ? '仓库还是空的 去商城逛逛吧' : '仓库还是空的'}
-              </p>
+          <div className="rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-5 py-10 text-center shadow-[var(--ui-shadow)]"><p className="text-sm text-[var(--ui-text-2)]">仓库还是空的</p>{shopEnabled && <button type="button" onClick={() => navigate('/shop')} className="mt-3 rounded-[var(--ui-radius-control)] bg-[var(--ui-action)] px-4 py-2 text-sm text-[var(--ui-on-action)]">去商城逛逛</button>}</div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
             {items.map((item) => (
-              <div key={item.id} className="rounded-xl bg-white p-3">
+              <div key={item.id} className="rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] p-3 shadow-[var(--ui-shadow)]">
                 <div className="mb-2 flex h-16 items-center justify-center rounded-lg bg-gray-50 text-3xl">
                   {item.icon}
                 </div>
@@ -105,6 +109,7 @@ export function WarehousePage() {
             ))}
           </div>
         )}
+        </div>
       </div>
 
       {gifting && (

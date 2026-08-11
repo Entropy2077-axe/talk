@@ -241,31 +241,30 @@ export function GroupInfoPage() {
   }
 
   return (
-    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[var(--ui-bg)]">
       <TopBar title="群聊信息" showBack />
 
       <div className="flex-1 overflow-y-auto">
-        <section className="mt-3 flex flex-col items-center gap-2 bg-white px-4 py-6">
-          <Avatar avatar={group.avatar} color={group.avatarColor} size={64} />
-          <button onClick={group.kind === 'location' ? undefined : openNameEditor} className="ui-font-display text-[15px] font-medium text-gray-900 underline-offset-2 active:underline">
-            {group.kind === 'location' ? `${group.name} · ${groupLocation?.name ?? '未选择地点'}` : group.name}
-          </button>
-          {group.kind !== 'location' && <p className="text-xs text-gray-400">所属世界：{groupWorldview?.name || '默认世界'}</p>}
-          <p className="text-xs text-gray-400">{members.length} 位成员</p>
+        <section className="border-b border-[var(--ui-border-soft)] bg-[var(--ui-surface)] px-4 pb-5 pt-4">
+          <div className="flex items-center gap-4">
+            <Avatar avatar={group.avatar} color={group.avatarColor} size={68} />
+            <div className="min-w-0 flex-1">
+              <button onClick={group.kind === 'location' ? undefined : openNameEditor} className="ui-font-display block max-w-full truncate text-left text-xl font-semibold text-[var(--ui-text)] active:opacity-70">
+                {group.name}
+              </button>
+              <p className="mt-1 truncate text-xs text-[var(--ui-text-3)]">{group.kind === 'location' ? groupLocation?.name ?? '尚未选择地点' : groupWorldview?.name || '默认世界'} · {members.length} 位成员</p>
+            </div>
+            {group.kind !== 'location' && <button type="button" onClick={openNameEditor} className="shrink-0 text-xs text-[var(--ui-link)]">修改名称</button>}
+          </div>
+          <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] px-2 py-2.5"><p className="text-[10px] text-[var(--ui-text-3)]">成员</p><p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{members.length} 人</p></div>
+            <div className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] px-2 py-2.5"><p className="text-[10px] text-[var(--ui-text-3)]">共同计划</p><p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{groupPlans.length} 项</p></div>
+            <div className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] px-2 py-2.5"><p className="text-[10px] text-[var(--ui-text-3)]">群聊近况</p><p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{group.memory || group.vibe ? '已沉淀' : '待形成'}</p></div>
+          </div>
         </section>
 
-        {group.kind !== 'location' && <section className="mt-3 bg-white">
-          <button
-            onClick={openNameEditor}
-            className="flex w-full items-center justify-between border-b border-gray-100 px-4 py-3.5 text-left active:bg-gray-50"
-          >
-            <span className="text-[15px] text-gray-900">群聊名称</span>
-            <span className="max-w-[58%] truncate text-sm text-gray-400">{group.name}</span>
-          </button>
-        </section>}
-
         {group.kind === 'location' && (
-          <section className="mt-3 bg-white px-4 py-4">
+          <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
             <div className="flex items-center justify-between gap-3">
               <div><h3 className="text-xs font-medium text-gray-400">当前地点</h3><p className="mt-1 text-sm text-gray-900">{groupLocation?.name ?? '未选择地点'}</p><p className="mt-1 text-xs leading-relaxed text-gray-400">{groupLocation?.description ?? '请从地点地图选择一个具体地点。'}</p></div>
               <button type="button" onClick={() => navigate('/locations')} className="shrink-0 rounded-full bg-[var(--ui-special-soft)] px-3 py-1.5 text-xs text-[var(--ui-special-ink)]">打开地图</button>
@@ -273,7 +272,7 @@ export function GroupInfoPage() {
           </section>
         )}
 
-        {group.kind === 'location' && locationParticipants && <section className="mt-3 bg-white px-4 py-4">
+        {group.kind === 'location' && locationParticipants && <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
           <h3 className="mb-3 text-xs font-medium text-gray-400">现场人物</h3>
           {([
             ['正在这里', locationParticipants.here],
@@ -282,36 +281,28 @@ export function GroupInfoPage() {
           ] as Array<[string, Contact[]]>).map(([label, contacts]) => <div key={label} className="mb-3 last:mb-0"><p className="mb-1 text-[11px] text-gray-400">{label} · {contacts.length}</p>{contacts.length === 0 ? <p className="px-2 text-xs text-gray-300">暂无</p> : <div className="space-y-1">{contacts.map((contact) => <button type="button" key={contact.id} onClick={() => navigate(`/contact/${contact.id}`)} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left active:bg-gray-50"><Avatar avatar={contact.avatar} color={contact.avatarColor} size={34} /><span className="min-w-0 flex-1 truncate text-sm text-gray-800">{displayName(contact)}</span><span className="max-w-28 truncate text-[10px] text-gray-400">{contact.currentLocationId}</span></button>)}</div>}</div>)}
         </section>}
 
-        <section className="mt-3 bg-white px-4 py-4">
-          <h3 className="mb-2 text-xs font-medium text-gray-400">群聊记忆</h3>
-          <p className="whitespace-pre-wrap rounded-lg bg-gray-50 px-3 py-2 text-sm leading-relaxed text-gray-600">
-            {group.memory || '暂无群聊记忆。后续可由群聊总结自动沉淀。'}
-          </p>
-        </section>
-
-        <section className="mt-3 bg-white px-4 py-4">
-          <h3 className="mb-2 text-xs font-medium text-gray-400">群聊氛围</h3>
-          <p className="whitespace-pre-wrap rounded-lg bg-gray-50 px-3 py-2 text-sm leading-relaxed text-gray-600">
-            {group.vibe || '暂无群聊氛围。后续可由群聊总结自动沉淀。'}
-          </p>
-        </section>
-
-        <section className="mt-3 bg-white px-4 py-4">
-          <h3 className="mb-2 text-xs font-medium text-gray-400">朋友圈素材</h3>
-          <div className="grid grid-cols-3 gap-2">
-            {([
-              ['enabled', '允许引用'], ['relationshipOnly', '仅关系'], ['private', '群内私密'],
-            ] as const).map(([value, label]) => <button key={value} type="button" onClick={() => void updateGroup({ momentSharing: value })} className={`rounded-lg border px-2 py-2 text-xs ${(group.momentSharing ?? 'enabled') === value ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 text-gray-600'}`}>{label}</button>)}
+        <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
+          <h3 className="ui-font-display text-sm font-semibold text-[var(--ui-text)]">群聊近况</h3>
+          <p className="mt-1 text-[11px] text-[var(--ui-text-3)]">由群聊总结逐渐沉淀，帮助成员保持共同语境。</p>
+          <div className="mt-3 space-y-2">
+            <div className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] px-3 py-3"><p className="text-[11px] text-[var(--ui-text-3)]">共同记忆</p><p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-[var(--ui-text-2)]">{group.memory || '还没有形成稳定的群聊记忆。'}</p></div>
+            <div className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] px-3 py-3"><p className="text-[11px] text-[var(--ui-text-3)]">相处氛围</p><p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-[var(--ui-text-2)]">{group.vibe || '还没有形成明确的群聊氛围。'}</p></div>
           </div>
         </section>
 
-        <section className="mt-3 bg-white px-4 py-4">
-          <h3 className="mb-2 text-xs font-medium text-gray-400">共同计划</h3>
+        <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
+          <h3 className="ui-font-display mb-1 text-sm font-semibold text-[var(--ui-text)]">共同计划</h3>
+          <p className="mb-3 text-[11px] text-[var(--ui-text-3)]">群聊里已经形成的约定和下一步行动。</p>
           {groupPlans.length === 0 ? <p className="text-sm text-gray-400">群聊中形成明确约定后，会自动出现在这里。</p> : <div className="space-y-2">{groupPlans.map((plan: GroupPlan) => <div key={plan.id} className="rounded-lg bg-gray-50 p-3"><p className="text-sm font-medium text-gray-900">{plan.title}</p><p className="mt-1 text-xs text-gray-500">{plan.summary}{plan.location ? ` · ${plan.location}` : ''}</p><p className="mt-1 text-[11px] text-gray-400">{plan.status === 'pending' ? '待确认' : plan.status === 'confirmed' ? '已确认' : plan.status === 'completed' ? '已成行' : '已取消'}</p>{plan.status === 'pending' && <div className="mt-2 flex gap-2"><button type="button" onClick={() => void setGroupPlanStatus(plan, group, 'confirmed', settings)} className="rounded-md bg-gray-900 px-2.5 py-1 text-xs text-white">确认成行</button><button type="button" onClick={() => void setGroupPlanStatus(plan, group, 'cancelled', settings)} className="rounded-md bg-white px-2.5 py-1 text-xs text-gray-500">取消</button></div>}{plan.status === 'confirmed' && <div className="mt-2 flex gap-2"><button type="button" onClick={() => void setGroupPlanStatus(plan, group, 'completed', settings)} className="rounded-md bg-green-600 px-2.5 py-1 text-xs text-white">已成行</button><button type="button" onClick={() => void setGroupPlanStatus(plan, group, 'cancelled', settings)} className="rounded-md bg-white px-2.5 py-1 text-xs text-gray-500">取消</button></div>}</div>)}</div>}
         </section>
 
-        <section className="mt-3 bg-white px-4 py-4">
-          <h3 className="mb-2 text-xs font-medium text-gray-400">每轮发言人数</h3>
+        <details className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 shadow-[var(--ui-shadow)]">
+          <summary className="flex cursor-pointer list-none items-center justify-between py-4">
+            <span><span className="ui-font-display block text-sm font-semibold text-[var(--ui-text)]">群聊互动设置</span><span className="mt-1 block text-[11px] text-[var(--ui-text-3)]">发言人数、互动方式、热闹程度与朋友圈引用</span></span>
+            <span className="text-[var(--ui-text-3)]">⌄</span>
+          </summary>
+          <div className="border-t border-[var(--ui-border-soft)] pb-4 pt-4">
+          <h3 className="mb-2 text-xs font-medium text-[var(--ui-text-3)]">每轮发言人数</h3>
           <div className="grid grid-cols-5 gap-2">
             {SPEAKER_LIMIT_OPTIONS.map((option) => {
               const checked = (group.speakerLimit ?? 3) === option
@@ -320,7 +311,7 @@ export function GroupInfoPage() {
                   key={String(option)}
                   onClick={() => void updateGroup({ speakerLimit: option })}
                   className={`rounded-lg border px-2 py-2 text-sm ${
-                    checked ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600'
+                    checked ? 'border-[var(--ui-action)] bg-[var(--ui-action)] text-[var(--ui-on-action)]' : 'border-[var(--ui-border)] bg-[var(--ui-surface)] text-[var(--ui-text-2)]'
                   }`}
                 >
                   {speakerLimitLabel(option)}
@@ -328,10 +319,7 @@ export function GroupInfoPage() {
               )
             })}
           </div>
-        </section>
-
-        <section className="mt-3 bg-white px-4 py-4">
-          <h3 className="mb-2 text-xs font-medium text-gray-400">AI是否可以互相聊起来</h3>
+          <h3 className="mb-2 mt-5 text-xs font-medium text-[var(--ui-text-3)]">AI 是否可以互相聊起来</h3>
           <div className="grid grid-cols-2 gap-2">
             {[
               { label: '可以', value: true, description: '允许接话、吐槽、短暂发展群内互动' },
@@ -343,7 +331,7 @@ export function GroupInfoPage() {
                   key={option.label}
                   onClick={() => void updateGroup({ allowAiChatter: option.value })}
                   className={`rounded-lg border px-3 py-2 text-left ${
-                    checked ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600'
+                    checked ? 'border-[var(--ui-action)] bg-[var(--ui-action)] text-[var(--ui-on-action)]' : 'border-[var(--ui-border)] bg-[var(--ui-surface)] text-[var(--ui-text-2)]'
                   }`}
                 >
                   <span className="block text-sm font-medium">{option.label}</span>
@@ -354,10 +342,7 @@ export function GroupInfoPage() {
               )
             })}
           </div>
-        </section>
-
-        <section className="mt-3 bg-white px-4 py-4">
-          <h3 className="mb-2 text-xs font-medium text-gray-400">群聊热闹程度</h3>
+          <h3 className="mb-2 mt-5 text-xs font-medium text-[var(--ui-text-3)]">群聊热闹程度</h3>
           <div className="grid grid-cols-3 gap-2">
             {ENERGY_OPTIONS.map((option) => {
               const checked = (group.energyLevel ?? 'normal') === option.value
@@ -366,7 +351,7 @@ export function GroupInfoPage() {
                   key={option.value}
                   onClick={() => void updateGroup({ energyLevel: option.value })}
                   className={`rounded-lg border px-3 py-2 text-left ${
-                    checked ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-200 bg-white text-gray-600'
+                    checked ? 'border-[var(--ui-action)] bg-[var(--ui-action)] text-[var(--ui-on-action)]' : 'border-[var(--ui-border)] bg-[var(--ui-surface)] text-[var(--ui-text-2)]'
                   }`}
                 >
                   <span className="block text-sm font-medium">{option.label}</span>
@@ -377,9 +362,16 @@ export function GroupInfoPage() {
               )
             })}
           </div>
-        </section>
+          <h3 className="mb-2 mt-5 text-xs font-medium text-[var(--ui-text-3)]">朋友圈素材</h3>
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              ['enabled', '允许引用'], ['relationshipOnly', '仅关系'], ['private', '群内私密'],
+            ] as const).map(([value, label]) => <button key={value} type="button" onClick={() => void updateGroup({ momentSharing: value })} className={`rounded-[var(--ui-radius-control)] border px-2 py-2 text-xs ${(group.momentSharing ?? 'enabled') === value ? 'border-[var(--ui-action)] bg-[var(--ui-action)] text-[var(--ui-on-action)]' : 'border-[var(--ui-border)] text-[var(--ui-text-2)]'}`}>{label}</button>)}
+          </div>
+          </div>
+        </details>
 
-        {group.kind !== 'location' && <section className="mt-3 bg-white px-4 py-4">
+        {group.kind !== 'location' && <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
           <div className="mb-2 flex items-center justify-between">
             <label className="block text-xs font-medium text-gray-400">群成员</label>
             <button onClick={() => setEditingMembers((v) => !v)} className="text-xs text-gray-500 underline">
@@ -452,17 +444,17 @@ export function GroupInfoPage() {
 
         {adminEnabled && (
           <>
-            <section className="mt-3 bg-white px-4 py-4">
+            <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
               <h3 className="mb-2 text-xs font-medium text-gray-400">各个AI的内部意图</h3>
               <AdminIntentList members={members} />
             </section>
 
-            <section className="mt-3 bg-white px-4 py-4">
+            <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
               <h3 className="mb-2 text-xs font-medium text-gray-400">最新群聊原始JSON</h3>
               <LatestGroupAiTurnJson groupId={group.id} />
             </section>
 
-            <section className="mt-3 bg-white px-4 py-4">
+            <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
               <h3 className="mb-2 text-xs font-medium text-gray-400">提示词预览</h3>
               {promptPreview ? (
                 <div className="space-y-4">
@@ -493,7 +485,7 @@ export function GroupInfoPage() {
           </>
         )}
 
-        {group.kind !== 'location' && <section className="mt-3 bg-white px-4 py-4">
+        {group.kind !== 'location' && <section className="mx-3 mb-5 mt-6 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
           {confirming ? (
             <div className="rounded-lg bg-red-50 p-3">
               <p className="mb-2 text-xs text-red-500">解散后聊天记录也会一起删除，无法恢复。确定吗？</p>

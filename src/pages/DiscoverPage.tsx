@@ -52,15 +52,21 @@ export function DiscoverPage() {
   ]
 
   return (
-    <div className="relative flex min-h-full flex-col">
+    <div className="relative flex min-h-full flex-col bg-[var(--ui-bg)] pb-5">
       <TopBar title="发现" showSearch onSearchClick={() => setSearching(true)} />
 
-      <div className="mx-4 mt-3 space-y-2">
+      <section className="ui-page-intro">
+        <p className="ui-page-kicker">功能与世界</p>
+        <h1 className="ui-page-title">查看动态，进入当前启用的功能</h1>
+        <p className="ui-page-summary">这里仅显示已经启用且可以使用的入口。</p>
+      </section>
+      <h2 className="ui-section-label">可用功能</h2>
+      <div className="ui-list-card">
         {entries.map((entry) => (
           <button
             key={entry.to + entry.label}
             onClick={() => navigate(entry.to)}
-            className="flex w-full items-center justify-between rounded-xl bg-white px-4 py-3.5 text-left active:bg-gray-50"
+            className="ui-list-row"
           >
             <div className="flex items-center gap-3">
               <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--ui-special-soft)] text-lg">
@@ -77,12 +83,12 @@ export function DiscoverPage() {
       </div>
 
       {adminModeEnabled && (
-        <section className="mx-4 mt-5">
-          <h2 className="mb-2 px-1 text-xs font-medium text-gray-400">小程序</h2>
+        <section>
+          <h2 className="ui-section-label">管理员工具</h2>
           <button
             type="button"
             onClick={() => navigate('/ai-test-cards')}
-            className="flex w-full items-center justify-between rounded-xl bg-white px-4 py-3.5 text-left active:bg-gray-50"
+            className="ui-list-row mx-3 w-[calc(100%-1.5rem)] rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow)]"
           >
             <span className="flex items-center gap-3">
               <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--ui-special-soft)]"><UiIcon name="🧪" size={19} /></span>
@@ -93,9 +99,7 @@ export function DiscoverPage() {
         </section>
       )}
 
-      <div className="flex flex-1 items-center justify-center">
-        <p className="text-sm text-gray-400">更多小程序敬请期待</p>
-      </div>
+      <div className="flex-1" />
       {searching && <SearchOverlay onClose={() => setSearching(false)} />}
     </div>
   )

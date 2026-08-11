@@ -15,15 +15,15 @@ export function ImageProviderListPage() {
   const ready = isImageProviderReady({ imageProvider, imageProviders })
 
   return (
-    <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="ui-page">
       <TopBar title="图片生成" showBack />
-      <div className="flex-1 overflow-y-auto pb-6">
-        <section className="mt-3 bg-white px-4 py-4">
+      <div className="ui-page-scroll">
+        <section className="ui-page-intro">
+          <p className="ui-page-kicker">当前图片服务</p><h1 className="ui-page-title">{imageProviderName(imageProvider)}</h1>
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-900">当前服务</p>
               <p className={`mt-1 text-xs ${ready ? 'text-green-600' : 'text-gray-400'}`}>
-                {imageProviderName(imageProvider)} · {ready ? '已就绪' : imageProvider === 'none' ? '未启用' : '还需完成配置'}
+                {ready ? '已就绪' : imageProvider === 'none' ? '未启用' : '还需完成配置'}
               </p>
             </div>
             {imageProvider !== 'none' && (
@@ -37,8 +37,7 @@ export function ImageProviderListPage() {
           </p>
         </section>
 
-        <section className="mt-3 bg-white">
-          <h2 className="px-4 pt-4 text-xs font-medium text-gray-400">选择服务</h2>
+        <h2 className="ui-section-label">选择服务</h2><section className="ui-list-card">
           <div className="mt-1">
             {IMAGE_PROVIDER_INFO.map((item) => {
               const selected = imageProvider === item.id
@@ -47,7 +46,7 @@ export function ImageProviderListPage() {
                   key={item.id}
                   type="button"
                   onClick={() => navigate(`/settings/image-generation/${item.id}`)}
-                  className="flex w-full items-center gap-3 border-b border-gray-100 px-4 py-3 text-left last:border-0"
+                  className="ui-list-row"
                 >
                   <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xs font-semibold ${selected ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'}`}>
                     {item.id === 'stable-diffusion' ? 'SD' : item.name.slice(0, 2)}
@@ -67,7 +66,7 @@ export function ImageProviderListPage() {
           </div>
         </section>
 
-        <section className="mx-4 mt-4 rounded-xl bg-blue-50 px-3 py-3">
+        <section className="ui-section-card ui-section-spaced bg-[var(--ui-info-soft)]">
           <p className="text-xs font-medium text-blue-700">本地接口提示</p>
           <p className="mt-1 text-[11px] leading-relaxed text-blue-600">
             电脑浏览器可填 127.0.0.1；安卓手机要填电脑的局域网 IP，并让手机和电脑处于同一网络。APK 已为这两类本地 HTTP 接口保留兼容。

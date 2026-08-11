@@ -58,10 +58,13 @@ export function GroupAddPage() {
   }
 
   return (
-    <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="ui-page">
       <TopBar title="发起群聊" showBack />
 
-      <div className="mt-3 flex-1 overflow-y-auto bg-white px-4 py-4">
+      <div className="ui-page-scroll">
+        <section className="ui-page-intro"><p className="ui-page-kicker">创建群聊</p><h1 className="ui-page-title">让至少两位联系人加入同一段对话</h1><p className="ui-page-summary">先确定群聊身份，再选择成员；创建后可以继续调整互动方式、成员和共同计划。</p></section>
+        <section className="ui-section-card ui-section-spaced">
+        <h2 className="ui-section-title">群聊身份</h2><p className="ui-section-summary mb-4">头像和名称会显示在消息列表与群聊顶部。</p>
         <label className="mb-1 block text-xs text-gray-400">群头像</label>
         <button
           onClick={() => setPickingAvatar(true)}
@@ -80,11 +83,14 @@ export function GroupAddPage() {
           className="mb-4 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
         />
 
+        </section>
+        <h2 className="ui-section-label">选择成员</h2>
+        <section className="ui-section-card">
         <label className="mb-2 block text-xs font-medium text-gray-400">
           选择群成员（至少{MIN_MEMBERS}人{selected.length > 0 ? ` · 已选${selected.length}人` : ''}）
         </label>
         {contacts.length === 0 ? (
-          <p className="text-sm text-gray-400">还没有联系人 先去"联系人"页添加几个吧</p>
+          <div className="py-6 text-center"><p className="text-sm text-[var(--ui-text-3)]">还没有可加入群聊的联系人</p><button type="button" onClick={() => navigate('/contact/new')} className="ui-primary-action mt-3 px-4 py-2 text-sm">添加联系人</button></div>
         ) : (
           <div className="space-y-1">
             {contacts.map((c) => {
@@ -109,13 +115,14 @@ export function GroupAddPage() {
             })}
           </div>
         )}
+        </section>
       </div>
 
-      <div className="sticky bottom-0 border-t border-gray-100 bg-white p-3">
+      <div className="sticky bottom-0 border-t border-[var(--ui-border-soft)] bg-[var(--ui-surface)] p-3 pb-[calc(.75rem+env(safe-area-inset-bottom))]">
         <button
           onClick={handleCreate}
           disabled={!name.trim() || selected.length < MIN_MEMBERS || creating}
-          className="w-full rounded-lg bg-gray-900 py-2.5 text-sm text-white disabled:opacity-40"
+          className="ui-primary-action w-full py-3 text-sm font-medium disabled:opacity-40"
         >
           {creating ? '创建中…' : '创建群聊'}
         </button>

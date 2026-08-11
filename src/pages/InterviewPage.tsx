@@ -1,16 +1,214 @@
-import { useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import { useLiveQuery } from 'dexie-react-hooks'
-import { v4 as uuid } from 'uuid'
-import { TopBar } from '../components/TopBar'
-import { db } from '../db/db'
-import { useSettingsStore } from '../store/useSettingsStore'
-import { askInterview, interviewEvaluationPrompt, interviewNextPrompt, interviewOpeningPrompt } from '../lib/interview'
-import { employmentPatch } from '../lib/career'
+import { useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { useLiveQuery } from "dexie-react-hooks";
+import { v4 as uuid } from "uuid";
+import { TopBar } from "../components/TopBar";
+import { db } from "../db/db";
+import { useSettingsStore } from "../store/useSettingsStore";
+import {
+  askInterview,
+  interviewEvaluationPrompt,
+  interviewNextPrompt,
+  interviewOpeningPrompt,
+} from "../lib/interview";
+import { employmentPatch } from "../lib/career";
 
-const thresholds={入门:55,普通:65,竞争激烈:75}
-export function InterviewPage(){const {jobId}=useParams(),nav=useNavigate(),settings=useSettingsStore();const job=useLiveQuery(()=>jobId?db.jobListings.get(jobId):undefined,[jobId]);const session=useLiveQuery(()=>jobId?db.interviews.where('jobId').equals(jobId).first():undefined,[jobId]);const [input,setInput]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('')
-async function call(prompt:string,jsonMode=false){return askInterview(settings,prompt,jsonMode)}
-async function start(){if(!job||!settings.apiKey)return;setBusy(true);try{const active=await db.interviews.where('status').equals('active').first();if(active&&active.jobId!==job.id)throw new Error('请先完成当前进行中的面试');const q=await call(interviewOpeningPrompt(job,settings));const now=Date.now();await db.interviews.add({id:uuid(),jobId:job.id,status:'active',round:0,messages:[{role:'interviewer',content:q.trim(),createdAt:now}],createdAt:now,updatedAt:now});await db.jobListings.update(job.id,{status:'interviewing'})}catch(e){setError(e instanceof Error?e.message:String(e))}finally{setBusy(false)}}
-async function answer(){if(!job||!session||!input.trim())return;setBusy(true);const answerText=input.trim();setInput('');const messages=[...session.messages,{role:'candidate' as const,content:answerText,createdAt:Date.now()}];try{const nextRound=session.round+1;const transcript=messages.map(m=>`${m.role==='interviewer'?'面试官':'候选人'}：${m.content}`).join('\n');if(nextRound<4){const q=await call(interviewNextPrompt(job,nextRound+1,transcript,settings));messages.push({role:'interviewer',content:q.trim(),createdAt:Date.now()});await db.interviews.update(session.id,{round:nextRound,messages,updatedAt:Date.now()})}else{const raw=await call(interviewEvaluationPrompt(job,transcript,settings),true);const p=JSON.parse(raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]??raw);const score=Math.max(0,Math.min(100,Number(p.knowledge||0)+Number(p.problemSolving||0)+Number(p.communication||0)+Number(p.fit||0)));const passed=score>=thresholds[job.difficulty];await db.interviews.update(session.id,{round:4,messages,status:passed?'passed':'failed',score,scoreBreakdown:p,feedback:String(p.feedback||''),updatedAt:Date.now()});await db.jobListings.update(job.id,{status:passed?'hired':'rejected'});if(passed){const ep=employmentPatch(job.title,job.monthlySalary);settings.setSettings({userOccupation:ep.occupation,userMonthlySalary:ep.monthlySalary,userJobStartedDate:ep.jobStartedDate,userLastSalaryDate:ep.lastSalaryDate})}}}catch(e){setError(e instanceof Error?e.message:String(e))}finally{setBusy(false)}}
-if(!job)return null;return <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#ededed]"><TopBar title={`${job.title}面试`} showBack/><div className="flex-1 overflow-y-auto p-4">{!session?<button disabled={busy} onClick={start} className="w-full rounded-xl bg-gray-900 py-3 text-white">{busy?'面试官准备中…':'开始专业面试'}</button>:<>{session.messages.map((m,i)=><div key={i} className={`mb-3 flex ${m.role==='candidate'?'justify-end':''}`}><div className={`max-w-[82%] rounded-2xl px-3 py-2 text-sm ${m.role==='candidate'?'bg-[#95ec69]':'bg-white'}`}>{m.content}</div></div>)}{session.status!=='active'&&<div className="rounded-xl bg-white p-4 text-center"><b className="text-xl">{session.status==='passed'?'录用':'未录用'} · {session.score}分</b><p className="mt-2 text-sm text-gray-500">{session.feedback}</p><button onClick={()=>nav('/work')} className="mt-3 text-sm text-blue-500">返回工作</button></div>}</>}</div>{session?.status==='active'&&<div className="flex gap-2 border-t bg-white p-2"><textarea value={input} onChange={e=>setInput(e.target.value)} className="flex-1 resize-none rounded-xl border px-3 py-2 text-sm" placeholder="回答面试问题"/><button disabled={busy||!input.trim()} onClick={answer} className="rounded-xl bg-gray-900 px-4 text-white disabled:opacity-40">发送</button></div>}{error&&<p className="bg-red-50 p-2 text-xs text-red-500">{error}</p>}</div>}
+const thresholds = { 入门: 55, 普通: 65, 竞争激烈: 75 };
+export function InterviewPage() {
+  const { jobId } = useParams(),
+    nav = useNavigate(),
+    settings = useSettingsStore();
+  const job = useLiveQuery(
+    () => (jobId ? db.jobListings.get(jobId) : undefined),
+    [jobId],
+  );
+  const session = useLiveQuery(
+    () =>
+      jobId ? db.interviews.where("jobId").equals(jobId).first() : undefined,
+    [jobId],
+  );
+  const [input, setInput] = useState(""),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  async function call(prompt: string, jsonMode = false) {
+    return askInterview(settings, prompt, jsonMode);
+  }
+  async function start() {
+    if (!job || !settings.apiKey) return;
+    setBusy(true);
+    try {
+      const active = await db.interviews
+        .where("status")
+        .equals("active")
+        .first();
+      if (active && active.jobId !== job.id)
+        throw new Error("请先完成当前进行中的面试");
+      const q = await call(interviewOpeningPrompt(job, settings));
+      const now = Date.now();
+      await db.interviews.add({
+        id: uuid(),
+        jobId: job.id,
+        status: "active",
+        round: 0,
+        messages: [{ role: "interviewer", content: q.trim(), createdAt: now }],
+        createdAt: now,
+        updatedAt: now,
+      });
+      await db.jobListings.update(job.id, { status: "interviewing" });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function answer() {
+    if (!job || !session || !input.trim()) return;
+    setBusy(true);
+    const answerText = input.trim();
+    setInput("");
+    const messages = [
+      ...session.messages,
+      {
+        role: "candidate" as const,
+        content: answerText,
+        createdAt: Date.now(),
+      },
+    ];
+    try {
+      const nextRound = session.round + 1;
+      const transcript = messages
+        .map(
+          (m) =>
+            `${m.role === "interviewer" ? "面试官" : "候选人"}：${m.content}`,
+        )
+        .join("\n");
+      if (nextRound < 4) {
+        const q = await call(
+          interviewNextPrompt(job, nextRound + 1, transcript, settings),
+        );
+        messages.push({
+          role: "interviewer",
+          content: q.trim(),
+          createdAt: Date.now(),
+        });
+        await db.interviews.update(session.id, {
+          round: nextRound,
+          messages,
+          updatedAt: Date.now(),
+        });
+      } else {
+        const raw = await call(
+          interviewEvaluationPrompt(job, transcript, settings),
+          true,
+        );
+        const p = JSON.parse(
+          raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1] ?? raw,
+        );
+        const score = Math.max(
+          0,
+          Math.min(
+            100,
+            Number(p.knowledge || 0) +
+              Number(p.problemSolving || 0) +
+              Number(p.communication || 0) +
+              Number(p.fit || 0),
+          ),
+        );
+        const passed = score >= thresholds[job.difficulty];
+        await db.interviews.update(session.id, {
+          round: 4,
+          messages,
+          status: passed ? "passed" : "failed",
+          score,
+          scoreBreakdown: p,
+          feedback: String(p.feedback || ""),
+          updatedAt: Date.now(),
+        });
+        await db.jobListings.update(job.id, {
+          status: passed ? "hired" : "rejected",
+        });
+        if (passed) {
+          const ep = employmentPatch(job.title, job.monthlySalary);
+          settings.setSettings({
+            userOccupation: ep.occupation,
+            userMonthlySalary: ep.monthlySalary,
+            userJobStartedDate: ep.jobStartedDate,
+            userLastSalaryDate: ep.lastSalaryDate,
+          });
+        }
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!job) return null;
+  return (
+    <div className="ui-page">
+      <TopBar title={`${job.title}面试`} showBack />
+      <div className="ui-page-scroll px-4 py-4">
+        {!session ? (
+          <div>
+            <header className="mb-5">
+              <p className="ui-page-kicker">{job.company}</p>
+              <h1 className="ui-page-title">{job.title}</h1>
+              <p className="ui-page-summary">面试开始后会连续进行四轮问答，完成前会保留当前进度。</p>
+            </header>
+            <button disabled={busy} onClick={start} className="ui-primary-action">
+              {busy ? "面试官准备中…" : "开始专业面试"}
+            </button>
+          </div>
+        ) : (
+          <>
+            {session.messages.map((m, i) => (
+              <div
+                key={i}
+                className={`mb-3 flex ${m.role === "candidate" ? "justify-end" : ""}`}
+              >
+                <div
+                  className={`max-w-[82%] rounded-2xl px-3 py-2 text-sm ${m.role === "candidate" ? "bg-[#95ec69]" : "bg-white"}`}
+                >
+                  {m.content}
+                </div>
+              </div>
+            ))}
+            {session.status !== "active" && (
+              <div className="rounded-xl bg-white p-4 text-center">
+                <b className="text-xl">
+                  {session.status === "passed" ? "录用" : "未录用"} ·{" "}
+                  {session.score}分
+                </b>
+                <p className="mt-2 text-sm text-gray-500">{session.feedback}</p>
+                <button
+                  onClick={() => nav("/work")}
+                  className="mt-3 text-sm text-blue-500"
+                >
+                  返回工作
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+      {session?.status === "active" && (
+        <div className="flex gap-2 border-t bg-white p-2">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            className="flex-1 resize-none rounded-xl border px-3 py-2 text-sm"
+            placeholder="回答面试问题"
+          />
+          <button
+            disabled={busy || !input.trim()}
+            onClick={answer}
+            className="rounded-xl bg-gray-900 px-4 text-white disabled:opacity-40"
+          >
+            发送
+          </button>
+        </div>
+      )}
+      {error && <p className="bg-red-50 p-2 text-xs text-red-500">{error}</p>}
+    </div>
+  );
+}

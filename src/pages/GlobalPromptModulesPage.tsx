@@ -94,10 +94,11 @@ export function GlobalPromptModulesPage() {
     setSelectedContactIds([])
   }
 
-  return <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+  return <div className="ui-page relative">
     <TopBar title="预设" showBack />
-    <div className="flex-1 overflow-y-auto pb-8">
-      <section className="mt-3 bg-white px-4 py-4">
+    <div className="ui-page-scroll">
+      <header className="ui-page-intro"><p className="ui-page-kicker">当前预设</p><h1 className="ui-page-title">{selected.name}</h1><p className="ui-page-summary">先选择或保存一套提示词预设，再决定是否覆盖到具体联系人。</p></header>
+      <section className="ui-section-card px-4 py-4">
         <h2 className="text-sm font-medium text-gray-900">生成参数</h2>
         <p className="mt-1 text-[11px] leading-relaxed text-gray-400">这些值会覆盖应用内各功能原有的温度默认值；留空则保持原有行为。Top P / Top K 仅在填写后发送给接口。</p>
         <div className="mt-3 grid grid-cols-3 gap-2">
@@ -106,13 +107,13 @@ export function GlobalPromptModulesPage() {
           <label className="text-xs text-gray-500">Top K<input aria-label="Top K" type="number" min="1" step="1" value={samplingDraft.topK ?? ''} onChange={(event) => setSamplingDraft((current) => ({ ...current, ...(event.target.value === '' ? { topK: undefined } : { topK: Number(event.target.value) }) }))} placeholder="默认" className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-2 text-sm text-gray-800" /></label>
         </div>
       </section>
-      <section className="mt-3 bg-white px-4 py-4">
+      <section className="ui-section-card ui-section-spaced px-4 py-4">
         <button type="button" onClick={saveArchive} className="w-full rounded-xl bg-gray-900 py-3 text-sm font-medium text-white">保存为新预设</button>
         <p className="mt-2 text-[11px] leading-relaxed text-gray-400">预设会同时保存生成参数和全局提示词模块。启用后，生成参数立即生效；新联系人会复制当前预设的提示词模块快照。</p>
         {validationError && <p className="mt-2 text-xs text-red-500">{validationError}</p>}
       </section>
 
-      <section className="mt-3 bg-white px-4 py-4">
+      <section className="ui-section-card ui-section-spaced px-4 py-4">
         <h2 className="mb-3 text-xs font-medium text-gray-400">已保存的提示词</h2>
         <div className="space-y-2">{presets.map((preset) => <div key={preset.id} className={`rounded-xl border px-3 py-3 ${selectedId === preset.id ? 'border-gray-900' : 'border-gray-200'}`}>
           <button type="button" onClick={() => loadPreset(preset)} className="w-full text-left">
@@ -126,7 +127,7 @@ export function GlobalPromptModulesPage() {
         </div>)}</div>
       </section>
 
-      <section className="mt-3 bg-white px-4 py-4">
+      <section className="ui-section-card ui-section-spaced px-4 py-4">
         <div className="mb-3"><h2 className="text-sm font-medium text-gray-900">全局提示词设置 · 正在编辑：{selected.name}</h2><p className="mt-1 text-[11px] text-gray-400">编辑后点击顶部“保存为新预设”创建新存档；系统默认预设本身不会被覆盖。</p></div>
         <div className="space-y-3">{visibleDefinitions.map((definition) => {
           const config = draft[definition.id]

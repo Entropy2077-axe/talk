@@ -15,6 +15,10 @@ await mkdir('artifacts/desktop', { recursive: true })
 await page.reload()
 await page.waitForLoadState('domcontentloaded')
 await page.screenshot({ path: 'artifacts/desktop/main.png' })
+await page.locator('.desktop-rail-button[title="设置"]').click()
+await page.locator('.desktop-settings-list').waitFor()
+await page.screenshot({ path: 'artifacts/desktop/settings.png' })
+const settingsGroups = await page.locator('.desktop-settings-group').count()
 await page.locator('.desktop-user-avatar').click()
 await page.locator('.desktop-profile-page').waitFor()
 await page.screenshot({ path: 'artifacts/desktop/profile-edit.png' })
@@ -34,6 +38,7 @@ const result = {
   rail: await page.locator('.desktop-rail').count(),
   sidebar: await page.locator('.desktop-sidebar').count(),
   desktopFlag: await page.locator('.app-shell[data-desktop="true"]').count(),
+  settingsGroups,
   profileEditor,
   momentsCover,
   errors,

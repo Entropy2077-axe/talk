@@ -21,7 +21,7 @@ export function ContactsPage() {
   )
 
   return (
-    <div className="relative flex min-h-full flex-col">
+    <div className="relative flex min-h-full flex-col bg-[var(--ui-bg)]">
       <TopBar
         title="联系人"
         showSearch
@@ -39,7 +39,8 @@ export function ContactsPage() {
         }
       />
 
-      <div className="flex-1">
+      <div className="flex-1 bg-[var(--ui-surface)]">
+        <div className="flex items-center justify-between border-b border-[var(--ui-border-soft)] px-4 py-2 text-xs text-[var(--ui-text-3)]"><span>我的联系人</span><span>{contacts.length} 人</span></div>
         <button
           onClick={() => navigate('/contact/new')}
           className="flex w-full items-center gap-3 border-b border-gray-100 px-4 py-3 text-left active:bg-gray-50"
@@ -69,9 +70,7 @@ export function ContactsPage() {
         ))}
 
         {contacts.length === 0 && generationTasks.filter((task) => !['cancelled', 'completed'].includes(task.status)).length === 0 ? (
-          <p className="px-4 py-10 text-center text-sm text-gray-400">
-            还没有联系人 点击上方"添加联系人"认识一个新朋友吧
-          </p>
+          <div className="ui-empty-state"><p className="text-sm text-[var(--ui-text-2)]">还没有联系人</p><p className="mt-1 text-xs">添加一个人物，开始积累聊天、关系和共同经历。</p><button type="button" onClick={() => navigate('/contact/new')} className="ui-primary-action mt-4 px-4 py-2 text-sm">添加联系人</button></div>
         ) : (
           contacts.map((c) => (
             <button

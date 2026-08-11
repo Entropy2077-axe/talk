@@ -29,10 +29,10 @@ export function ContactGenerationTaskPage() {
   }, [task?.id, task?.status, task?.personaDraft])
 
   if (task === undefined) {
-    return <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]"><TopBar title="生成任务" showBack/><div className="flex flex-1 items-center justify-center text-sm text-gray-400">正在读取任务…</div></div>
+    return <div className="ui-page"><TopBar title="生成任务" showBack/><div className="flex flex-1 items-center justify-center text-sm text-[var(--ui-text-3)]">正在读取任务…</div></div>
   }
   if (task === null) {
-    return <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]"><TopBar title="生成任务" showBack/><div className="flex flex-1 flex-col items-center justify-center px-6 text-center"><p className="text-sm text-gray-400">这个任务已完成或不存在</p><button type="button" onClick={() => navigate('/contacts')} className="mt-4 rounded-lg bg-gray-900 px-5 py-2.5 text-sm text-white">返回联系人</button></div></div>
+    return <div className="ui-page"><TopBar title="生成任务" showBack/><div className="flex flex-1 flex-col items-center justify-center px-6 text-center"><p className="text-sm text-[var(--ui-text-3)]">这个任务已完成或不存在</p><button type="button" onClick={() => navigate('/contacts')} className="ui-primary-action mt-4 px-5 py-2.5 text-sm">返回联系人</button></div></div>
   }
   const currentTask = task
 
@@ -53,10 +53,10 @@ export function ContactGenerationTaskPage() {
   }
 
   return (
-    <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="ui-page">
       <TopBar title={immersive ? '寻找联系人' : task.method === 'precision' ? '精细创建 · 女娲模式' : '联系人生成'} showBack />
-      <div className="flex-1 overflow-y-auto px-4 py-4">
-        <section className="rounded-xl bg-white p-4">
+      <div className="ui-page-scroll px-3 pt-3">
+        <section className="ui-section-card ui-section-flush">
           <div className="flex items-center gap-3">
             <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${task.status === 'failed' ? 'bg-red-50 text-red-500' : task.status === 'awaiting_review' ? 'bg-green-50 text-green-600' : 'bg-[var(--ui-special-soft)] text-[var(--ui-special-ink)]'}`}>{task.status === 'failed' ? '!' : task.status === 'awaiting_review' ? '✓' : '◌'}</div>
             <div className="min-w-0 flex-1"><h2 className="text-base font-medium text-gray-900">{task.stageLabel}</h2><p className="mt-0.5 text-xs text-gray-400">任务 {task.id.slice(0, 8)} · 第 {Math.max(1, task.attempt)} 次尝试</p></div>
@@ -65,14 +65,14 @@ export function ContactGenerationTaskPage() {
         </section>
 
         {!immersive && fields.length > 0 && task.status !== 'awaiting_review' && (
-          <section className="mt-3 rounded-xl bg-white p-4">
+          <section className="mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] p-4 shadow-[var(--ui-shadow)]">
             <h3 className="text-sm font-medium text-gray-900">已经生成的内容</h3>
             <div className="mt-3 space-y-3">{fields.map(([key, value]) => <div key={key}><p className="text-xs text-green-600">✓ {FIELD_LABELS[key]}</p><p className="mt-0.5 line-clamp-3 whitespace-pre-wrap text-sm leading-relaxed text-gray-700">{previewValue(value)}</p></div>)}</div>
           </section>
         )}
 
         {immersive && active && (
-          <section className="mt-3 rounded-xl bg-white p-4 text-sm text-gray-600">
+          <section className="mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] p-4 text-sm text-[var(--ui-text-2)] shadow-[var(--ui-shadow)]">
             <p>✓ 已确认你的寻找偏好</p>
             <p className="mt-2 text-[var(--ui-special-ink)]">● {task.stageLabel}</p>
             <p className="mt-2 text-gray-300">○ 正在确认是否适合认识</p>
@@ -80,7 +80,7 @@ export function ContactGenerationTaskPage() {
         )}
 
         {task.status === 'awaiting_review' && draft && (
-          <section className="mt-3 rounded-xl bg-white p-4">
+          <section className="mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] p-4 shadow-[var(--ui-shadow)]">
             <div className="mb-3"><h3 className="text-base font-medium text-gray-900">AI人设初稿</h3><p className="mt-1 text-xs text-gray-400">初稿已完成。你可以二次修改，确认后联系人正式上线。</p></div>
             <div className="grid grid-cols-2 gap-2">
               <label className="text-xs text-gray-500">姓名<input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" /></label>
@@ -98,7 +98,7 @@ export function ContactGenerationTaskPage() {
         )}
 
         {task.error && (
-          <section className="mt-3 rounded-xl border border-red-100 bg-white p-4">
+          <section className="mt-3 rounded-[var(--ui-radius-card)] border border-[var(--ui-danger)] bg-[var(--ui-surface)] p-4 shadow-[var(--ui-shadow)]">
             <h3 className="text-sm font-medium text-red-600">{task.error.message}</h3>
             <p className="mt-2 text-xs leading-relaxed text-gray-500">失败阶段：{task.error.stage}<br/>错误代码：{task.error.code}<br/>技术原因：{task.error.technicalMessage}</p>
             {task.error.validation && <div className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs leading-relaxed text-red-700">

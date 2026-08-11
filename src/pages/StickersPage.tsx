@@ -69,11 +69,14 @@ export function StickersPage() {
   }
 
   return (
-    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[var(--ui-bg)]">
       <TopBar title="表情包管理" showBack />
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto pb-6">
 
-      <section className="mt-3 bg-white">
+      <section className="border-b border-[var(--ui-border-soft)] bg-[var(--ui-surface)] px-4 pb-4 pt-5">
+        <p className="text-xs font-medium text-[var(--ui-text-3)]">我的表情库</p>
+        <h1 className="ui-font-display mt-1 text-lg font-semibold text-[var(--ui-text)]">{stickers.length} 个本地表情</h1>
+        <p className="mt-2 text-xs text-[var(--ui-text-3)]">本地表情可直接使用；远程服务让 AI 和用户临时搜索更多内容。</p>
         <button type="button" onClick={() => navigate('/stickers/remote')} className="flex w-full items-center gap-3 px-4 py-4 text-left">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-[var(--ui-special-ink)]"><Globe size={20} /></div>
           <div className="min-w-0 flex-1">
@@ -86,9 +89,11 @@ export function StickersPage() {
         </button>
       </section>
 
-      <section className="mt-3 bg-white px-4 py-4">
-        <h2 className="mb-2 text-xs font-medium text-gray-400">添加表情包</h2>
-        <input ref={fileInput} type="file" accept="image/*" onChange={handleFile} className="mb-2 text-sm" />
+      <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
+        <h2 className="ui-font-display text-sm font-semibold text-[var(--ui-text)]">添加本地表情</h2>
+        <p className="mt-1 text-[11px] text-[var(--ui-text-3)]">选择图片并设置唯一名称，聊天时可按名称调用。</p>
+        <input ref={fileInput} type="file" accept="image/*" onChange={handleFile} className="hidden" />
+        <button type="button" onClick={() => fileInput.current?.click()} className="mt-3 w-full rounded-[var(--ui-radius-control)] border border-dashed border-[var(--ui-border)] bg-[var(--ui-surface-2)] py-3 text-sm text-[var(--ui-text-2)]">{pendingImage ? '重新选择图片' : '选择一张图片'}</button>
         {pendingImage && (
           <div className="mb-2 flex items-center gap-3">
             <img src={pendingImage} alt="预览" className="h-16 w-16 rounded-lg object-cover" />
@@ -110,8 +115,9 @@ export function StickersPage() {
         </button>
       </section>
 
-      <section className="mt-3 flex-1 bg-white px-4 py-4">
-        <h2 className="mb-3 text-xs font-medium text-gray-400">已有表情包（{stickers.length}）</h2>
+      <section className="mx-3 mt-3 flex-1 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
+        <h2 className="ui-font-display mb-1 text-sm font-semibold text-[var(--ui-text)]">已有表情</h2>
+        <p className="mb-4 text-[11px] text-[var(--ui-text-3)]">点击名称可重命名；删除操作会再次确认。</p>
         {stickers.length === 0 ? (
           <p className="text-sm text-gray-400">还没有表情包 对方暂时无法发送表情</p>
         ) : (

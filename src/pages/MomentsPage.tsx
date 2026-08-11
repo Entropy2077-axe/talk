@@ -230,7 +230,7 @@ export function MomentsPage() {
   }
 
   return (
-    <div data-page-kind="moments" className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#ededed]">
+    <div data-page-kind="moments" className="ui-page relative">
       <TopBar
         title={filterContact ? `${displayName(filterContact)}的朋友圈` : '朋友圈'}
         showBack
@@ -281,7 +281,8 @@ export function MomentsPage() {
       </div>}
 
       {composerOpen && (
-        <div className="border-b border-gray-100 bg-white px-4 py-3">
+        <div className="border-b border-[var(--ui-border-soft)] bg-[var(--ui-surface)] px-4 py-3">
+          <div className="mb-3"><p className="ui-section-title">分享此刻</p><p className="ui-section-summary">发布后会进入你和联系人共同可见的动态流。</p></div>
           <textarea
             value={composerText}
             onChange={(e) => setComposerText(e.target.value)}
@@ -314,7 +315,7 @@ export function MomentsPage() {
 
       <div className="flex-1">
         {visibleMoments.length === 0 ? (
-          <p className="bg-white py-10 text-center text-sm text-gray-400">{filterContact ? 'TA还没有发布过朋友圈' : '还没有动态 点右上角刷新试试'}</p>
+          <div className="ui-empty-state">{filterContact ? 'TA 还没有发布过朋友圈。' : '还没有动态，可以发布一条或点击右上角刷新。'}</div>
         ) : (
           visibleMoments.map((m) => {
             const isUserPost = m.contactId === 'user'

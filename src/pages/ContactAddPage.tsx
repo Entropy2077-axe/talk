@@ -547,25 +547,25 @@ issues 要用简短中文列出具体错误。` },
   }
 
   return (
-    <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[var(--ui-bg)]">
       <TopBar title="添加联系人" showBack />
 
-      <div className="mt-3 flex-1 overflow-y-auto bg-white px-4 py-4">
-        {settings.experienceMode === 'free' ? <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-1" role="group" aria-label="创建方式">
-          <div className="grid grid-cols-2 gap-1">
-            <button type="button" aria-pressed={!isNuwaMode} onClick={() => { setIsNuwaMode(false); setPersonaDraft(null); setError('') }} className={`rounded-lg py-2.5 text-sm ${!isNuwaMode ? 'bg-white font-medium text-gray-900 shadow-sm' : 'text-gray-500'}`}>帮我找人</button>
-            <button type="button" aria-pressed={isNuwaMode} onClick={() => { setIsNuwaMode(true); setPersonaDraft(null); setError('') }} className={`rounded-lg py-2.5 text-sm ${isNuwaMode ? 'bg-[var(--ui-special)] font-medium text-white shadow-sm' : 'text-gray-500'}`}>精细创建</button>
-          </div>
-          <p className="px-2 pb-1 pt-2 text-[11px] leading-relaxed text-gray-400">帮我找人会随机补全所有未选择的项目；精细创建（女娲模式）会先生成可修改的完整初稿。</p>
-        </div> : <div className="mb-4 rounded-xl border border-[var(--ui-special-border)] bg-[var(--ui-special-soft)] px-3 py-3"><p className="text-sm font-medium text-[var(--ui-special-ink)]">帮我找人</p><p className="mt-1 text-xs leading-relaxed text-[var(--ui-special-ink)]">只需选择你在意的条件，其他资料会在寻找过程中自然确定。</p></div>}
+      <div className="flex-1 overflow-y-auto px-4 pb-5 pt-4">
+        <section className="mb-4">
+          <p className="text-xs font-medium text-[var(--ui-text-3)]">认识一个新的人</p>
+          <h1 className="ui-font-display mt-1 text-xl font-semibold text-[var(--ui-text)]">先决定你想参与到什么程度</h1>
+          <p className="mt-2 text-xs leading-relaxed text-[var(--ui-text-3)]">只填写你真正关心的部分；名字和未指定资料会由对方自己确定。</p>
+        </section>
+        {settings.experienceMode === 'free' ? <div className="mb-4 grid grid-cols-2 gap-2" role="group" aria-label="创建方式">
+            <button type="button" aria-pressed={!isNuwaMode} onClick={() => { setIsNuwaMode(false); setPersonaDraft(null); setError('') }} className={`rounded-[var(--ui-radius-card)] border p-3 text-left ${!isNuwaMode ? 'border-[var(--ui-action)] bg-[var(--ui-accent-soft)]' : 'border-[var(--ui-border)] bg-[var(--ui-surface)]'}`}><span className="block text-sm font-semibold text-[var(--ui-text)]">帮我找人</span><span className="mt-1 block text-[11px] leading-relaxed text-[var(--ui-text-3)]">给出偏好，其余内容自然补全</span></button>
+            <button type="button" aria-pressed={isNuwaMode} onClick={() => { setIsNuwaMode(true); setPersonaDraft(null); setError('') }} className={`rounded-[var(--ui-radius-card)] border p-3 text-left ${isNuwaMode ? 'border-[var(--ui-action)] bg-[var(--ui-accent-soft)]' : 'border-[var(--ui-border)] bg-[var(--ui-surface)]'}`}><span className="block text-sm font-semibold text-[var(--ui-text)]">精细创建</span><span className="mt-1 block text-[11px] leading-relaxed text-[var(--ui-text-3)]">先生成完整初稿，再逐项确认</span></button>
+        </div> : <div className="mb-4 rounded-[var(--ui-radius-card)] border border-[var(--ui-special-border)] bg-[var(--ui-special-soft)] px-3 py-3"><p className="text-sm font-medium text-[var(--ui-special-ink)]">帮我找人</p><p className="mt-1 text-xs leading-relaxed text-[var(--ui-special-ink)]">只需选择你在意的条件，其他资料会在寻找过程中自然确定。</p></div>}
         {!isNuwaMode && <button type="button" onClick={completelyRandom} disabled={generating} className="mb-4 flex w-full items-center justify-center gap-2 rounded-lg bg-gray-900 py-3 text-sm font-medium text-white transition active:scale-[.98] disabled:opacity-50"><Dice5 size={17} />完全随机寻找</button>}
-        {settings.experienceMode === 'free' && <><button type="button" onClick={() => characterCardInputRef.current?.click()} disabled={generating} className="mb-4 w-full rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] bg-[var(--ui-surface-2)] py-2.5 text-sm text-[var(--ui-text-2)] disabled:opacity-50">导入角色卡到资料库并创建</button>
+        {settings.experienceMode === 'free' && <><button type="button" onClick={() => characterCardInputRef.current?.click()} disabled={generating} className="mb-4 w-full rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] bg-[var(--ui-surface)] py-2.5 text-sm text-[var(--ui-text-2)] disabled:opacity-50">已有角色卡？导入到资料库并创建</button>
         <input ref={characterCardInputRef} type="file" accept=".png,.json,application/json,image/png" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importCharacterCard(file) }} />
         {importedCardName && <p className="-mt-2 mb-4 break-all text-[11px] text-[var(--ui-text-3)]">已载入：{importedCardName}</p>}</>}
         {isNuwaMode && <p className="mb-2 text-xs text-[var(--ui-special-ink)]">女娲模式：先写初稿建议和你确定的设定，AI只补全仍为空的内容。</p>}
-        <p className="mb-4 text-xs text-gray-400">
-          描述一下你想认识的这个人 名字会由对方自己来定；创建后可在管理员模式下修正完整设定
-        </p>
+        <div className="mb-4 border-t border-[var(--ui-border-soft)] pt-4"><h2 className="ui-font-display text-sm font-semibold text-[var(--ui-text)]">{personaDraft ? '检查 AI 初稿' : '告诉我你在意的部分'}</h2><p className="mt-1 text-[11px] text-[var(--ui-text-3)]">{personaDraft ? '确认身份、关系、经历和说话方式后再创建。' : '未选择的项目会自动补全；创建后仍可在管理员模式修正完整设定。'}</p></div>
 
         {isNuwaMode && <div className="mb-4 grid grid-cols-2 gap-2"><button type="button" onClick={() => void saveCurrentPersona()} className="rounded-lg bg-gray-900 py-2.5 text-sm text-white">保存当前人设</button><button type="button" onClick={() => { setPersonaPage(0); setPersonaPickerOpen(true) }} className="rounded-lg border border-gray-300 bg-white py-2.5 text-sm text-gray-800">使用已保存的人设</button></div>}
         {isNuwaMode && <button type="button" onClick={() => setCreationPickerOpen(true)} className="mb-4 w-full rounded-lg border border-[var(--ui-special-border)] bg-[var(--ui-special-soft)] py-2.5 text-sm text-[var(--ui-special-ink)]">调用以前创建过的人设（{creationRecords.length}）</button>}
@@ -930,11 +930,11 @@ issues 要用简短中文列出具体错误。` },
         {!isNuwaMode && error && <p className="mt-3 text-xs text-red-500">{error}</p>}
       </div>
 
-      <div className="sticky bottom-0 border-t border-gray-100 bg-white p-3">
+      <div className="sticky bottom-0 border-t border-[var(--ui-border-soft)] bg-[var(--ui-surface)] p-3 pb-[calc(.75rem+env(safe-area-inset-bottom))]">
         <button
           onClick={() => void handleGenerate(undefined, personaDraft ?? undefined)}
           disabled={generating}
-          className="w-full rounded-lg bg-gray-900 py-2.5 text-sm text-white disabled:opacity-40"
+          className="w-full rounded-[var(--ui-radius-control)] bg-[var(--ui-action)] py-3 text-sm font-medium text-[var(--ui-on-action)] disabled:opacity-40"
         >
           {generating ? '正在提交任务…' : personaDraft ? '确认修改并创建' : isNuwaMode ? '生成AI初稿' : '开始寻找'}
         </button>

@@ -344,19 +344,28 @@ export function ImageProviderSettingsPage() {
   }
 
   return (
-    <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[var(--ui-bg)]">
       <TopBar title={info.name} showBack />
       <div className="flex-1 overflow-y-auto pb-6">
-        <section className="mt-3 bg-white px-4 py-4">
+        <section className="border-b border-[var(--ui-border-soft)] bg-[var(--ui-surface)] px-4 pb-4 pt-5">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-base font-medium text-gray-900">{info.name}</h2>
+              <p className="text-xs font-medium text-[var(--ui-text-3)]">图片生成服务</p>
+              <h1 className="ui-font-display mt-1 text-lg font-semibold text-[var(--ui-text)]">{info.name}</h1>
               <p className="mt-1 text-xs leading-relaxed text-gray-400">{info.description}</p>
             </div>
             <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] ${active ? 'bg-green-50 text-green-600' : 'bg-gray-100 text-gray-500'}`}>
               {active ? '使用中' : '未启用'}
             </span>
           </div>
+          <div className="mb-5 grid grid-cols-2 gap-2">
+            <button type="button" onClick={activate} disabled={active} className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] py-2.5 text-sm text-[var(--ui-text-2)] disabled:opacity-50">{active ? '已启用' : '启用此服务'}</button>
+            <button type="button" onClick={() => void generatePreview()} className={`rounded-[var(--ui-radius-control)] py-2.5 text-sm text-[var(--ui-on-action)] ${generating ? 'bg-[var(--ui-danger)]' : 'bg-[var(--ui-action)]'}`}>{generating ? '停止等待' : '生成测试图'}</button>
+          </div>
+          {(provider === 'novelai' || provider === 'comfyui' || provider === 'stable-diffusion') && <button type="button" onClick={() => void testConnection()} disabled={testing} className="mb-2 w-full rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] py-2.5 text-sm text-[var(--ui-text-2)] disabled:opacity-50">{testing ? '验证中…' : provider === 'novelai' ? '只验证 Token（不生图）' : '只测试连接（不生图）'}</button>}
+          <p className="mb-4 text-[11px] leading-relaxed text-[var(--ui-warning-ink)]">“生成测试图”会真实调用接口，云端服务可能消耗额度。</p>
+          {status && <p className={`mb-4 text-xs ${status.pending ? 'text-[var(--ui-warning-ink)]' : status.ok ? 'text-[var(--ui-success-ink)]' : 'text-[var(--ui-danger-ink)]'}`}>{status.pending ? '… ' : status.ok ? '✓ ' : '✕ '}{status.text}</p>}
+          <div className="mb-4 border-t border-[var(--ui-border-soft)] pt-4"><h2 className="ui-font-display text-sm font-semibold text-[var(--ui-text)]">连接与生成参数</h2><p className="mt-1 text-[11px] text-[var(--ui-text-3)]">先填写服务需要的连接信息，再按需调整模型和工作流。</p></div>
 
           {provider === 'atlas' && (
             <div className="space-y-3">
@@ -722,26 +731,11 @@ export function ImageProviderSettingsPage() {
             </div>
           )}
 
-          <div className="mt-5 grid grid-cols-2 gap-2">
-            <button type="button" onClick={activate} disabled={active} className="rounded-lg bg-gray-100 py-2.5 text-sm text-gray-700 disabled:opacity-50">
-              {active ? '已启用' : '启用此服务'}
-            </button>
-            <button type="button" onClick={() => void generatePreview()} className={`rounded-lg py-2.5 text-sm text-white ${generating ? 'bg-red-500' : 'bg-gray-900'}`}>
-              {generating ? '停止等待' : '生成测试图'}
-            </button>
-          </div>
-          {(provider === 'novelai' || provider === 'comfyui' || provider === 'stable-diffusion') && (
-            <button type="button" onClick={() => void testConnection()} disabled={testing} className="mt-2 w-full rounded-lg border border-gray-200 py-2.5 text-sm text-gray-600 disabled:opacity-50">
-              {testing ? '验证中…' : provider === 'novelai' ? '只验证 Token（不生图）' : '只测试连接（不生图）'}
-            </button>
-          )}
-          <p className="mt-2 text-[11px] leading-relaxed text-amber-600">“生成测试图”会真实调用接口，云端服务可能消耗额度。</p>
-          {status && <p className={`mt-3 text-xs ${status.pending ? 'text-amber-600' : status.ok ? 'text-green-600' : 'text-red-500'}`}>{status.pending ? '… ' : status.ok ? '✓ ' : '✕ '}{status.text}</p>}
         </section>
 
         {preview && (
-          <section className="mt-3 bg-white px-4 py-4">
-            <h2 className="mb-3 text-xs font-medium text-gray-400">实际调用结果</h2>
+          <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
+            <h2 className="ui-font-display mb-3 text-sm font-semibold text-[var(--ui-text)]">实际调用结果</h2>
             <div className={(preview.urls?.length ?? 1) > 1 ? 'grid grid-cols-2 gap-2' : ''}>
               {(preview.urls?.length ? preview.urls : [preview.url]).map((url, index) => (
                 <img key={`${index}:${url.slice(-24)}`} src={url} alt={`生图测试结果 ${index + 1}`} onLoad={() => confirmPreviewLoaded(url)} onError={reportPreviewLoadFailure} className="max-h-96 w-full rounded-xl bg-gray-50 object-contain" />

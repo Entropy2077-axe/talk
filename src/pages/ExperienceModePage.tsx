@@ -17,10 +17,10 @@ export function ExperienceModePage() {
   }
 
   return (
-    <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="ui-page">
       <TopBar title="体验模式" showBack />
-      <div className="flex-1 overflow-y-auto px-4 py-4">
-        <p className="mb-4 text-xs leading-relaxed text-gray-500">选择你希望怎样使用 Talk。切换模式不会删除联系人、聊天记录或原有模组配置。</p>
+      <div className="ui-page-scroll px-4 py-4">
+        <p className="ui-page-kicker">使用方式</p><h1 className="ui-page-title">你希望 Talk 更像真实聊天，还是创作工具？</h1><p className="ui-page-summary mb-4">切换模式不会删除联系人、聊天记录或原有模组配置。</p>
         <button onClick={() => choose('immersive')} className={`block w-full rounded-xl border p-4 text-left ${mode === 'immersive' ? 'border-[var(--ui-special)] bg-[var(--ui-special-soft)]' : 'border-gray-200 bg-white'}`}>
           <div className="flex items-center justify-between"><h2 className="text-base font-medium text-gray-900">沉浸模式</h2>{mode === 'immersive' && <span className="text-xs text-[var(--ui-special-ink)]">使用中</span>}</div>
           <p className="mt-2 text-sm leading-relaxed text-gray-600">把这里当成真实聊天软件。通过模糊条件寻找联系人，对方不保证秒回，并隐藏好感度、读心、内部意图和地点等系统信息。</p>

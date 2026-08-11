@@ -474,6 +474,19 @@ body {
 .desktop-list-top { display: flex; min-width: 0; align-items: center; gap: 8px; }
 .desktop-list-top strong { flex: 1; }
 .desktop-list-top time { color: #a3a7ad; font-size: 11px; }
+.desktop-settings-list { padding: 0 10px 16px; }
+.desktop-settings-group { margin-top: 10px; }
+.desktop-settings-group:first-child { margin-top: 2px; }
+.desktop-settings-label { padding: 0 6px 7px; color: var(--ui-text-3); font-size: 11px; font-weight: 600; letter-spacing: .04em; }
+.desktop-settings-card { overflow: hidden; border: 1px solid var(--ui-border-soft); border-radius: var(--ui-radius-card); background: var(--ui-surface); }
+.desktop-settings-card .desktop-list-row { min-height: 62px; padding: 8px 10px; }
+.desktop-settings-card .desktop-list-row + .desktop-list-row { border-top: 1px solid var(--ui-border-soft); }
+.desktop-settings-card .desktop-list-row.active { background: var(--ui-surface-3); }
+.desktop-settings-card .desktop-menu-avatar { width: 42px; height: 42px; flex-basis: 42px; border-radius: var(--ui-radius-control); }
+.desktop-settings-profile { display: flex; width: 100%; align-items: center; gap: 12px; padding: 14px 12px; text-align: left; }
+.desktop-settings-profile:hover, .desktop-settings-profile.active { background: var(--ui-surface-2); }
+.desktop-settings-profile .desktop-list-copy strong { font-size: 16px; }
+.desktop-settings-chevron { color: var(--ui-text-3); font-size: 22px; line-height: 1; }
 .desktop-add-avatar, .desktop-menu-avatar { display: grid; width: 48px; height: 48px; flex: 0 0 48px; place-items: center; border-radius: 11px; background: #e4f3e8; color: #27332c; font-size: 21px; }
 .desktop-menu-avatar { background: #e8ebee; font-size: 18px; }
 .desktop-generation-avatar.failed { background: #fef2f2; color: #ef4444; }
@@ -758,6 +771,33 @@ html, body, #root { background: var(--ui-bg); font-family: var(--ui-font-body); 
 .app-shell .ui-font-reading { font-family: var(--ui-font-reading); }
 .app-shell .font-mono { font-family: var(--ui-font-mono) !important; }
 .app-shell .font-sans { font-family: var(--ui-font-body) !important; }
+
+/* Semantic page-layout primitives. Pages choose a composition that matches
+   their task, but share one vocabulary for hierarchy, spacing and states. */
+.ui-page { display: flex; height: var(--app-height); flex-direction: column; overflow: hidden; background: var(--ui-bg); }
+.ui-page-scroll { min-height: 0; flex: 1; overflow-y: auto; padding-bottom: calc(1.5rem + env(safe-area-inset-bottom)); }
+.ui-page-intro { border-bottom: 1px solid var(--ui-border-soft); background: var(--ui-surface); padding: 20px 16px 18px; }
+.ui-page-kicker { color: var(--ui-text-3); font-size: 12px; font-weight: 600; }
+.ui-page-title { margin-top: 4px; color: var(--ui-text); font-family: var(--ui-font-display); font-size: 20px; font-weight: 650; line-height: 1.3; }
+.ui-page-summary { margin-top: 8px; color: var(--ui-text-3); font-size: 12px; line-height: 1.65; }
+.ui-section-label { margin: 0; padding: 20px 16px 8px; color: var(--ui-text-3); font-size: 12px; font-weight: 600; }
+.ui-section-card { margin: 0 12px; border-radius: var(--ui-radius-card); background: var(--ui-surface); padding: 16px; box-shadow: var(--ui-shadow); }
+.ui-section-card.ui-section-spaced { margin-top: 12px; }
+.ui-section-card.ui-section-flush { margin-left: 0; margin-right: 0; }
+.ui-section-title { color: var(--ui-text); font-family: var(--ui-font-display); font-size: 14px; font-weight: 650; }
+.ui-section-summary { margin-top: 4px; color: var(--ui-text-3); font-size: 11px; line-height: 1.6; }
+.ui-list-card { margin: 0 12px; overflow: hidden; border-radius: var(--ui-radius-card); background: var(--ui-surface); box-shadow: var(--ui-shadow); }
+.ui-list-row { display: flex; width: 100%; min-height: 52px; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--ui-border-soft); padding: 12px 16px; color: var(--ui-text); text-align: left; }
+.ui-list-row:last-child { border-bottom: 0; }
+.ui-list-row:active { background: var(--ui-surface-2); }
+.ui-list-label { min-width: 0; flex: 1; font-size: 15px; }
+.ui-list-note { color: var(--ui-text-3); font-size: 12px; text-align: right; }
+.ui-soft-block { border-radius: var(--ui-radius-control); background: var(--ui-surface-2); padding: 12px; }
+.ui-empty-state { margin: 16px 12px 0; border-radius: var(--ui-radius-card); background: var(--ui-surface); padding: 40px 20px; color: var(--ui-text-3); text-align: center; box-shadow: var(--ui-shadow); }
+.ui-empty-state.ui-section-flush { margin-left: 0; margin-right: 0; }
+.ui-primary-action { border-radius: var(--ui-radius-control); background: var(--ui-action); color: var(--ui-on-action); }
+.ui-secondary-action { border: 1px solid var(--ui-border); border-radius: var(--ui-radius-control); background: var(--ui-surface-2); color: var(--ui-text-2); }
+.ui-danger-action { border-radius: var(--ui-radius-control); background: var(--ui-danger-soft); color: var(--ui-danger-ink); }
 .desktop-list-copy strong { font-family: var(--ui-font-display); }
 
 /* Theme cards preview their own typography before selection. This changes

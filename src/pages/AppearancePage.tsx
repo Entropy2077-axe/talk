@@ -9,10 +9,11 @@ export function AppearancePage() {
   const setSettings = useSettingsStore((state) => state.setSettings)
 
   return (
-    <div className="appearance-page flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="appearance-page ui-page">
       <TopBar title="软件风格切换" showBack />
-      <div className="appearance-scroll flex-1 overflow-y-auto px-4 py-5">
-        <section className="appearance-panel mx-auto max-w-3xl bg-white p-4">
+      <div className="appearance-scroll ui-page-scroll px-4 py-5">
+        <div className="mx-auto mb-4 max-w-3xl"><p className="ui-page-kicker">外观与阅读体验</p><h1 className="ui-page-title">选择适合你的界面气质</h1><p className="ui-page-summary">风格会统一改变颜色、字体、圆角与质感，不会移动功能入口或改变操作方式。</p></div>
+        <section className="appearance-panel mx-auto max-w-3xl rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] p-4 shadow-[var(--ui-shadow)]">
           <div className="mb-3">
             <h2 className="text-[15px] font-semibold text-gray-900">明暗模式</h2>
             <p className="mt-1 text-xs leading-5 text-gray-500">每套风格都包含完整的浅色与深色方案。</p>

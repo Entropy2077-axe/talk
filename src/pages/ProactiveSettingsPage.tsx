@@ -62,10 +62,16 @@ export function ProactiveSettingsPage() {
   } = settings
 
   return (
-    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="ui-page relative">
       <TopBar title="自主行为设置" showBack />
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-4 mt-3 overflow-hidden rounded-xl bg-white">
+      <div className="ui-page-scroll">
+        <header className="ui-page-intro">
+          <p className="ui-page-kicker">后台节奏</p>
+          <h1 className="ui-page-title">控制主动联系的频率</h1>
+          <p className="ui-page-summary">先调整聊天触发与刷新节奏，心情持续时间作为独立的状态配置放在后面。</p>
+        </header>
+        <p className="ui-section-label">主动聊天与朋友圈</p>
+        <div className="ui-list-card">
           <SliderRow
             label="每天主动聊天次数上限"
             desc="1~15次，拉到最右为∞不限制（会产生较多API费用）"
@@ -135,7 +141,8 @@ export function ProactiveSettingsPage() {
           />
         </div>
 
-        <div className="mx-4 mt-3 overflow-hidden rounded-xl bg-white">
+        <p className="ui-section-label">状态持续时间</p>
+        <div className="ui-list-card">
           <SliderRow
             label="心情持续时间"
             desc="AI表达的心情（如开心、吃醋、生气）持续多久后自动消失"
@@ -148,7 +155,7 @@ export function ProactiveSettingsPage() {
           />
         </div>
 
-        <div className="mx-4 mt-6 mb-6">
+        <div className="mx-3 mb-2 mt-6">
           <button
             onClick={() =>
               setSettings({
@@ -160,7 +167,7 @@ export function ProactiveSettingsPage() {
                 proactiveTickIntervalMs: 5 * 60 * 1000,
               })
             }
-            className="w-full rounded-xl bg-white px-4 py-3 text-sm text-gray-500 active:bg-gray-50"
+            className="ui-secondary-action"
           >
             恢复默认
           </button>

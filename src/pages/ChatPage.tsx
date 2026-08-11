@@ -651,7 +651,7 @@ export function ChatPage() {
   if (conversation === undefined) return null
   if (conversation === null) {
     return (
-      <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#ededed]">
+      <div className="ui-page">
         <TopBar title="对话" showBack />
         <p className="px-4 py-10 text-center text-sm text-gray-400">会话不存在</p>
       </div>
@@ -661,7 +661,7 @@ export function ChatPage() {
     if (group === undefined) return null
     if (group === null) {
       return (
-        <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#ededed]">
+        <div className="ui-page">
           <TopBar title="群聊" showBack />
           <p className="px-4 py-10 text-center text-sm text-gray-400">该群聊已被解散</p>
         </div>
@@ -671,7 +671,7 @@ export function ChatPage() {
     if (contact === undefined) return null
     if (contact === null) {
       return (
-        <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#ededed]">
+        <div className="ui-page">
           <TopBar title="对话" showBack />
           <p className="px-4 py-10 text-center text-sm text-gray-400">会话不存在</p>
         </div>
@@ -692,7 +692,7 @@ export function ChatPage() {
         : undefined
 
   return (
-    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#ededed]">
+    <div className="ui-page relative">
       <TopBar
         title={selectingMessages ? `已选择 ${selectedMessageIds.length} 条` : visibleHeaderTitle}
         showBack={!selectingMessages}

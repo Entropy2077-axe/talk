@@ -29,9 +29,9 @@ export function StickerProviderSettingsPage() {
 
   if (!isKnownProvider(providerId)) {
     return (
-      <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+      <div className="ui-page">
         <TopBar title="表情包接口" showBack />
-        <div className="p-4 text-sm text-gray-500">这个服务不存在。</div>
+        <div className="ui-page-scroll"><div className="ui-empty-state"><p>这个服务不存在。</p></div></div>
       </div>
     )
   }
@@ -89,10 +89,11 @@ export function StickerProviderSettingsPage() {
   const active = stickerProvider === provider
 
   return (
-    <div className="flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="ui-page">
       <TopBar title={info.name} showBack />
-      <div className="flex-1 overflow-y-auto pb-6">
-        <section className="mt-3 bg-white px-4 py-4">
+      <div className="ui-page-scroll">
+        <header className="ui-page-intro"><p className="ui-page-kicker">表情包服务</p><h1 className="ui-page-title">{info.name}</h1><p className="ui-page-summary">先确认当前服务，再配置搜索、鉴权与预览参数。</p></header>
+        <section className="ui-section-card px-4 py-4">
           <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <h2 className="text-base font-medium text-gray-900">{info.name}</h2>
@@ -233,7 +234,7 @@ export function StickerProviderSettingsPage() {
         </section>
 
         {results.length > 0 && (
-          <section className="mt-3 bg-white px-4 py-4">
+          <section className="ui-section-card ui-section-spaced px-4 py-4">
             <h2 className="mb-3 text-xs font-medium text-gray-400">搜索预览</h2>
             <div className="grid grid-cols-4 gap-2">
               {results.map((item, index) => (

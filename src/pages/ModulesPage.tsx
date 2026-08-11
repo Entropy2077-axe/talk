@@ -30,14 +30,18 @@ export function ModulesPage() {
     ALL_MODULES.filter((m) => m.parentId === parentId)
 
   return (
-    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="ui-page relative">
       <TopBar title="模组" showBack />
 
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-4 mt-3 space-y-3">
-          <p className="text-xs text-gray-400">
+      <div className="ui-page-scroll">
+        <header className="ui-page-intro">
+          <p className="ui-page-kicker">功能组合</p>
+          <h1 className="ui-page-title">已开启 {enabledModules.length} 个模组</h1>
+          <p className="ui-page-summary">
             开启或关闭功能模组，关闭后对应功能和入口隐藏，不会引发报错
           </p>
+        </header>
+        <div className="mx-3 space-y-3">
 
           {/* Parent module accordions */}
           {PARENT_MODULES.map((parent) => {
@@ -48,7 +52,7 @@ export function ModulesPage() {
             const anyOn = kids.some((k) => enabledModules.includes(k.id))
 
             return (
-              <div key={parent.id} className="overflow-hidden rounded-xl bg-white">
+              <div key={parent.id} className="overflow-hidden rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-[var(--ui-surface)]">
                 <button
                   onClick={() => toggleExpand(parent.id)}
                   className="flex w-full items-center justify-between px-4 py-3.5"
@@ -119,7 +123,7 @@ export function ModulesPage() {
             return (
               <div
                 key={mod.id}
-                className="flex items-center justify-between rounded-xl bg-white px-4 py-3.5"
+                className="flex items-center justify-between rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3.5"
               >
                 <div className="flex items-center gap-3">
                   <UiIcon name={mod.icon} size={20} className="text-[var(--ui-special-ink)]" />
@@ -139,14 +143,14 @@ export function ModulesPage() {
           })}
 
           {ALL_MODULES.length === 0 && (
-            <p className="py-8 text-center text-sm text-gray-400">暂无可用模组</p>
+            <div className="ui-empty-state ui-section-flush"><p>暂无可用模组</p></div>
           )}
         </div>
 
-        <div className="mx-4 mt-6 mb-6">
+        <div className="mx-3 mb-2 mt-6">
           <button
             onClick={() => setSettings({ enabledModules: DEFAULT_ENABLED_MODULES })}
-            className="w-full rounded-xl bg-white px-4 py-3 text-sm text-gray-500 active:bg-gray-50"
+            className="ui-secondary-action"
           >
             恢复默认
           </button>

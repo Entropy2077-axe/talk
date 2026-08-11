@@ -88,7 +88,7 @@ export function MessagesPage() {
   const menuConv = rows.find((r) => r.conv.id === menuFor)?.conv
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[var(--ui-bg)]">
       <TopBar
         title="消息"
         showSearch
@@ -107,9 +107,7 @@ export function MessagesPage() {
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
         {rows.length === 0 && (
-          <p className="px-4 py-10 text-center text-sm text-gray-400">
-            还没有会话 去"联系人"页添加一个联系人开始聊天吧
-          </p>
+          <div className="ui-empty-state"><p className="text-sm text-[var(--ui-text-2)]">还没有会话</p><p className="mt-1 text-xs">认识联系人后，对话会集中显示在这里。</p><button type="button" onClick={() => navigate('/contacts')} className="ui-primary-action mt-4 px-4 py-2 text-sm">前往联系人</button></div>
         )}
         {rows.map(({ conv, avatar, avatarColor, name, preview, unread }) => (
           <ConversationRow
@@ -173,7 +171,7 @@ const ConversationRow = memo(function ConversationRow(props: {
       {...longPress}
       onClick={() => props.onClick(props.conversationId)}
       className={`flex cursor-pointer items-center gap-3 px-4 py-2.5 select-none ${
-        props.pinned ? 'bg-gray-100' : 'bg-white active:bg-gray-50'
+        props.pinned ? 'bg-[var(--ui-surface-2)]' : 'bg-[var(--ui-surface)] active:bg-gray-50'
       }`}
     >
       <div className="relative shrink-0">

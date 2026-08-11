@@ -67,18 +67,19 @@ export function ProfileEditPage() {
   }
 
   return (
-    <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
+    <div className="ui-page relative">
       <TopBar title="编辑资料" showBack />
 
-      <div className="flex-1 overflow-y-auto">
-      <section className="mt-3 flex flex-col items-center gap-2 bg-white px-4 py-8">
+      <div className="ui-page-scroll">
+      <section className="ui-page-intro flex flex-col items-center gap-2">
         <button onClick={() => setPickingAvatar(true)}>
           <Avatar avatar={avatar} size={80} />
         </button>
         <span className="text-xs text-gray-400">点击更换头像</span>
       </section>
 
-      <section className="mt-3 bg-white px-4 py-2">
+      <h2 className="ui-section-label">聊天对象看到的你</h2>
+      <section className="ui-section-card">
         <label className="mb-1 block pt-2 text-xs text-gray-400">昵称</label>
         <input
           value={nickname}
@@ -127,8 +128,8 @@ export function ProfileEditPage() {
       </section>
       </div>
 
-      <div className="border-t border-gray-100 bg-white p-3">
-        <button onClick={handleSave} className="w-full rounded-lg bg-gray-900 py-2.5 text-sm text-white">
+      <div className="border-t border-[var(--ui-border-soft)] bg-[var(--ui-surface)] p-3 pb-[calc(.75rem+env(safe-area-inset-bottom))]">
+        <button onClick={handleSave} className="ui-primary-action w-full py-3 text-sm font-medium">
           保存
         </button>
       </div>
