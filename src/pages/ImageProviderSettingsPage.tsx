@@ -734,7 +734,7 @@ export function ImageProviderSettingsPage() {
         </section>
 
         {preview && (
-          <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
+          <section className="mx-4 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
             <h2 className="ui-font-display mb-3 text-sm font-semibold text-[var(--ui-text)]">实际调用结果</h2>
             <div className={(preview.urls?.length ?? 1) > 1 ? 'grid grid-cols-2 gap-2' : ''}>
               {(preview.urls?.length ? preview.urls : [preview.url]).map((url, index) => (

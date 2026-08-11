@@ -21,7 +21,7 @@ export function ContactsPage() {
   )
 
   return (
-    <div className="relative flex min-h-full flex-col bg-[var(--ui-bg)]">
+    <div className="relative min-h-full bg-[var(--ui-bg)]">
       <TopBar
         title="联系人"
         showSearch
@@ -39,7 +39,7 @@ export function ContactsPage() {
         }
       />
 
-      <div className="flex-1 bg-[var(--ui-surface)]">
+      <div className="bg-[var(--ui-surface)]">
         <div className="flex items-center justify-between border-b border-[var(--ui-border-soft)] px-4 py-2 text-xs text-[var(--ui-text-3)]"><span>我的联系人</span><span>{contacts.length} 人</span></div>
         <button
           onClick={() => navigate('/contact/new')}

@@ -174,7 +174,7 @@ export function WorkPage() {
           随机生成岗位
         </button>
         {error && <p className="mx-4 mt-2 text-xs text-red-500">{error}</p>}
-        <div className="mx-3 mt-3 space-y-3">
+        <div className="mx-4 mt-3 space-y-3">
           {jobs.slice(page * 4, page * 4 + 4).map((job) => (
             <article key={job.id} className="rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4">
               <div className="flex justify-between gap-2">

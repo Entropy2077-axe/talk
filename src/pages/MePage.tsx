@@ -110,7 +110,7 @@ export function MePage() {
   }
 
   return (
-    <div className="relative flex min-h-full flex-col bg-[var(--ui-bg)] pb-5">
+    <div className="relative min-h-full bg-[var(--ui-bg)] pb-5">
       <TopBar title="我" />
 
       <section className="border-b border-[var(--ui-border-soft)] bg-[var(--ui-surface)] px-4 pb-5 pt-4">
@@ -129,7 +129,7 @@ export function MePage() {
       </section>
 
       {careerEnabled && (
-        <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
+        <section className="mx-4 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="ui-font-display font-semibold text-[var(--ui-text)]">今日工资</p>
@@ -144,7 +144,7 @@ export function MePage() {
       )}
 
       <h2 className="px-4 pb-2 pt-5 text-xs font-medium text-[var(--ui-text-3)]">使用体验</h2>
-      <section className="mx-3 overflow-hidden rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow)]">
+      <section className="mx-4 overflow-hidden rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow)]">
         <button
           type="button"
           onClick={() => navigate('/experience-mode')}
@@ -184,7 +184,7 @@ export function MePage() {
       </section>
 
       <h2 className="px-4 pb-2 pt-5 text-xs font-medium text-[var(--ui-text-3)]">AI 与内容</h2>
-      <section className="mx-3 overflow-hidden rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow)]">
+      <section className="mx-4 overflow-hidden rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow)]">
         <button
           type="button"
           onClick={() => navigate('/presets')}
@@ -215,7 +215,7 @@ export function MePage() {
       </section>
 
       <h2 className="px-4 pb-2 pt-5 text-xs font-medium text-[var(--ui-text-3)]">应用管理</h2>
-      <section className="mx-3 overflow-hidden rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow)]">
+      <section className="mx-4 overflow-hidden rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow)]">
         <button onClick={() => navigate('/settings')} className="flex w-full items-center justify-between border-b border-[var(--ui-border-soft)] px-4 py-3.5 text-left active:bg-gray-50"><span className="text-[15px] text-[var(--ui-text)]">通用设置</span><span className="text-[var(--ui-text-3)]">›</span></button>
         <button onClick={() => navigate('/settings/other-interfaces')} className="flex w-full items-center justify-between border-b border-[var(--ui-border-soft)] px-4 py-3.5 text-left active:bg-gray-50"><span className="text-[15px] text-[var(--ui-text)]">其他接口</span><span className="text-[var(--ui-text-3)]">›</span></button>
         <button

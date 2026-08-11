@@ -89,7 +89,7 @@ export function StickersPage() {
         </button>
       </section>
 
-      <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
+      <section className="mx-4 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
         <h2 className="ui-font-display text-sm font-semibold text-[var(--ui-text)]">添加本地表情</h2>
         <p className="mt-1 text-[11px] text-[var(--ui-text-3)]">选择图片并设置唯一名称，聊天时可按名称调用。</p>
         <input ref={fileInput} type="file" accept="image/*" onChange={handleFile} className="hidden" />
@@ -115,7 +115,7 @@ export function StickersPage() {
         </button>
       </section>
 
-      <section className="mx-3 mt-3 flex-1 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
+      <section className="mx-4 mt-3 flex-1 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
         <h2 className="ui-font-display mb-1 text-sm font-semibold text-[var(--ui-text)]">已有表情</h2>
         <p className="mb-4 text-[11px] text-[var(--ui-text-3)]">点击名称可重命名；删除操作会再次确认。</p>
         {stickers.length === 0 ? (

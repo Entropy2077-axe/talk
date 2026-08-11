@@ -155,7 +155,7 @@ export function ProactiveSettingsPage() {
           />
         </div>
 
-        <div className="mx-3 mb-2 mt-6">
+        <div className="mx-4 mb-2 mt-6">
           <button
             onClick={() =>
               setSettings({

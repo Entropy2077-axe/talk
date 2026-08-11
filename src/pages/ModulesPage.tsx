@@ -41,7 +41,7 @@ export function ModulesPage() {
             开启或关闭功能模组，关闭后对应功能和入口隐藏，不会引发报错
           </p>
         </header>
-        <div className="mx-3 space-y-3">
+        <div className="mx-4 mt-3 space-y-3">
 
           {/* Parent module accordions */}
           {PARENT_MODULES.map((parent) => {
@@ -147,7 +147,7 @@ export function ModulesPage() {
           )}
         </div>
 
-        <div className="mx-3 mb-2 mt-6">
+        <div className="mx-4 mb-2 mt-6">
           <button
             onClick={() => setSettings({ enabledModules: DEFAULT_ENABLED_MODULES })}
             className="ui-secondary-action"

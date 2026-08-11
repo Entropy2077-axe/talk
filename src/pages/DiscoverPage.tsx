@@ -52,7 +52,7 @@ export function DiscoverPage() {
   ]
 
   return (
-    <div className="relative flex min-h-full flex-col bg-[var(--ui-bg)] pb-5">
+    <div className="relative min-h-full bg-[var(--ui-bg)] pb-5">
       <TopBar title="发现" showSearch onSearchClick={() => setSearching(true)} />
 
       <section className="ui-page-intro">
@@ -88,7 +88,7 @@ export function DiscoverPage() {
           <button
             type="button"
             onClick={() => navigate('/ai-test-cards')}
-            className="ui-list-row mx-3 w-[calc(100%-1.5rem)] rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow)]"
+            className="ui-list-row mx-4 w-[calc(100%-2rem)] rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow)]"
           >
             <span className="flex items-center gap-3">
               <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--ui-special-soft)]"><UiIcon name="🧪" size={19} /></span>
@@ -99,7 +99,6 @@ export function DiscoverPage() {
         </section>
       )}
 
-      <div className="flex-1" />
       {searching && <SearchOverlay onClose={() => setSearching(false)} />}
     </div>
   )
