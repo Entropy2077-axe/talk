@@ -14,7 +14,7 @@ import type {
 import { useSettingsStore } from '../store/useSettingsStore'
 import { buildPersonaGenerationPrompt, diagnosePersonaGeneration, type PersonaGenerationResult } from './prompt'
 import { speechVoiceGenerationContext } from './speechProviders'
-import { chatCompletionStream, chatCompletionText } from './deepseek'
+import { chatCompletionText } from './deepseek'
 import { completedTopLevelJsonFields } from './incrementalJson'
 import { selectedWorldbookEntriesText, retrieveWorldbookContext } from './worldbook'
 import { extractWorldbookPersonaCanon, type WorldbookPersonaCanon } from './worldbookPersonaCanon'
@@ -28,6 +28,7 @@ import { employmentPatch } from './career'
 import { displayName } from './contact'
 import { syncContactLocationsAt } from './locations'
 import { activePromptPreset, clonePromptModules } from './promptPresets'
+import { generatePersonaWithTools } from './personaAgentTools'
 
 const ACTIVE_STATUSES: ContactGenerationStatus[] = [
   'preparing', 'retrieving_context', 'extracting_canon', 'generating', 'validating', 'fetching_avatar', 'committing',
@@ -315,30 +316,15 @@ async function preparePersona(task: ContactGenerationTask, settings: AppSettings
   if (!prompt.trim()) throw codedError('PROMPT_DISABLED', '女娲创建提示词模块已屏蔽', false)
 
   await setStage(task, 'generating', { rawOutput: '', partialFields: {}, validationRepairAttempted: false })
-  let raw = ''
-  let lastPersistedAt = 0
-  raw = await chatCompletionStream({
-    apiKey: settings.apiKey,
-    baseUrl: settings.baseUrl,
-    model: settings.model,
-    provider: settings.aiProvider,
-    messages: [{ role: 'system', content: prompt }, { role: 'user', content: '请生成' }],
+  const generated = await generatePersonaWithTools({
+    settings,
+    systemPrompt: prompt,
+    taskId: task.id,
+    worldviewId: input.worldviewId,
+    voiceContext,
     signal,
-    thinking: 'disabled',
-    temperature: 0.7,
-    maxTokens: 2200,
-    jsonMode: true,
-    purpose: 'persona',
-    trace: { turnId: task.id, stage: 'other' },
-    onDelta: (delta) => {
-      raw += delta
-      const now = Date.now()
-      if (now - lastPersistedAt < 150) return
-      lastPersistedAt = now
-      const partialFields = completedTopLevelJsonFields(raw)
-      void db.contactGenerationTasks.update(task.id, { rawOutput: raw, partialFields, updatedAt: now })
-    },
   })
+  let raw = generated.raw
   task.rawOutput = raw
   task.partialFields = completedTopLevelJsonFields(raw)
   await setStage(task, 'validating', { rawOutput: raw, partialFields: task.partialFields })
@@ -469,6 +455,7 @@ async function commitTask(task: ContactGenerationTask) {
     : task.method === 'precision' ? parsed.initialWarmth ?? automaticWarmth : automaticWarmth
   const boundWorldbookEntryIds = Array.from(new Set([...input.selectedWorldbookEntryIds, ...(input.importedWorldbook?.entries.map((entry) => entry.id) ?? [])]))
   const contacts = await db.contacts.toArray()
+  const existingContactIds = new Set(contacts.map((contact) => contact.id))
   const byName = new Map(contacts.flatMap((contact) => [contact.name, contact.realName, contact.nickname, displayName(contact)].filter((name): name is string => !!name).map((name) => [name.trim().toLocaleLowerCase(), contact.id] as const)))
   const voiceContext = speechVoiceGenerationContext(useSettingsStore.getState())
   const generatedSpeechVoices = voiceContext && parsed.speechVoiceId && voiceContext.options.some((option) => option.id === parsed.speechVoiceId)
@@ -528,7 +515,10 @@ async function commitTask(task: ContactGenerationTask) {
     const past = parsed.pastExperiences ?? []
     if (past.length) {
       await db.contactExperiences.bulkAdd(past.map((experience) => ({
-        id: uuid(), contactIds: [contactId, ...Array.from(new Set(experience.relatedContactNames.map((name) => byName.get(name.trim().toLocaleLowerCase())).filter((id): id is string => !!id)))],
+        id: uuid(), contactIds: [contactId, ...Array.from(new Set([
+          ...(((experience as typeof experience & { relatedContactIds?: string[] }).relatedContactIds) ?? []).filter((id) => existingContactIds.has(id)),
+          ...experience.relatedContactNames.map((name) => byName.get(name.trim().toLocaleLowerCase())).filter((id): id is string => !!id),
+        ]))],
         kind: 'past' as const, memoryTier: 'long' as const, title: experience.title || '过去的经历', summary: experience.summary, periodLabel: experience.period || undefined, importance: experience.importance,
         sources: Array.from(new Set([input.sharedHistory ? 'user' : undefined, boundWorldbookEntryIds.length ? 'worldbook' : undefined, input.relations.length ? 'relationship' : undefined, 'persona'].filter((source): source is 'user' | 'worldbook' | 'relationship' | 'persona' => !!source))),
         sourceRefIds: boundWorldbookEntryIds.length ? boundWorldbookEntryIds : undefined, createdAt: now,
