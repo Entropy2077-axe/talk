@@ -288,6 +288,17 @@ const KEYWORD_LOCATIONS: Array<[RegExp, string[]]> = [
 
 const NPC_HOME_LOCATIONS = ['riverside-apartment-room', 'youth-apartment-room', 'student-dorm-room', 'old-residences-lane', 'villa-district-lane']
 
+/** A contact can genuinely live with the player. Keep their explicitly
+ * generated household routine at the player's home instead of treating it as
+ * the old generic "everyone sleeps here" generation mistake. */
+function isPlayerHomeResident(contact: Contact) {
+  return /女仆|佣人|管家|保姆|住家|同居|室友|妹妹|姐姐|弟弟|哥哥|家人|妻子|丈夫|未婚妻|未婚夫/.test([
+    contact.relationshipBase,
+    contact.relationshipDynamic,
+    contact.systemPrompt,
+  ].filter(Boolean).join(' '))
+}
+
 function stableHash(value: string) {
   let hash = 2166136261
   for (let index = 0; index < value.length; index += 1) hash = Math.imul(hash ^ value.charCodeAt(index), 16777619)
@@ -315,6 +326,18 @@ export function resolveContactRuntimeAt(contact: Contact, now: Date, validLocati
   const active = resolveActiveTask(contact, now)
   if (active?.kind === 'special' && active.task.locationId && validLocationIds.has(active.task.locationId)) return { locationId: active.task.locationId, source: 'specialTask', taskId: active.task.id, taskKind: 'special', activity: active.task.activity }
   if (contact.locationSource === 'manual' && contact.currentLocationId && validLocationIds.has(contact.currentLocationId)) return { locationId: contact.currentLocationId, source: 'manual', taskId: active?.task.id, taskKind: active?.kind, activity: active?.task.activity }
+  // "我的家" is the player's private space, not a generic NPC residence. Older
+  // persona-generation examples accidentally used it for every contact's
+  // nightly routine; keep those legacy schedules from gathering everyone in
+  // the player's living room while preserving explicit one-off visits above.
+  const isLegacyPlayerHomeRest = active?.kind === 'default'
+    && (active.task.locationId === 'home-living' || active.task.locationId === 'home-kitchen')
+    && /卧室|家里|在家|住宅|睡觉|休息|午休|补觉/.test(`${active.task.location} ${active.task.activity}`)
+    && !isPlayerHomeResident(contact)
+  if (isLegacyPlayerHomeRest) {
+    const homes = NPC_HOME_LOCATIONS.filter((id) => validLocationIds.has(id))
+    if (homes.length) return { locationId: homes[stableHash(contact.id) % homes.length], source: 'schedule', taskId: active.task.id, taskKind: 'default', activity: active.task.activity }
+  }
   if (active?.task.locationId && validLocationIds.has(active.task.locationId)) return { locationId: active.task.locationId, source: 'schedule', taskId: active.task.id, taskKind: active.kind, activity: active.task.activity }
   const timeKey = `${localDateKey(now)}:${active?.task.id ?? Math.floor(now.getHours() / 4)}`
   const scheduleText = `${active?.task.location ?? ''} ${active?.task.activity ?? ''}`

@@ -5,7 +5,8 @@ import { PERSONALITY_TRAIT_OPTIONS, type ContactGenerationValidationDiagnostics,
 import { createDefaultPromptModules, getPromptTemplate, promptModuleEnabled } from './promptModules'
 
 const GENERATED_SCHEDULE_LOCATION_IDS = new Set([
-  'home-living', 'home-kitchen', 'school-classroom', 'school-canteen', 'school-playground',
+  'home-living', 'home-kitchen', 'riverside-apartment-room', 'youth-apartment-room', 'student-dorm-room', 'old-residences-lane', 'villa-district-lane',
+  'school-classroom', 'school-canteen', 'school-playground',
   'office-floor', 'office-lobby', 'mall-atrium', 'mall-cafe', 'mall-shop',
   'hospital-lobby', 'hospital-clinic', 'park-lawn', 'park-riverside',
   'beach-boardwalk', 'mountain-lookout', 'farm-field',
@@ -218,6 +219,15 @@ export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCate
   const generationDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
   const promptSettings = { promptModules: promptModules ?? createDefaultPromptModules() }
   if (!promptModuleEnabled(promptSettings, 'nuwaMode')) return ''
+  const isCohabitingRole = /女仆|佣人|管家|保姆|住家|同居|室友|妹妹|姐姐|弟弟|哥哥|家人|妻子|丈夫|未婚妻|未婚夫/.test([
+    answers.relationship, answers.extra, answers.sharedHistory,
+  ].filter(Boolean).join(' '))
+  const restScheduleExample = isCohabitingRole
+    ? '{ "dayOfWeek": 1, "startHour": 23, "endHour": 7, "phoneAccess": "unavailable", "location": "家里客厅", "locationId": "home-living", "activity": "睡觉" }'
+    : '{ "dayOfWeek": 1, "startHour": 23, "endHour": 7, "phoneAccess": "unavailable", "location": "临江公寓住户楼层", "locationId": "riverside-apartment-room", "activity": "睡觉" }'
+  const homeScheduleRule = isCohabitingRole
+    ? '本次设定明确为同住角色，可把 home-living 或 home-kitchen 用于合理的固定居家日程；仍需按人设安排，不能把它当作唯一地点。'
+    : 'home-living 和 home-kitchen 是用户的私人住所，不能用作联系人自己的固定日程或睡觉地点；联系人休息时请按人设分散选择一处住宅/宿舍地点。'
   const avatarInstruction =
     avatarCategory === 'anime'
       ? ''
@@ -279,9 +289,9 @@ ${speechVoiceContext.options.map((option) => `- ${option.id}｜${option.name}｜
   "monthlySalary": 8000,
   "schedule": [
     { "dayOfWeek": 1, "startHour": 9, "endHour": 18, "phoneAccess": "unavailable", "location": "公司", "locationId": "office-floor", "activity": "上班" },
-    { "dayOfWeek": 1, "startHour": 23, "endHour": 7, "phoneAccess": "unavailable", "location": "家里", "locationId": "home-living", "activity": "睡觉" }
+    ${restScheduleExample}
   ]${avatarInstruction}
-	}\nschedule 中 locationId 为必填项，必须逐字填写下列已有具体地点 ID；location 只作为由 ID 派生的显示名，不能杜撰地点或只填“家里”等自由文本。可用值：home-living、home-kitchen、school-classroom、school-canteen、school-playground、office-floor、office-lobby、mall-atrium、mall-cafe、mall-shop、hospital-lobby、hospital-clinic、park-lawn、park-riverside、beach-boardwalk、mountain-lookout、farm-field。${answers.draftMode ? '\ninitialWarmth 必须是 -100 到 100 的整数。请根据角色对用户的关系、过去的经历、性格和边界决定创建时的好感度，陌生疏离可为负数，亲密关系应与设定相符。' : ''}`
+	}\nschedule 中 locationId 为必填项，必须逐字填写下列已有具体地点 ID；location 只作为由 ID 派生的显示名，不能杜撰地点或只填“家里”等自由文本。${homeScheduleRule} 可用值：home-living、home-kitchen、riverside-apartment-room、youth-apartment-room、student-dorm-room、old-residences-lane、villa-district-lane、school-classroom、school-canteen、school-playground、office-floor、office-lobby、mall-atrium、mall-cafe、mall-shop、hospital-lobby、hospital-clinic、park-lawn、park-riverside、beach-boardwalk、mountain-lookout、farm-field。${answers.draftMode ? '\ninitialWarmth 必须是 -100 到 100 的整数。请根据角色对用户的关系、过去的经历、性格和边界决定创建时的好感度，陌生疏离可为负数，亲密关系应与设定相符。' : ''}`
 }
 
 export function diagnosePersonaGeneration(raw: string): { result: PersonaGenerationResult | null; diagnostics: ContactGenerationValidationDiagnostics } {

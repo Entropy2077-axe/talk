@@ -66,6 +66,26 @@ describe('location runtime', () => {
     expect(result).toEqual({ locationId: 'mall-cafe', source: 'schedule' })
   })
 
+  it('keeps legacy generated sleep schedules out of the player home', async () => {
+    await ensureLocationsInitialized()
+    const ids = new Set((await db.locations.toArray()).map((item) => item.id))
+    const result = resolveContactRuntimeAt(contact('legacy-sleeper', {
+      schedule: [{ id: 'sleep', dayOfWeek: 1, startHour: 23, endHour: 7, phoneAccess: 'unavailable', location: '家里', locationId: 'home-living', activity: '睡觉' }],
+    }), new Date(2026, 6, 28, 1), ids)
+    expect(result).toMatchObject({ source: 'schedule', taskId: 'sleep', taskKind: 'default', activity: '睡觉' })
+    expect(result.locationId).toBeOneOf(['riverside-apartment-room', 'youth-apartment-room', 'student-dorm-room', 'old-residences-lane', 'villa-district-lane'])
+  })
+
+  it('keeps an explicitly cohabiting contact at the player home', async () => {
+    await ensureLocationsInitialized()
+    const ids = new Set((await db.locations.toArray()).map((item) => item.id))
+    const result = resolveContactRuntimeAt(contact('live-in-maid', {
+      relationshipBase: '住家女仆',
+      schedule: [{ id: 'sleep', dayOfWeek: 1, startHour: 23, endHour: 7, phoneAccess: 'unavailable', location: '家里', locationId: 'home-living', activity: '睡觉' }],
+    }), new Date(2026, 6, 28, 1), ids)
+    expect(result).toMatchObject({ locationId: 'home-living', source: 'schedule', taskId: 'sleep' })
+  })
+
   it('synchronizes an isolated AI-test contact when a special task is active', async () => {
     await ensureLocationsInitialized()
     const now = new Date(2026, 6, 27, 10, 30)
