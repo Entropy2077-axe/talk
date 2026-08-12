@@ -413,6 +413,7 @@ export function ContactCardPage() {
       <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-5 py-6 shadow-[var(--ui-shadow)]">
         <div className="flex items-center gap-4"><button type="button" onClick={() => setPickingAvatar(true)} aria-label="修改头像"><Avatar avatar={contact.avatar} color={contact.avatarColor} size={72} /></button><div className="min-w-0 flex-1"><h2 className="ui-font-display truncate text-xl font-semibold text-[var(--ui-text)]">{displayName(contact)}</h2><p className="mt-0.5 truncate text-xs text-[var(--ui-text-3)]">{contact.remark ? `备注：${contact.remark}` : `本名：${contact.name}`}</p>{contact.relationshipBase && <span className="mt-2 inline-block rounded-full bg-[var(--ui-accent-soft)] px-2.5 py-1 text-[11px] text-[var(--ui-action)]">{contact.relationshipBase}{contact.relationshipDynamic ? ` · ${contact.relationshipDynamic}` : ''}</span>}</div></div>
         {contact.avatarPhotographer && <p className="mt-3 text-[11px] text-[var(--ui-text-3)]">头像照片来自 Pexels · {contact.avatarPhotographerUrl ? <a href={contact.avatarPhotographerUrl} target="_blank" rel="noreferrer" className="underline">{contact.avatarPhotographer}</a> : contact.avatarPhotographer}</p>}
+        {adminEnabled && <button type="button" onClick={() => navigate(`/contact/${contactId}/admin`)} className="mt-4 w-full rounded-lg bg-gray-900 px-3 py-2.5 text-sm font-medium text-white">编辑全部资料</button>}
         <div className="mt-5 grid grid-cols-3 gap-2"><button type="button" onClick={handleChat} className="rounded-[var(--ui-radius-control)] bg-[var(--ui-action)] py-2.5 text-xs font-medium text-[var(--ui-on-action)]">发消息</button><button type="button" onClick={() => navigate(`/moments?contact=${contactId}`)} className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] py-2.5 text-xs text-[var(--ui-text-2)]">朋友圈（{momentCount}）</button><button type="button" onClick={() => setMenuOpen(true)} className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] py-2.5 text-xs text-[var(--ui-text-2)]">管理联系人</button></div>
       </section>
 
@@ -601,7 +602,7 @@ export function ContactCardPage() {
 
       {adminEnabled && (
         <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-white px-4 py-4 shadow-[var(--ui-shadow)]">
-          <div className="mb-3 flex items-center justify-between gap-3"><div><h3 className="text-xs font-medium text-gray-400">提示词预览（管理员模式）</h3><p className="mt-1 text-[10px] text-gray-400">来源：{contact.promptPresetSourceName || '升级前提示词'}{contact.promptSnapshotUpdatedAt ? ` · ${new Date(contact.promptSnapshotUpdatedAt).toLocaleString()}` : ''}</p></div><button type="button" onClick={() => navigate(`/contact/${contactId}/admin`)} className="shrink-0 rounded-lg bg-gray-900 px-3 py-2 text-xs text-white">编辑全部资料</button></div>
+          <div className="mb-3"><h3 className="text-xs font-medium text-gray-400">提示词预览（管理员模式）</h3><p className="mt-1 text-[10px] text-gray-400">来源：{contact.promptPresetSourceName || '升级前提示词'}{contact.promptSnapshotUpdatedAt ? ` · ${new Date(contact.promptSnapshotUpdatedAt).toLocaleString()}` : ''}</p></div>
 
           <div className="space-y-4">
             {/* Step 1: main model */}

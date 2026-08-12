@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { chatCompletion, separateSupplierThinking } from './deepseek'
+import { chatCompletion, separateSupplierThinking, traceableCompletionOutput } from './deepseek'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -76,6 +76,16 @@ describe('structured chat completion result', () => {
     expect(result.status).toBe('ok')
     expect(result.toolCalls?.[0]).toMatchObject({ id: 'call-1', function: { name: 'send_text' } })
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('formats tool-only replies for the AI trace instead of treating them as empty output', () => {
+    const output = traceableCompletionOutput('', [{
+      id: 'call-1', type: 'function', function: { name: 'send_text', arguments: '{"content":"你好"}' },
+    }])
+
+    expect(output).toContain('tool_calls')
+    expect(output).toContain('send_text')
+    expect(output).toContain('你好')
   })
 
   it('retries without tool fields when a compatible relay rejects them', async () => {

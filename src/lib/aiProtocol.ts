@@ -6,6 +6,14 @@ export interface ParsedAiTurn {
   knowledgeQueries: string[]
   mood?: string
   thought?: string
+  immediateActivities?: ImmediateActivityAction[]
+}
+
+export interface ImmediateActivityAction {
+  locationId: string
+  activity: string
+  durationMinutes: number
+  phoneAccess: 'available' | 'unavailable'
 }
 
 export function parseAiResponse(raw: string): ParsedAiTurn {
@@ -189,6 +197,7 @@ export function serializePrivateTurn(parsed: ParsedAiTurn): string {
     mood: parsed.mood,
     thought: parsed.thought,
     knowledgeQueries: parsed.knowledgeQueries,
+    ...(parsed.immediateActivities?.length ? { immediateActivities: parsed.immediateActivities } : {}),
   })
 }
 

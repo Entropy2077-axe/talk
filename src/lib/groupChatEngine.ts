@@ -38,6 +38,18 @@ import { generateGroupAgentTurn } from './chatAgentTools'
 import { traceTurnEvent } from './deepseek'
 import type { AppSettings, Contact, Group, GroupAiBubble, Message, Sticker } from '../types'
 
+function ensureGroupImagesHaveText(bubbles: GroupAiBubble[]): GroupAiBubble[] {
+  const textSpeakers = new Set(bubbles.filter((bubble) => bubble.type === 'text').map((bubble) => bubble.speakerIndex))
+  const missingSpeakers = Array.from(new Set(bubbles
+    .filter((bubble) => bubble.type === 'image' && !textSpeakers.has(bubble.speakerIndex))
+    .map((bubble) => bubble.speakerIndex)))
+  if (!missingSpeakers.length) return bubbles
+  return [
+    ...missingSpeakers.map((speakerIndex): GroupAiBubble => ({ speakerIndex, type: 'text', content: '给你们看张图。', thought: '想把这张图发出来', mood: '分享' })),
+    ...bubbles,
+  ]
+}
+
 /** Load recent structured memories for each speaker in parallel. */
 async function loadSpeakerMemories(speakers: Contact[]): Promise<Map<string, string>> {
   const map = new Map<string, string>()
@@ -487,7 +499,7 @@ async function runGroupAiTurn(
     } else {
       const generated = await generateGroupAgentTurn({
         apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, utilityModel: settings.utilityModel,
-        messages: [...chatMessages, { role: 'system', content: `本轮必须通过提供的函数发送群聊消息或执行行动。create_schedule 日程卡不能单独作为回复：创建日程时，同一位发言人必须同时调用 send_text 自然说话；图片已有必填配文，表情包可以单独发送。每条消息都必须填写该发言人的真实想法和简短中文文字心情；心情禁止使用 emoji。严格选择正确的 speakerIndex。${locationToolContext}` }],
+        messages: [...chatMessages, { role: 'system', content: `本轮必须通过提供的函数发送群聊消息或执行行动。send_image 只发送纯图片，发图的同一位联系人必须同时调用 send_text 自然说话；create_schedule 也不能单独作为回复。表情包可以单独发送。每条消息都必须填写该发言人的真实想法和简短中文文字心情；心情禁止使用 emoji。严格选择正确的 speakerIndex。${locationToolContext}` }],
         signal: controller.signal, purpose: 'chat', trace: { turnId: streamId, stage: 'original_generation', conversationId },
         stickerNames: stickers.map((sticker) => sticker.name), stickerSearchEnabled: remoteStickerSearchEnabled,
         imageEnabled: imageGenerationEnabled || !!settings.pexelsApiKey, knowledgeEnabled: featureActive(settings, 'knowledgeBase'),
@@ -508,6 +520,7 @@ async function runGroupAiTurn(
 
     let finalRaw = jsonRaw
     let { bubbles, knowledgeQueries, turnSummary, groupVibe, planCandidates } = parsedTurn
+    bubbles = ensureGroupImagesHaveText(bubbles)
     const initiallyRequestedKnowledge = [...knowledgeQueries]
     const runLogicReview = (stage: 'first_quality' | 'second_quality') => reviewTurnLogic({
       settings,
@@ -545,7 +558,7 @@ async function runGroupAiTurn(
       if (knowledge.text) {
         const regenerated = await generateGroupAgentTurn({
           apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, utilityModel: settings.utilityModel,
-          messages: [...chatMessages, { role: 'user', content: `刚才出现了你们不了解的词。搜索结果如下：\n${knowledge.text}\n请基于结果自然接话，不要写成报告。` }, { role: 'system', content: `必须通过提供的函数发送消息。create_schedule 日程卡不能单独作为回复：创建日程时，同一位发言人必须同时调用 send_text 自然说话。每条消息填写真实想法和中文文字心情，禁止使用 emoji。${locationToolContext}` }],
+          messages: [...chatMessages, { role: 'user', content: `刚才出现了你们不了解的词。搜索结果如下：\n${knowledge.text}\n请基于结果自然接话，不要写成报告。` }, { role: 'system', content: `必须通过提供的函数发送消息。send_image 只发送纯图片，发图的同一位联系人必须同时调用 send_text；create_schedule 也必须由同一位联系人同时调用 send_text。每条消息填写真实想法和中文文字心情，禁止使用 emoji。${locationToolContext}` }],
           signal: controller.signal, purpose: 'chat', trace: { turnId: streamId, stage: 'second_chat', conversationId },
           stickerNames: stickers.map((sticker) => sticker.name), stickerSearchEnabled: remoteStickerSearchEnabled,
           imageEnabled: imageGenerationEnabled || !!settings.pexelsApiKey, knowledgeEnabled: false,
@@ -557,6 +570,7 @@ async function runGroupAiTurn(
         jsonRaw = rawText
         finalRaw = jsonRaw
         ;({ bubbles, knowledgeQueries, turnSummary, groupVibe, planCandidates } = enrichedConverted)
+        bubbles = ensureGroupImagesHaveText(bubbles)
       }
     }
     console.log(`[group] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 群=${group.name}`)
@@ -646,7 +660,7 @@ function revealGroupBubbles(
             )
           : bubble.type === 'sticker' ? (stickerFailed ? '表情没找到…' : bubble.name)
             : bubble.type === 'scheduleChange' ? bubble.summary
-              : imageFailed ? '图片没发出来…' : bubble.caption || '[图片]'
+              : imageFailed ? '图片没发出来…' : '[图片]'
 
       const messageCreatedAt = await nextMessageTimestamp(conversationId)
       const messageId = uuid()
@@ -674,7 +688,7 @@ function revealGroupBubbles(
             participantIds = selectGroupImageParticipantIds(participantIds, speaker?.id)
             const asset = await createMediaAsset({ origin: 'chat', originId: messageId, conversationId, turnId: streamId, ownerContactIds: participantIds, includeUser: bubble.includeUser, scene: bubble.query, kind, settings })
             imageAssetId = asset.id
-            imagePayload = { assetId: asset.id, caption: bubble.caption, query: bubble.query, provider: asset.provider }
+            imagePayload = { assetId: asset.id, query: bubble.query, provider: asset.provider }
           } catch (error) { console.warn('[media] 创建群聊图片任务失败', error); imageFailed = true }
         }
       }

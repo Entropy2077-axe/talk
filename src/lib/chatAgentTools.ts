@@ -1,5 +1,5 @@
 import type { AiBubble, GroupAiBubble } from '../types'
-import { parseJsonLoose, serializePrivateTurn, type ParsedAiTurn } from './aiProtocol'
+import { parseJsonLoose, serializePrivateTurn, type ImmediateActivityAction, type ParsedAiTurn } from './aiProtocol'
 import { normalizeMood } from './mood'
 import type { ChatCompletionOptions, ChatMessage, ChatToolCall, ChatToolDefinition } from './deepseek'
 import { chatCompletion, chatCompletionText } from './deepseek'
@@ -24,15 +24,9 @@ interface AgentToolOptions {
 
 interface ToolPlan { calls?: Array<{ name?: unknown; arguments?: unknown }> }
 
-const PRIVATE_ACTION_TOOL_NAMES = new Set([
-  'create_schedule',
-  'transfer_money',
-  'send_red_packet',
-  'request_loan',
-  'decide_loan',
-  'purchase_gift',
-])
-const GROUP_ACTION_TOOL_NAMES = new Set(['create_schedule'])
+const PRIVATE_TURN_TOOL_NAME = 'submit_turn'
+
+const GROUP_ACTION_TOOL_NAMES = new Set(['send_image', 'create_schedule'])
 
 const text = (value: unknown, max: number) => typeof value === 'string' ? value.trim().slice(0, max) : ''
 const positiveInteger = (value: unknown) => {
@@ -68,13 +62,12 @@ export function privateChatTools(opts: Pick<AgentToolOptions, 'stickerNames' | '
       : { type: 'string', enum: opts.stickerNames, description: '必须逐字选择一个本地表情名。' },
     ...commonProperties(),
   }, ['name', 'thought', 'mood']))
-  if (opts.imageEnabled) tools.push(fn('send_image', '生成或搜索并发送一张图片。只有角色确实决定发图时调用。', {
+  if (opts.imageEnabled) tools.push(fn('send_image', '生成或搜索并发送一张纯图片。只有角色确实决定发图时调用；图片本身不带配文，因此必须在同一轮另外调用 send_text 自然说话。', {
     query: { type: 'string', description: '完整英文画面提示，清楚描述主体、场景、动作、构图、光线、颜色和氛围。' },
-    caption: { type: 'string', description: '随图片发送给用户看的简短配文。' },
     kind: { type: 'string', enum: ['selfie', 'portrait', 'scene', 'object'] },
     participants: { type: 'array', items: { type: 'string', enum: ['self', 'user'] } },
     ...commonProperties(),
-  }, ['query', 'caption', 'kind', 'participants', 'thought', 'mood']))
+  }, ['query', 'kind', 'participants', 'thought', 'mood']))
   if (opts.knowledgeEnabled) tools.push(fn('search_knowledge', '查询角色当前确实不懂、但回答用户前必须弄清楚的新词、作品或事实。查询后系统会把结果交回角色重新回答。', {
     query: { type: 'string', description: '简短、可搜索的查询词。' },
   }, ['query']))
@@ -86,6 +79,13 @@ export function privateChatTools(opts: Pick<AgentToolOptions, 'stickerNames' | '
     activity: { type: 'string' }, phoneAccess: { type: 'string', enum: ['available', 'unavailable'] }, summary: { type: 'string' },
     ...commonProperties(),
   }, ['date', 'startHour', 'endHour', 'locationId', 'activity', 'phoneAccess', 'summary', 'thought', 'mood']))
+  if (opts.scheduleEnabled && opts.locationIds.length) tools.push(fn('start_activity_now', '角色明确决定现在立刻前往某个具体地点并开始一项活动时调用。适用于“现在去厨房做菜”这类即时行动，不用于未来安排、仅讨论可能性、拒绝或尚未答应的请求。调用后必须同时用 send_text 自然回应。', {
+    locationId: { type: 'string', enum: opts.locationIds },
+    activity: { type: 'string', description: '现在开始进行的简短活动，例如“做菜”。' },
+    durationMinutes: { type: 'integer', minimum: 5, maximum: 480, description: '预计持续分钟数；根据活动合理估计。' },
+    phoneAccess: { type: 'string', enum: ['available', 'unavailable'] },
+    ...commonProperties(),
+  }, ['locationId', 'activity', 'durationMinutes', 'phoneAccess', 'thought', 'mood']))
   tools.push(
     fn('transfer_money', '角色决定立即向用户转账时调用。', { amount: { type: 'integer', minimum: 1 }, note: { type: 'string' }, ...commonProperties() }, ['amount', 'note', 'thought', 'mood']),
     fn('send_red_packet', '角色决定立即向用户发送红包时调用。', { amount: { type: 'integer', minimum: 1 }, blessing: { type: 'string' }, ...commonProperties() }, ['amount', 'blessing', 'thought', 'mood']),
@@ -96,6 +96,59 @@ export function privateChatTools(opts: Pick<AgentToolOptions, 'stickerNames' | '
   return tools
 }
 
+function privateTurnTool(opts: Pick<AgentToolOptions, 'stickerNames' | 'stickerSearchEnabled' | 'imageEnabled' | 'knowledgeEnabled' | 'scheduleEnabled' | 'locationIds'>): ChatToolDefinition {
+  const eventTypes = [
+    'text',
+    ...(opts.stickerNames.length || opts.stickerSearchEnabled ? ['sticker'] : []),
+    ...(opts.imageEnabled ? ['image'] : []),
+    ...(opts.scheduleEnabled && opts.locationIds.length ? ['schedule', 'activity_now'] : []),
+    'transfer', 'red_packet', 'loan_request', 'loan_decision', 'gift_purchase',
+  ]
+  return fn(PRIVATE_TURN_TOOL_NAME, '一次提交本轮完整回复。events 按真实发送顺序排列，可以包含任意数量的文字、图片、表情和动作；不要机械地让每张图片固定搭配一句文字。图片和行动不能单独作为回复，但只要求整轮至少有一条自然文字，文字可以位于其前后。', {
+    events: {
+      type: 'array', minItems: 0, maxItems: 12,
+      description: '本轮有序事件。可以连续发送多段文字或多张图片；根据角色意愿自然决定数量和顺序。仅查询知识时可以为空。',
+      items: {
+        type: 'object', additionalProperties: false,
+        properties: {
+          type: {
+            type: 'string', enum: eventTypes,
+            description: '事件类型及必填字段：text→content；sticker→name；image→query/kind/participants；schedule→date/startHour/endHour/locationId/activity/phoneAccess/summary；activity_now→locationId/activity/durationMinutes/phoneAccess；transfer→amount/note；red_packet→amount/blessing；loan_request→amount/reason；loan_decision→loanId/decision/amount；gift_purchase→amount/name/icon/description。',
+          },
+          content: { type: 'string', description: 'type=text 时的自然聊天正文。' },
+          name: opts.stickerSearchEnabled
+            ? { type: 'string', description: 'type=sticker 时的简短具体搜索词，优先英文；也可使用已知本地表情名。' }
+            : { type: 'string', enum: opts.stickerNames.length ? opts.stickerNames : [''] },
+          query: { type: 'string', description: 'type=image 时的完整英文画面提示。' },
+          kind: { type: 'string', enum: ['selfie', 'portrait', 'scene', 'object'] },
+          participants: { type: 'array', items: { type: 'string', enum: ['self', 'user'] } },
+          date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+          startHour: { type: 'integer', minimum: 0, maximum: 23 },
+          endHour: { type: 'integer', minimum: 1, maximum: 24 },
+          locationId: { type: 'string', enum: opts.locationIds.length ? opts.locationIds : [''] },
+          activity: { type: 'string' },
+          phoneAccess: { type: 'string', enum: ['available', 'unavailable'] },
+          summary: { type: 'string' },
+          durationMinutes: { type: 'integer', minimum: 5, maximum: 480 },
+          amount: { type: 'integer', minimum: 1 },
+          note: { type: 'string' },
+          blessing: { type: 'string' },
+          reason: { type: 'string' },
+          loanId: { type: 'string' },
+          decision: { type: 'string', enum: ['accept', 'reject'] },
+          icon: { type: 'string' },
+          description: { type: 'string' },
+        },
+        required: ['type'],
+      },
+    },
+    ...(opts.knowledgeEnabled ? {
+      knowledgeQueries: { type: 'array', maxItems: 2, items: { type: 'string' }, description: '只有遇到角色确实不懂且回答前必须查清的新词或事实时填写；否则使用空数组。' },
+    } : {}),
+    ...commonProperties(),
+  }, ['events', ...(opts.knowledgeEnabled ? ['knowledgeQueries'] : []), 'thought', 'mood'])
+}
+
 function argumentsObject(call: ChatToolCall): Record<string, unknown> | null {
   const parsed = parseJsonLoose<unknown>(call.function.arguments)
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null
@@ -104,6 +157,7 @@ function argumentsObject(call: ChatToolCall): Record<string, unknown> | null {
 export function parsePrivateToolCalls(calls: ChatToolCall[]): ParsedAiTurn {
   const bubbles: AiBubble[] = []
   const knowledgeQueries: string[] = []
+  const immediateActivities: ImmediateActivityAction[] = []
   const thoughts: string[] = []
   let mood: string | undefined
   for (const call of calls) {
@@ -120,13 +174,19 @@ export function parsePrivateToolCalls(calls: ChatToolCall[]): ParsedAiTurn {
       const name = text(args.name, 100); if (name) bubbles.push({ type: 'sticker', name })
     } else if (call.function.name === 'send_image') {
       const query = text(args.query, 2_000)
-      if (query) bubbles.push({ type: 'image', query, caption: text(args.caption, 200) || undefined, kind: ['selfie','portrait','scene','object'].includes(String(args.kind)) ? args.kind as 'selfie'|'portrait'|'scene'|'object' : undefined, participants: Array.isArray(args.participants) ? args.participants.filter((value): value is 'self'|'user' => value === 'self' || value === 'user') : undefined })
+      if (query) bubbles.push({ type: 'image', query, kind: ['selfie','portrait','scene','object'].includes(String(args.kind)) ? args.kind as 'selfie'|'portrait'|'scene'|'object' : undefined, participants: Array.isArray(args.participants) ? args.participants.filter((value): value is 'self'|'user' => value === 'self' || value === 'user') : undefined })
     } else if (call.function.name === 'search_knowledge') {
       const query = text(args.query, 120); if (query && knowledgeQueries.length < 2) knowledgeQueries.push(query)
     } else if (call.function.name === 'create_schedule') {
       const date = text(args.date, 10), locationId = text(args.locationId, 80), activity = text(args.activity, 16), summary = text(args.summary, 40)
       const startHour = Number(args.startHour), endHour = Number(args.endHour), phoneAccess = args.phoneAccess
       if (/^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isInteger(startHour) && startHour >= 0 && startHour <= 23 && Number.isInteger(endHour) && endHour >= 1 && endHour <= 24 && startHour !== endHour && locationId && activity && summary && (phoneAccess === 'available' || phoneAccess === 'unavailable')) bubbles.push({ type: 'scheduleChange', date, startHour, endHour, location: locationId, locationId, activity, summary, phoneAccess })
+    } else if (call.function.name === 'start_activity_now') {
+      const locationId = text(args.locationId, 80), activity = text(args.activity, 16)
+      const durationMinutes = Number(args.durationMinutes), phoneAccess = args.phoneAccess
+      if (locationId && activity && Number.isInteger(durationMinutes) && durationMinutes >= 5 && durationMinutes <= 480 && (phoneAccess === 'available' || phoneAccess === 'unavailable') && immediateActivities.length === 0) {
+        immediateActivities.push({ locationId, activity, durationMinutes, phoneAccess })
+      }
     } else if (call.function.name === 'transfer_money') {
       const amount = positiveInteger(args.amount); if (amount) bubbles.push({ type: 'transfer', amount, note: text(args.note, 80) })
     } else if (call.function.name === 'send_red_packet') {
@@ -141,7 +201,46 @@ export function parsePrivateToolCalls(calls: ChatToolCall[]): ParsedAiTurn {
       if (amount && name) bubbles.push({ type: 'giftPurchase', amount, name, icon: text(args.icon, 8), description: text(args.description, 80) })
     }
   }
-  return { bubbles, knowledgeQueries, mood, thought: thoughts.join('；').slice(0, 100) || undefined }
+  return { bubbles, knowledgeQueries, mood, thought: thoughts.join('；').slice(0, 100) || undefined, immediateActivities }
+}
+
+const PRIVATE_EVENT_TOOL_NAMES: Record<string, string> = {
+  text: 'send_text', sticker: 'send_sticker', image: 'send_image', schedule: 'create_schedule',
+  activity_now: 'start_activity_now', transfer: 'transfer_money', red_packet: 'send_red_packet',
+  loan_request: 'request_loan', loan_decision: 'decide_loan', gift_purchase: 'purchase_gift',
+}
+
+function parsePrivateTurnCall(call: ChatToolCall): ParsedAiTurn {
+  if (call.function.name !== PRIVATE_TURN_TOOL_NAME) return { bubbles: [], knowledgeQueries: [] }
+  const args = argumentsObject(call)
+  if (!args || !Array.isArray(args.events)) return { bubbles: [], knowledgeQueries: [] }
+  const thought = text(args.thought, 100)
+  const mood = text(args.mood, 20)
+  if (!thought || !mood) return { bubbles: [], knowledgeQueries: [] }
+  const calls = args.events.flatMap((candidate, index): ChatToolCall[] => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return []
+    const event = candidate as Record<string, unknown>
+    const name = PRIVATE_EVENT_TOOL_NAMES[String(event.type)]
+    if (!name) return []
+    return [{
+      id: `${call.id}_event_${index}`,
+      type: 'function',
+      function: { name, arguments: JSON.stringify({ ...event, type: undefined, thought, mood }) },
+    }]
+  })
+  const parsed = parsePrivateToolCalls(calls)
+  const queries = Array.isArray(args.knowledgeQueries)
+    ? args.knowledgeQueries.map((query) => text(query, 120)).filter(Boolean).slice(0, 2)
+    : []
+  return { ...parsed, knowledgeQueries: queries, thought, mood: normalizeMood(mood) }
+}
+
+function privateTurnIsValid(parsed: ParsedAiTurn): boolean {
+  if (parsed.knowledgeQueries.length > 0) return true
+  if (parsed.bubbles.length === 0 && !parsed.immediateActivities?.length) return false
+  const requiresText = !!parsed.immediateActivities?.length || parsed.bubbles.some((bubble) =>
+    ['image', 'scheduleChange', 'transfer', 'redPacket', 'loanRequest', 'loanDecision', 'giftPurchase'].includes(bubble.type))
+  return !requiresText || parsed.bubbles.some((bubble) => bubble.type === 'text')
 }
 
 async function fallbackCalls(opts: AgentToolOptions, raw: string, tools: ChatToolDefinition[]): Promise<ChatToolCall[]> {
@@ -159,14 +258,8 @@ async function fallbackCalls(opts: AgentToolOptions, raw: string, tools: ChatToo
   }) : []
 }
 
-function needsTextForAction(calls: ChatToolCall[], actionNames: Set<string>): boolean {
-  return calls.some((call) => actionNames.has(call.function.name))
-    && !calls.some((call) => call.function.name === 'send_text')
-}
-
-function actionSpeakerIndex(calls: ChatToolCall[]): number | undefined {
-  const schedule = calls.find((call) => call.function.name === 'create_schedule')
-  const args = schedule ? argumentsObject(schedule) : null
+function actionSpeakerIndex(call: ChatToolCall): number | undefined {
+  const args = argumentsObject(call)
   const speakerIndex = Number(args?.speakerIndex)
   return Number.isInteger(speakerIndex) && speakerIndex > 0 ? speakerIndex : undefined
 }
@@ -222,65 +315,57 @@ async function addRequiredActionText(
   throw new Error('动作已生成，但连续两次未能生成有效的配套聊天消息')
 }
 
-async function completePrivateActionText(opts: AgentToolOptions, tools: ChatToolDefinition[], calls: ChatToolCall[], assistantContent: string): Promise<ChatToolCall[]> {
-  if (!needsTextForAction(calls, PRIVATE_ACTION_TOOL_NAMES)) return calls
-  return addRequiredActionText(opts, tools, calls, assistantContent, (textCalls) => parsePrivateToolCalls(textCalls).bubbles.some((bubble) => bubble.type === 'text'))
-}
-
 async function completeGroupActionText(
   opts: AgentToolOptions & { speakerNames: string[]; memberNames: string[] },
   tools: ChatToolDefinition[],
   calls: ChatToolCall[],
   assistantContent: string,
 ): Promise<ChatToolCall[]> {
-  if (!needsTextForAction(calls, GROUP_ACTION_TOOL_NAMES)) return calls
-  const speakerIndex = actionSpeakerIndex(calls)
-  return addRequiredActionText(opts, tools, calls, assistantContent, (textCalls) => {
-    const parsed = parseGroupToolCalls(textCalls, opts.speakerNames.length, opts.memberNames.length)
-    return parsed.bubbles.some((bubble) => bubble.type === 'text' && (!speakerIndex || bubble.speakerIndex === speakerIndex))
-  }, speakerIndex)
+  let completed = calls
+  const actionSpeakers = Array.from(new Set(calls
+    .filter((call) => GROUP_ACTION_TOOL_NAMES.has(call.function.name))
+    .map(actionSpeakerIndex)
+    .filter((value): value is number => value !== undefined)))
+  for (const speakerIndex of actionSpeakers) {
+    const alreadyHasText = completed.some((call) => call.function.name === 'send_text' && actionSpeakerIndex(call) === speakerIndex)
+    if (alreadyHasText) continue
+    completed = await addRequiredActionText(opts, tools, completed, assistantContent, (textCalls) => {
+      const parsed = parseGroupToolCalls(textCalls, opts.speakerNames.length, opts.memberNames.length)
+      return parsed.bubbles.some((bubble) => bubble.type === 'text' && bubble.speakerIndex === speakerIndex)
+    }, speakerIndex)
+  }
+  return completed
 }
 
 export async function generatePrivateAgentTurn(opts: AgentToolOptions): Promise<{ parsed: ParsedAiTurn; raw: string; native: boolean }> {
-  const tools = privateChatTools(opts)
+  const tool = privateTurnTool(opts)
   const messages = [...opts.messages]
-  const accepted: ChatToolCall[] = []
   for (let round = 0; round < 3; round++) {
     const response = await chatCompletion({
       apiKey: opts.apiKey, baseUrl: opts.baseUrl, model: opts.model, messages,
-      tools, toolChoice: 'required', signal: opts.signal, purpose: opts.purpose, automatic: opts.automatic,
+      tools: [tool], toolChoice: { type: 'function', function: { name: PRIVATE_TURN_TOOL_NAME } }, signal: opts.signal, purpose: opts.purpose, automatic: opts.automatic,
       thinking: 'disabled', temperature: 0.75, maxTokens: 2200, trace: opts.trace,
     })
     if (response.status !== 'ok') throw new Error('模型没有返回有效的聊天行动')
-    const nativeCalls = response.toolCalls ?? []
-    if (!nativeCalls.length) {
-      const fallback = await fallbackCalls(opts, response.content, tools)
-      const calls = await completePrivateActionText(opts, tools, fallback, response.content)
-      const parsed = parsePrivateToolCalls(calls)
-      return { parsed, raw: serializePrivateTurn(parsed), native: false }
+    const turnCall = (response.toolCalls ?? []).find((call) => call.function.name === PRIVATE_TURN_TOOL_NAME)
+    if (turnCall) {
+      const parsed = parsePrivateTurnCall(turnCall)
+      if (privateTurnIsValid(parsed)) {
+        return { parsed, raw: serializePrivateTurn(parsed), native: true }
+      }
     }
-    const invalid = nativeCalls.filter((call) => {
-      const parsed = parsePrivateToolCalls([call])
-      return parsed.bubbles.length === 0 && parsed.knowledgeQueries.length === 0
-    })
-    accepted.push(...nativeCalls.filter((call) => !invalid.includes(call)))
-    if (!invalid.length) {
-      const completed = await completePrivateActionText(opts, tools, accepted, response.content)
-      const parsed = parsePrivateToolCalls(completed)
-      return { parsed, raw: serializePrivateTurn(parsed), native: true }
+    if (response.toolCalls?.length) {
+      messages.push({ role: 'assistant', content: response.content, tool_calls: response.toolCalls })
+      messages.push(...response.toolCalls.map((call): ChatMessage => ({
+        role: 'tool', tool_call_id: call.id,
+        content: JSON.stringify({ success: false, code: 'INVALID_TURN', message: '整轮参数无效。图片或行动存在时，events 整体必须至少包含一条自然 text；请一次性重新提交完整 submit_turn，不要只补一条消息。' }),
+      })))
+    } else {
+      messages.push({ role: 'assistant', content: response.content })
+      messages.push({ role: 'system', content: '没有收到原生 submit_turn 工具调用。必须调用 submit_turn 一次性提交完整回复，禁止在普通 content 中输出 JSON。' })
     }
-    messages.push({ role: 'assistant', content: response.content, tool_calls: nativeCalls })
-    for (const call of nativeCalls) messages.push({
-      role: 'tool', tool_call_id: call.id,
-      content: invalid.includes(call)
-        ? JSON.stringify({ success: false, code: 'INVALID_ARGUMENTS', message: '参数不符合工具 schema，或可见消息缺少 thought/中文文字 mood。请只重试失败调用，不要重复成功调用。' })
-        : JSON.stringify({ success: true, staged: true, message: '调用已暂存，不要重复。' }),
-    })
   }
-  const completed = await completePrivateActionText(opts, tools, accepted, '')
-  const parsed = parsePrivateToolCalls(completed)
-  if (!parsed.bubbles.length && !parsed.knowledgeQueries.length) throw new Error('模型连续返回了无效的工具参数')
-  return { parsed, raw: serializePrivateTurn(parsed), native: true }
+  throw new Error('模型连续返回了无效的整轮工具参数')
 }
 
 export function groupChatTools(speakerNames: string[], memberNames: string[], base: ReturnType<typeof privateChatTools>): ChatToolDefinition[] {
@@ -321,7 +406,7 @@ export function parseGroupToolCalls(calls: ChatToolCall[], speakerCount: number,
     const common = { speakerIndex, thought, mood: normalizeMood(textualMood) }
     if (call.function.name === 'send_text') { const content = text(args.content, 2_000); if (content) bubbles.push({ ...common, type: 'text', content }) }
     else if (call.function.name === 'send_sticker') { const name = text(args.name, 100); if (name) bubbles.push({ ...common, type: 'sticker', name }) }
-    else if (call.function.name === 'send_image') { const query = text(args.query, 2_000); if (query) bubbles.push({ ...common, type: 'image', query, caption: text(args.caption, 200) || undefined, kind: ['selfie','portrait','group','scene','object'].includes(String(args.kind)) ? args.kind as any : undefined, participantIndexes: Array.isArray(args.participantIndexes) ? Array.from(new Set(args.participantIndexes.map(Number).filter((index) => Number.isInteger(index) && index >= 1 && index <= memberCount))) : [speakerIndex], includeUser: args.includeUser === true }) }
+    else if (call.function.name === 'send_image') { const query = text(args.query, 2_000); if (query) bubbles.push({ ...common, type: 'image', query, kind: ['selfie','portrait','group','scene','object'].includes(String(args.kind)) ? args.kind as any : undefined, participantIndexes: Array.isArray(args.participantIndexes) ? Array.from(new Set(args.participantIndexes.map(Number).filter((index) => Number.isInteger(index) && index >= 1 && index <= memberCount))) : [speakerIndex], includeUser: args.includeUser === true }) }
     else if (call.function.name === 'create_schedule') {
       const privateParsed = parsePrivateToolCalls([{ ...call, function: { ...call.function, arguments: JSON.stringify({ ...args, speakerIndex: undefined }) } }])
       const schedule = privateParsed.bubbles.find((bubble) => bubble.type === 'scheduleChange')

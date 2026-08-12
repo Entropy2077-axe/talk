@@ -6,6 +6,10 @@ const call = (name: string, args: Record<string, unknown>, id = name): ChatToolC
   id, type: 'function', function: { name, arguments: JSON.stringify(args) },
 })
 
+const turnCall = (events: Array<Record<string, unknown>>, extra: Record<string, unknown> = {}, id = 'turn') => call('submit_turn', {
+  events, thought: '想自然地回应对方', mood: '期待', ...extra,
+}, id)
+
 const agentOptions = {
   apiKey: 'sk-test', baseUrl: 'https://api.example.com/v1', model: 'test-model', utilityModel: 'test-model',
   messages: [{ role: 'user' as const, content: '我们明天下午去咖啡馆吧' }], purpose: 'chat' as const,
@@ -63,45 +67,52 @@ describe('native chat agent tools', () => {
     expect(parsed.bubbles).toEqual([{ speakerIndex: 2, type: 'text', content: '我也去', thought: '不想错过', mood: '兴奋' }])
   })
 
-  it('adds a natural text bubble before an action-only schedule without duplicating the action', async () => {
-    const schedule = call('create_schedule', { date: '2026-08-12', startHour: 14, endHour: 16, locationId: 'cafe-1', activity: '见面', phoneAccess: 'available', summary: '下午见面', thought: '愿意赴约', mood: '期待' }, 'schedule-1')
-    const reply = call('send_text', { content: '好呀，明天下午两点咖啡馆见。', thought: '我很期待', mood: '期待' }, 'text-1')
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(completion([schedule]))
-      .mockImplementationOnce(async (_url: string, init?: RequestInit) => {
-        const body = JSON.parse(String(init?.body))
-        expect(body.tools.map((tool: { function: { name: string } }) => tool.function.name)).toEqual(['send_text'])
-        expect(body.tool_choice).toEqual({ type: 'function', function: { name: 'send_text' } })
-        expect(body.messages.at(-1).content).toContain('不要重复调用')
-        return completion([reply])
-      })
+  it('submits text and a schedule through one forced native turn call', async () => {
+    const response = turnCall([
+      { type: 'text', content: '好呀，明天下午两点咖啡馆见。' },
+      { type: 'schedule', date: '2026-08-12', startHour: 14, endHour: 16, locationId: 'cafe-1', activity: '见面', phoneAccess: 'available', summary: '下午见面' },
+    ])
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body))
+      expect(body.tools.map((tool: { function: { name: string } }) => tool.function.name)).toEqual(['submit_turn'])
+      expect(body.tool_choice).toEqual({ type: 'function', function: { name: 'submit_turn' } })
+      return completion([response])
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     const result = await generatePrivateAgentTurn(agentOptions)
 
     expect(result.parsed.bubbles.map((bubble) => bubble.type)).toEqual(['text', 'scheduleChange'])
     expect(result.parsed.bubbles.filter((bubble) => bubble.type === 'scheduleChange')).toHaveLength(1)
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
-  it('does not add a second request when text and action were already returned together', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => completion([
-      call('send_text', { content: '那就这么定啦。', thought: '已经决定了', mood: '期待' }),
-      call('transfer_money', { amount: 20, note: '买杯咖啡', thought: '想请客', mood: '开心' }),
-    ])))
+  it('keeps multiple natural text bubbles around an action in one request', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => completion([turnCall([
+      { type: 'text', content: '拿着。' },
+      { type: 'transfer', amount: 20, note: '买杯咖啡' },
+      { type: 'text', content: '下次换你请我。' },
+    ])])))
 
     const result = await generatePrivateAgentTurn(agentOptions)
 
-    expect(result.parsed.bubbles.map((bubble) => bubble.type)).toEqual(['text', 'transfer'])
+    expect(result.parsed.bubbles.map((bubble) => bubble.type)).toEqual(['text', 'transfer', 'text'])
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 
-  it('also adds text to an action-only finance tool call', async () => {
-    const transfer = call('transfer_money', { amount: 20, note: '买杯咖啡', thought: '想请客', mood: '开心' }, 'transfer-1')
-    const reply = call('send_text', { content: '这杯我请你。', thought: '想让对方开心', mood: '开心' }, 'transfer-text')
+  it('retries an invalid action-only turn as a complete turn instead of requesting one fixed text', async () => {
+    const invalid = turnCall([{ type: 'transfer', amount: 20, note: '买杯咖啡' }], {}, 'invalid-turn')
+    const repaired = turnCall([
+      { type: 'text', content: '这杯我请你。' },
+      { type: 'transfer', amount: 20, note: '买杯咖啡' },
+    ], {}, 'repaired-turn')
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(completion([transfer]))
-      .mockResolvedValueOnce(completion([reply]))
+      .mockResolvedValueOnce(completion([invalid]))
+      .mockImplementationOnce(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body))
+        expect(body.messages.at(-1).content).toContain('一次性重新提交完整 submit_turn')
+        return completion([repaired])
+      })
     vi.stubGlobal('fetch', fetchMock)
 
     const result = await generatePrivateAgentTurn(agentOptions)
@@ -111,15 +122,38 @@ describe('native chat agent tools', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it('keeps image-only replies on the existing image plus caption path', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => completion([call('send_image', {
-      query: 'a warm cafe interior', caption: '就是这家～', kind: 'scene', participants: [], thought: '想给对方看看', mood: '开心',
-    })])))
+  it('supports multiple text bubbles around images in one native call', async () => {
+    const response = turnCall([
+      { type: 'text', content: '等一下，我找个光线好点的地方。' },
+      { type: 'image', query: 'a casual selfie in warm window light', kind: 'selfie', participants: ['self'] },
+      { type: 'text', content: '不许笑我。' },
+    ])
+    const fetchMock = vi.fn().mockResolvedValueOnce(completion([response]))
+    vi.stubGlobal('fetch', fetchMock)
 
     const result = await generatePrivateAgentTurn(agentOptions)
 
-    expect(result.parsed.bubbles).toEqual([{ type: 'image', query: 'a warm cafe interior', caption: '就是这家～', kind: 'scene', participants: [] }])
-    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(result.parsed.bubbles).toEqual([
+      { type: 'text', content: '等一下，我找个光线好点的地方。' },
+      { type: 'image', query: 'a casual selfie in warm window light', kind: 'selfie', participants: ['self'] },
+      { type: 'text', content: '不许笑我。' },
+    ])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('submits an immediate activity and natural text in one native call', async () => {
+    const response = turnCall([
+      { type: 'text', content: '好，我现在去厨房做饭。' },
+      { type: 'activity_now', locationId: 'cafe-1', activity: '做饭', durationMinutes: 60, phoneAccess: 'available' },
+    ])
+    const fetchMock = vi.fn().mockResolvedValueOnce(completion([response]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await generatePrivateAgentTurn(agentOptions)
+
+    expect(result.parsed.bubbles).toEqual([{ type: 'text', content: '好，我现在去厨房做饭。' }])
+    expect(result.parsed.immediateActivities).toEqual([{ locationId: 'cafe-1', activity: '做饭', durationMinutes: 60, phoneAccess: 'available' }])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('adds group schedule text from the same speaker and creates one card', async () => {
@@ -137,6 +171,18 @@ describe('native chat agent tools', () => {
     const result = await generateGroupAgentTurn({ ...agentOptions, speakerNames: ['小林', '阿青'], memberNames: ['小林', '阿青'] })
 
     expect(result.parsed.bubbles.map((bubble) => [bubble.speakerIndex, bubble.type])).toEqual([[2, 'text'], [2, 'scheduleChange']])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('adds image text from the same group speaker', async () => {
+    const image = call('send_image', { speakerIndex: 2, query: 'a plate of fresh pasta', kind: 'object', participantIndexes: [], includeUser: false, thought: '想分享晚饭', mood: '开心' }, 'group-image')
+    const reply = call('send_text', { speakerIndex: 2, content: '刚做好的，给你们看看。', thought: '想听听大家评价', mood: '开心' }, 'group-image-text')
+    const fetchMock = vi.fn().mockResolvedValueOnce(completion([image])).mockResolvedValueOnce(completion([reply]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await generateGroupAgentTurn({ ...agentOptions, speakerNames: ['小林', '阿青'], memberNames: ['小林', '阿青'] })
+
+    expect(result.parsed.bubbles.map((bubble) => [bubble.speakerIndex, bubble.type])).toEqual([[2, 'text'], [2, 'image']])
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })

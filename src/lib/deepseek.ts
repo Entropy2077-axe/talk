@@ -197,6 +197,16 @@ export interface ChatCompletionOptions {
 }
 
 /**
+ * Tool-capable chat APIs normally return an empty assistant `content` when
+ * the reply consists entirely of function calls.  Preserve those calls in
+ * Sky Eye instead of recording that successful response as an empty output.
+ */
+export function traceableCompletionOutput(content: string, toolCalls?: ChatToolCall[]): string {
+  if (content.trim() || !toolCalls?.length) return content
+  return JSON.stringify({ tool_calls: toolCalls }, null, 2)
+}
+
+/**
  * Empty 200 responses are usually transient supplier failures. Keep retries
  * bounded so a persistently broken endpoint cannot leave the chat spinning
  * forever; a user-initiated retry starts a fresh five-attempt cycle.
@@ -387,12 +397,13 @@ export async function chatCompletion(opts: ChatCompletionOptions): Promise<ChatC
   const recordedInputTokens = typeof promptTokens === 'number' && Number.isFinite(promptTokens) ? promptTokens : inputTokens
   const recordedOutputTokens = typeof completionTokens === 'number' && Number.isFinite(completionTokens) ? completionTokens : estimateTokens(result.content)
   const content = result.content
+  const traceOutput = traceableCompletionOutput(content, result.toolCalls)
   const success = result.status === 'ok' || (result.status === 'length' && !!content)
   const durationMs = Date.now() - startedAt
   const usageWrite = recordAiUsage({ purpose, model: opts.model, automatic, success, inputTokens: recordedInputTokens, outputTokens: recordedOutputTokens, estimated: typeof promptTokens !== 'number' || typeof completionTokens !== 'number' })
   if (automatic) await usageWrite
   else void usageWrite.catch(() => undefined)
-  void traceAiCall({ purpose, model: opts.model, messages, output: content, inputTokens: recordedInputTokens, outputTokens: recordedOutputTokens, durationMs, diagnostics: { provider, status: result.status, finishReason: result.finishReason, usage: result.usage, rawShapeSummary: result.rawShapeSummary, retried: result.retried ?? false }, ...opts.trace })
+  void traceAiCall({ purpose, model: opts.model, messages, output: traceOutput, inputTokens: recordedInputTokens, outputTokens: recordedOutputTokens, durationMs, diagnostics: { provider, status: result.status, finishReason: result.finishReason, usage: result.usage, rawShapeSummary: result.rawShapeSummary, retried: result.retried ?? false }, ...opts.trace })
   console.info(`[ai-call] purpose=${purpose} provider=${provider} model=${opts.model} status=${result.status} finish=${result.finishReason ?? 'unknown'} contentChars=${content.length} reasoningTokens=${result.usage?.reasoningTokens ?? 'unknown'} outputTokens=${result.usage?.completionTokens ?? 'unknown'} retried=${result.retried ? 'yes' : 'no'}`)
   if (!success) console.warn(`[ai-call] ${completionStatusMessage(result)}`)
   return result

@@ -42,6 +42,11 @@ import { generatePrivateAgentTurn } from './chatAgentTools'
 import { traceTurnEvent } from './deepseek'
 import type { AiBubble, AppSettings, Contact, InternalTask, Message, MessageType, ScheduleOverride, Sticker } from '../types'
 
+function ensureImageHasText(bubbles: AiBubble[]): AiBubble[] {
+  if (!bubbles.some((bubble) => bubble.type === 'image') || bubbles.some((bubble) => bubble.type === 'text')) return bubbles
+  return [{ type: 'text', content: '给你看张图。' }, ...bubbles]
+}
+
 /**
  * Per-conversation AI-turn state, deliberately kept in a module-level
  * Zustand store rather than component state. ChatPage used to own this in
@@ -417,7 +422,7 @@ async function runAiTurn(
       const leafLocations = actionLocations.filter((location) => !actionLocations.some((candidate) => candidate.parentId === location.id))
       const locationCatalog = leafLocations.map((location) => `${location.name}(${location.id})`).join('、')
       locationFactsForReview = `当前地点=${currentLocation?.name ?? '未知地点'}(${contact.currentLocationId ?? '未知'})\n可执行地点=${locationCatalog}`
-      locationActionContext = `【地点与特殊任务】你当前位于：${currentLocation?.name ?? '未知地点'}（${contact.currentLocationId ?? '未知'}）。你可以按照自己的人设和意愿接受、拒绝，也可以主动提出线下安排。只有日期、整点开始和结束时间、地点都明确，且你已经作出具体承诺时，才调用 create_schedule；日程卡只是结构化记录，不能代替自然聊天，必须同时调用 send_text 说清你的回应。信息不全时自然追问，不要创建日程。特殊任务一旦与某条默认任务重叠，那条默认任务会整项取消。以下列表是当前唯一可确认并执行的具体地点：${locationCatalog}。玩家提到列表外地点，或名称无法可靠对应列表时，不能假装去过、看过、知道它存在，也不能直接答应；请保持角色口吻自然询问位置或让对方进一步说明，不要提“系统”“目录”或地点ID。`
+      locationActionContext = `【地点与特殊任务】你当前位于：${currentLocation?.name ?? '未知地点'}（${contact.currentLocationId ?? '未知'}）。你可以按照自己的人设和意愿接受、拒绝，也可以主动提出行动。角色明确决定现在立刻前往某地并开始活动时，在 submit_turn.events 中加入 type=activity_now；未来安排只有日期、整点开始和结束时间、地点都明确且角色已经作出具体承诺时才加入 type=schedule。两种动作都不能代替自然聊天，整轮 events 必须至少包含一条 type=text。仅讨论可能性、拒绝、附带未满足条件或信息不全时不要执行动作。特殊任务一旦与某条默认任务重叠，那条默认任务会整项取消。以下列表是当前唯一可确认并执行的具体地点：${locationCatalog}。玩家提到列表外地点，或名称无法可靠对应列表时，不能假装去过、看过、知道它存在，也不能直接答应；请保持角色口吻自然询问位置或让对方进一步说明，不要提“系统”“目录”或地点ID。`
     }
     const memoryPromptOn = promptModuleEnabled(contactPromptSettings, 'memory')
     const [recentMemories, financeContext, socialMemories, sharedOriginalContext, lifeEventText, experienceText, worldbookTrace] = await Promise.all([
@@ -513,9 +518,9 @@ async function runAiTurn(
     ])
     console.info(`[chat-perf] context-ready=${Math.round(performance.now() - turnStartedAt)}ms contact=${displayName(contact)}`)
 
-    // Native Agent turn: the model emits schema-bound tool calls for every
-    // visible message and action. Compatible relays without tool_calls use a
-    // single structured-plan fallback inside generatePrivateAgentTurn().
+    // Native Agent turn: private chat forces one schema-bound submit_turn call
+    // containing the complete ordered message/action sequence. Plain-text JSON
+    // is deliberately not used as a compatibility fallback here.
     let rawText: string
     let localTurn
     if (directOutput) {
@@ -529,7 +534,7 @@ async function runAiTurn(
     } else {
       const generated = await generatePrivateAgentTurn({
         apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, utilityModel: settings.utilityModel,
-        messages: [...chatMessages, { role: 'system', content: `本轮必须通过提供的函数发送每一条消息或执行行动。create_schedule、转账、红包、借贷和礼物等动作卡不能单独作为回复：执行这些动作时必须同时调用 send_text 自然说话；图片已有必填配文，表情包可以单独发送。每个可见消息函数都要填写真实想法和中文文字心情；心情禁止使用 emoji。不要在普通 content 中输出 JSON、工具名或协议。${locationActionContext ? `\n${locationActionContext}` : ''}` }],
+        messages: [...chatMessages, { role: 'system', content: `本轮必须通过唯一的 submit_turn 原生函数一次性提交完整回复。events 按实际发送顺序排列，可以自然地连续发送多段文字、多张图片或穿插消息与行动，不要固定成“一张图片配一句话”。image、activity_now、schedule、transfer、red_packet、loan_request、loan_decision、gift_purchase 等事件不能单独作为回复，但只要求整轮至少有一条 text，文字可以在行动前后；sticker 可以单独发送。填写真实想法和中文文字心情，心情禁止使用 emoji。不要在普通 content 中输出 JSON、工具名或协议。${locationActionContext ? `\n${locationActionContext}` : ''}` }],
         signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext,
         trace: { turnId: streamId, stage: 'original_generation', conversationId },
         stickerNames: stickers.map((sticker) => sticker.name), stickerSearchEnabled: isStickerProviderReady(settings),
@@ -555,6 +560,8 @@ async function runAiTurn(
     }
     let finalRaw = jsonRaw
     let { bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parsedTurn
+    let immediateActivities = parsedTurn.immediateActivities ?? []
+    bubbles = ensureImageHasText(bubbles)
     const initiallyRequestedKnowledge = [...knowledgeQueries]
     const qualityCheckDebug = {
       enabled: true,
@@ -595,7 +602,7 @@ async function runAiTurn(
           : message)
         const regenerated = await generatePrivateAgentTurn({
           apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, utilityModel: settings.utilityModel,
-          messages: [...enrichedMessages, { role: 'system', content: '根据查询结果重新决定回复，并且必须通过提供的函数发送消息或执行行动。create_schedule、转账、红包、借贷和礼物等动作卡不能单独作为回复，执行时必须同时调用 send_text 自然说话。心情使用中文文字，禁止 emoji。' }],
+          messages: [...enrichedMessages, { role: 'system', content: '根据查询结果重新决定回复，并通过唯一的 submit_turn 原生函数一次性提交完整回复。events 可按自然顺序包含多段文字、多张图片和行动；图片或行动存在时，整轮至少包含一条自然文字，但不要机械地逐项配文。心情使用中文文字，禁止 emoji。' }],
           signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext,
           trace: { turnId: streamId, stage: 'second_chat', conversationId }, stickerNames: stickers.map((sticker) => sticker.name),
           stickerSearchEnabled: isStickerProviderReady(settings), imageEnabled: isImageProviderReady(settings) || !!settings.pexelsApiKey,
@@ -608,6 +615,8 @@ async function runAiTurn(
         jsonRaw = rawText
         finalRaw = jsonRaw
         ;({ bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = converted)
+        immediateActivities = converted.immediateActivities ?? []
+        bubbles = ensureImageHasText(bubbles)
       }
     }
     console.log(`[chat] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 mood=${turnMood || '无'} thought=${turnThought ? '有(' + turnThought.length + '字)' : '无'} 对方=${displayName(contact)}`)
@@ -653,13 +662,36 @@ async function runAiTurn(
     }
     let actionCommittee: (ActionCommitteeDebug & { toolResult?: CreateSpecialTaskResult }) | undefined
     let internalTask: InternalTask | undefined
+    if (!directOutput && !qualityCheckDebug.detectedInvalid && immediateActivities.length > 0 && isModuleEnabled('location')) {
+      const action = immediateActivities[0]
+      const location = actionLocations.find((candidate) => candidate.id === action.locationId)
+      const toolResult = await createScheduleInternalTask(contact.id, conversationId, {
+        startsAt: now,
+        endsAt: now + action.durationMinutes * 60_000,
+        locationId: action.locationId,
+        activity: action.activity,
+        summary: `${action.activity} · ${location?.name ?? action.locationId}`,
+        phoneAccess: action.phoneAccess,
+        sourceConversationId: conversationId,
+      }, now)
+      if (toolResult.success) {
+        internalTask = toolResult.internalTask
+        void traceTurnEvent({ turnId: streamId, conversationId, stage: 'location_change', output: `立即行动：${action.activity}｜${location?.name ?? action.locationId}｜${action.durationMinutes}分钟` })
+      } else {
+        bubbles = [{ type: 'text', content: '我刚想动身，但这个地点现在去不了。' }]
+        immediateActivities = []
+        turnThought = undefined
+        finalRaw = serializePrivateTurn({ bubbles, knowledgeQueries: [], mood: turnMood, thought: turnThought })
+        jsonRaw = finalRaw
+      }
+    }
     // Normal turns only execute explicit [schedule:...] markers parsed above.
     // The legacy committee remains limited to the experimental direct-output mode.
     if (directOutput && !qualityCheckDebug.detectedInvalid && _triggeringUserText.trim() && isModuleEnabled('location') && actionLocations.length > 0) {
       const visibleDraft = bubbles.map((bubble) => {
         if (bubble.type === 'text') return bubble.content
         if (bubble.type === 'scheduleChange') return bubble.summary
-        if (bubble.type === 'image') return bubble.caption || '[图片]'
+        if (bubble.type === 'image') return '[图片]'
         if (bubble.type === 'sticker') return `[表情：${bubble.name}]`
         return ''
       }).filter(Boolean).join('\n')
@@ -829,7 +861,7 @@ function revealBubbles(
       if (executionError) content = executionError
       else if (bubble.type === 'text') content = bubble.content
       else if (bubble.type === 'sticker') content = stickerFailed ? '表情没找到…' : bubble.name
-      else if (bubble.type === 'image') content = imageFailed ? '图片没发出来…' : bubble.caption || '[图片]'
+      else if (bubble.type === 'image') content = imageFailed ? '图片没发出来…' : '[图片]'
       else if (bubble.type === 'scheduleChange') content = bubble.summary
       else if (bubble.type === 'link') content = bubble.label
       else if (bubble.type === 'giftPurchase') content = bubble.name || '礼物'
@@ -850,7 +882,7 @@ function revealBubbles(
               kind, settings,
             })
             imageAssetId = asset.id
-            imagePayload = { assetId: asset.id, caption: bubble.caption, query: bubble.query, provider: asset.provider }
+            imagePayload = { assetId: asset.id, query: bubble.query, provider: asset.provider }
           } catch (error) { console.warn('[media] 创建图片任务失败', error); imageFailed = true }
         }
       }
