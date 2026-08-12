@@ -390,6 +390,8 @@ export interface Group {
   /** The location module reuses the normal Talk group engine and settings. */
   kind?: 'standard' | 'location'
   locationId?: string
+  /** SLG scenes are persistent per-leaf-location and only admit people physically in that exact leaf. */
+  sceneMode?: 'slg'
   /** Groups are single-world scenes; every member must belong to this world. */
   worldviewId?: string
 }
@@ -443,6 +445,8 @@ export interface WorldMapRecord {
 export interface LocationModuleState {
   id: 'active'
   currentLocationId?: string
+  /** Independent player position for virtual-life SLG; legacy location mode keeps using currentLocationId. */
+  slgCurrentLocationId?: string
   /** Built-in locations removed by the user must not be recreated during initialization. */
   deletedLocationIds?: string[]
   updatedAt: number
@@ -476,7 +480,7 @@ export interface GroupPlan {
 }
 
 export type MessageRole = 'user' | 'assistant'
-export type MessageType = 'text' | 'sticker' | 'image' | 'link' | 'gift' | 'scheduleChange' | 'internalTask' | 'groupPlan' | 'transfer' | 'redPacket' | 'loanRequest' | 'loanResult' | 'repayment'
+export type MessageType = 'text' | 'sticker' | 'image' | 'link' | 'gift' | 'scheduleChange' | 'internalTask' | 'groupPlan' | 'locationEvent' | 'transfer' | 'redPacket' | 'loanRequest' | 'loanResult' | 'repayment'
 export type GroupSpeakerLimit = 2 | 3 | 4 | 5 | 'all'
 export type GroupEnergyLevel = 'cold' | 'normal' | 'lively'
 
@@ -966,6 +970,8 @@ export interface AppSettings {
   chatResponseTimeoutMs: number
   /** Feature-module toggles — see src/features/. Every module id listed here is active. */
   enabledModules: string[]
+  /** Remembers whether 地点 was independently enabled before SLG forced it on. */
+  slgLocationWasEnabled?: boolean
 }
 
 export type PromptModuleId =

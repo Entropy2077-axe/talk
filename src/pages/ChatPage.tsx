@@ -22,7 +22,7 @@ import { claimRedPacket, transferFunds, USER_WALLET_ID } from '../lib/finance'
 import { searchRemoteStickers, trackRemoteStickerSend, type RemoteStickerResult } from '../lib/remoteMedia'
 import { isStickerProviderReady, stickerProviderName } from '../lib/mediaProviders'
 import { normalizeChatPageSize } from '../lib/chatPagination'
-import { resolveLocationParticipants, syncContactLocationsAt } from '../lib/locations'
+import { resolveExactLocationParticipants, resolveLocationParticipants, syncContactLocationsAt } from '../lib/locations'
 import { revertInternalTask } from '../lib/internalTasks'
 import { ArrowLeftRight, BriefcaseBusiness, CircleDollarSign, Gift, HandCoins, Package, Plus, ShoppingBag, Sticker as StickerIcon } from 'lucide-react'
 import { UiIcon } from '../components/UiIcon'
@@ -76,11 +76,11 @@ export function ChatPage() {
     let cancelled = false
     void (async () => {
       await syncContactLocationsAt(new Date())
-      const participants = await resolveLocationParticipants(group.locationId!)
+      const participants = await (group.sceneMode === 'slg' ? resolveExactLocationParticipants(group.locationId!) : resolveLocationParticipants(group.locationId!))
       if (!cancelled) await db.groups.update(group.id, { memberContactIds: participants.activeMembers.map((contact) => contact.id) })
     })()
     return () => { cancelled = true }
-  }, [group?.id, group?.kind, group?.locationId])
+  }, [group?.id, group?.kind, group?.locationId, group?.sceneMode])
   const groupMembersRaw = useLiveQuery(
     () => (group ? db.contacts.bulkGet(group.memberContactIds) : []),
     [group],
@@ -680,7 +680,7 @@ export function ChatPage() {
   }
 
   const headerTitle = isGroupConv
-    ? group!.kind === 'location' ? `${group!.name} · ${groupLocation?.name ?? '未选择地点'}` : group!.name
+    ? group!.sceneMode === 'slg' ? `${groupLocation?.name ?? group!.name} · 现场` : group!.kind === 'location' ? `${group!.name} · ${groupLocation?.name ?? '未选择地点'}` : group!.name
     : displayName(contact!)
   const visibleHeaderTitle = aiTyping && typingLabel ? `${typingLabel}正在输入中...` : headerTitle
   const headerInfoPath = isGroupConv ? `/group/${group!.id}` : `/contact/${contact!.id}`

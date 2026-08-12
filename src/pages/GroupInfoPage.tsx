@@ -14,7 +14,7 @@ import { isModuleEnabled } from '../features'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { setGroupPlanStatus } from '../lib/groupPlans'
 import type { Contact, Group, GroupEnergyLevel, GroupPlan, GroupSpeakerLimit } from '../types'
-import { realSeason, resolveLocationParticipants, syncContactLocationsAt } from '../lib/locations'
+import { realSeason, resolveExactLocationParticipants, resolveLocationParticipants, syncContactLocationsAt } from '../lib/locations'
 
 const EMPTY_CONTACTS: Contact[] = []
 const SPEAKER_LIMIT_OPTIONS: GroupSpeakerLimit[] = [2, 3, 4, 5, 'all']
@@ -126,8 +126,8 @@ export function GroupInfoPage() {
     if (group?.kind === 'location') void syncContactLocationsAt(new Date())
   }, [group?.kind, group?.locationId])
   const locationParticipants = useLiveQuery(
-    () => group?.kind === 'location' && group.locationId ? resolveLocationParticipants(group.locationId) : undefined,
-    [group?.kind, group?.locationId],
+    () => group?.kind === 'location' && group.locationId ? (group.sceneMode === 'slg' ? resolveExactLocationParticipants(group.locationId) : resolveLocationParticipants(group.locationId)) : undefined,
+    [group?.kind, group?.locationId, group?.sceneMode],
   )
   const groupPlans = useLiveQuery(() => (groupId ? db.groupPlans.where('groupId').equals(groupId).reverse().sortBy('createdAt') : []), [groupId]) ?? []
   const allContacts = (useLiveQuery(() => db.contacts.toArray(), []) ?? EMPTY_CONTACTS).filter((item) => !isAiTestId(item.id))
@@ -171,7 +171,7 @@ export function GroupInfoPage() {
           locationContextText: groupLocation
             ? `当前地点：${groupLocation.name}\n地点描述：${groupLocation.description}\n设备现实时间：${describeCurrentTime(new Date())}\n现实季节：${realSeason(new Date())}\n人物位置与听觉状态：\n${[
                 ...(locationParticipants?.here ?? []).map((contact) => `- ${displayName(contact)}：here`),
-                ...(locationParticipants?.audible ?? []).map(({ contact, audibility }) => `- ${displayName(contact)}：${audibility}`),
+                ...(group.sceneMode === 'slg' ? [] : (locationParticipants?.audible ?? []).map(({ contact, audibility }) => `- ${displayName(contact)}：${audibility}`)),
               ].join('\n') || '当前无人'}`
             : undefined,
         })
@@ -276,7 +276,7 @@ export function GroupInfoPage() {
           <h3 className="mb-3 text-xs font-medium text-gray-400">现场人物</h3>
           {([
             ['正在这里', locationParticipants.here],
-            ['附近能听见', locationParticipants.audible.map((item) => item.contact)],
+            ...(group.sceneMode === 'slg' ? [] : [['附近能听见', locationParticipants.audible.map((item) => item.contact)] as [string, Contact[]]]),
             ['不在这里', locationParticipants.away],
           ] as Array<[string, Contact[]]>).map(([label, contacts]) => <div key={label} className="mb-3 last:mb-0"><p className="mb-1 text-[11px] text-gray-400">{label} · {contacts.length}</p>{contacts.length === 0 ? <p className="px-2 text-xs text-gray-300">暂无</p> : <div className="space-y-1">{contacts.map((contact) => <button type="button" key={contact.id} onClick={() => navigate(`/contact/${contact.id}`)} className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left active:bg-gray-50"><Avatar avatar={contact.avatar} color={contact.avatarColor} size={34} /><span className="min-w-0 flex-1 truncate text-sm text-gray-800">{displayName(contact)}</span><span className="max-w-28 truncate text-[10px] text-gray-400">{contact.currentLocationId}</span></button>)}</div>}</div>)}
         </section>}

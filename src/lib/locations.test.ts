@@ -7,6 +7,7 @@ import { sendGroupMessage } from './groupChatEngine'
 import { useSettingsStore } from '../store/useSettingsStore'
 import {
   enterLocation,
+  enterSlgLocation,
   ensureLocationsInitialized,
   LOCATION_CONVERSATION_ID,
   LOCATION_GROUP_ID,
@@ -14,7 +15,11 @@ import {
   resolveContactLocationAt,
   resolveContactRuntimeAt,
   resolveLocationParticipants,
+  resolveExactLocationParticipants,
+  slgConversationId,
+  slgGroupId,
   syncContactLocationAt,
+  syncContactLocationsAt,
 } from './locations'
 
 const contact = (id: string, patch: Partial<Contact> = {}): Contact => ({
@@ -124,6 +129,61 @@ describe('location runtime', () => {
     ]))
     expect(result.away.map((item) => item.id)).toContain('away')
     expect(result.activeMembers.map((item) => item.id)).not.toContain('away')
+  })
+
+  it('keeps SLG scenes limited to the exact concrete location', async () => {
+    await ensureLocationsInitialized()
+    await db.contacts.bulkAdd([
+      contact('same-room', { currentLocationId: 'mall-cafe', locationSource: 'manual' }),
+      contact('next-room', { currentLocationId: 'mall-atrium', locationSource: 'manual' }),
+    ])
+    const result = await resolveExactLocationParticipants('mall-cafe')
+    expect(result.here.map((item) => item.id)).toEqual(['same-room'])
+    expect(result.activeMembers.map((item) => item.id)).toEqual(['same-room'])
+    expect(result.audible).toEqual([])
+    expect(result.away.map((item) => item.id)).toContain('next-room')
+  })
+
+  it('creates one persistent SLG scene per leaf and preserves earlier scene data when moving', async () => {
+    await ensureLocationsInitialized()
+    await db.locationModuleState.update('active', { currentLocationId: 'park-riverside' })
+    await db.contacts.add(contact('cafe-friend', { currentLocationId: 'mall-cafe', locationSource: 'manual' }))
+
+    const cafeConversationId = await enterSlgLocation('mall-cafe')
+    await db.messages.add({ id: 'remember-this', conversationId: cafeConversationId, role: 'user', type: 'text', content: '这条现场记录需要保留', createdAt: Date.now() + 10 })
+    const parkConversationId = await enterSlgLocation('park-lawn')
+
+    expect(cafeConversationId).toBe(slgConversationId('mall-cafe'))
+    expect(parkConversationId).toBe(slgConversationId('park-lawn'))
+    expect(await db.groups.get(slgGroupId('mall-cafe'))).toMatchObject({ sceneMode: 'slg', locationId: 'mall-cafe', memberContactIds: ['cafe-friend'] })
+    expect(await db.messages.get('remember-this')).toBeTruthy()
+    expect(await db.conversations.get(cafeConversationId)).toMatchObject({ systemPinned: false })
+    expect(await db.conversations.get(parkConversationId)).toMatchObject({ systemPinned: true })
+    expect(await db.locationModuleState.get('active')).toMatchObject({ currentLocationId: 'park-riverside', slgCurrentLocationId: 'park-lawn' })
+    expect((await db.messages.where('conversationId').equals(cafeConversationId).toArray()).some((message) => message.type === 'locationEvent' && message.content.includes('离开'))).toBe(true)
+    expect((await db.messages.where('conversationId').equals(parkConversationId).toArray()).some((message) => message.type === 'locationEvent' && message.content.includes('进入'))).toBe(true)
+  })
+
+  it('records deterministic arrivals and departures when an SLG contact schedule moves them', async () => {
+    await ensureLocationsInitialized()
+    await enterSlgLocation('mall-cafe')
+    await enterSlgLocation('park-lawn')
+    const now = new Date()
+    const enabledModules = Array.from(new Set([...useSettingsStore.getState().enabledModules, 'location', 'slg']))
+    useSettingsStore.getState().setSettings({ enabledModules })
+    await db.contacts.add(contact('moving-friend', {
+      name: '小满', currentLocationId: 'mall-cafe', locationSource: 'schedule',
+      schedule: [{ id: 'walk', dayOfWeek: now.getDay(), startHour: now.getHours(), endHour: Math.min(24, now.getHours() + 1), phoneAccess: 'available', location: '中央草坪', locationId: 'park-lawn', activity: '散步' }],
+    }))
+
+    await syncContactLocationsAt(now)
+
+    const cafeEvents = await db.messages.where('conversationId').equals(slgConversationId('mall-cafe')).toArray()
+    const parkEvents = await db.messages.where('conversationId').equals(slgConversationId('park-lawn')).toArray()
+    expect(cafeEvents.some((message) => message.type === 'locationEvent' && message.content === '小满离开了咖啡店')).toBe(true)
+    expect(parkEvents.some((message) => message.type === 'locationEvent' && message.content === '小满进入了中央草坪')).toBe(true)
+    expect(await db.groups.get(slgGroupId('mall-cafe'))).toMatchObject({ memberContactIds: [] })
+    expect(await db.groups.get(slgGroupId('park-lawn'))).toMatchObject({ memberContactIds: ['moving-friend'] })
   })
 
   it('preserves Talk group settings while switching and caches only dynamic participants', async () => {

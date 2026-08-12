@@ -10,6 +10,8 @@ import type { AppSettings, ScheduleBlock } from '../types'
 
 export const LOCATION_GROUP_ID = 'talk-location-group'
 export const LOCATION_CONVERSATION_ID = 'talk-location-conversation'
+export const SLG_GROUP_PREFIX = 'talk-slg-location-group:'
+export const SLG_CONVERSATION_PREFIX = 'talk-slg-location-conversation:'
 const MAP_SEED = 'talk-location-map-v1'
 
 type LocationSeed = Pick<LocationNode, 'id' | 'parentId' | 'name' | 'kind' | 'description' | 'access' | 'sortOrder'>
@@ -217,6 +219,7 @@ export async function deleteLocationTree(locationId: string) {
     await db.locationModuleState.put({
       id: 'active',
       currentLocationId: state?.currentLocationId && deletedIds.has(state.currentLocationId) ? undefined : state?.currentLocationId,
+      slgCurrentLocationId: state?.slgCurrentLocationId && deletedIds.has(state.slgCurrentLocationId) ? undefined : state?.slgCurrentLocationId,
       deletedLocationIds: nextDeletedIds,
       updatedAt: Date.now(),
     })
@@ -355,6 +358,29 @@ export async function syncContactLocationsAt(now = new Date()) {
   const updates = contacts.filter((contact) => contact.locationSource !== 'unknown').map((contact) => ({ contact, resolved: resolveContactRuntimeAt(contact, now, leafIds) }))
     .filter(({ contact, resolved }) => contact.currentLocationId !== resolved.locationId || contact.locationSource !== resolved.source || contact.currentTaskId !== resolved.taskId || contact.currentTaskKind !== resolved.taskKind || contact.currentActivity !== resolved.activity)
   if (updates.length) await db.contacts.bulkUpdate(updates.map(({ contact, resolved }) => ({ key: contact.id, changes: { currentLocationId: resolved.locationId, locationSource: resolved.source, locationUpdatedAt: now.getTime(), currentTaskId: resolved.taskId, currentTaskKind: resolved.taskKind, currentActivity: resolved.activity, taskUpdatedAt: now.getTime() } })))
+  const settings = useSettingsStore.getState()
+  if (updates.length && settings.experienceMode === 'free' && settings.enabledModules.includes('slg')) {
+    const locationById = new Map(locations.map((location) => [location.id, location]))
+    const finalLocationByContact = new Map(contacts.map((contact) => [contact.id, contact.currentLocationId]))
+    const affectedLocationIds = new Set<string>()
+    for (const { contact, resolved } of updates) {
+      finalLocationByContact.set(contact.id, resolved.locationId)
+      if (!contact.currentLocationId || contact.currentLocationId === resolved.locationId) continue
+      affectedLocationIds.add(contact.currentLocationId)
+      affectedLocationIds.add(resolved.locationId)
+      const label = contact.remark || contact.name
+      const previousLocation = locationById.get(contact.currentLocationId)
+      const nextLocation = locationById.get(resolved.locationId)
+      const previousConversation = await db.conversations.get(slgConversationId(contact.currentLocationId))
+      const nextConversation = await db.conversations.get(slgConversationId(resolved.locationId))
+      if (previousConversation && previousLocation) await appendSlgLocationEvent(previousConversation.id, `${label}离开了${previousLocation.name}`, now.getTime())
+      if (nextConversation && nextLocation) await appendSlgLocationEvent(nextConversation.id, `${label}进入了${nextLocation.name}`, now.getTime())
+    }
+    for (const locationId of affectedLocationIds) {
+      const group = await db.groups.get(slgGroupId(locationId))
+      if (group) await db.groups.update(group.id, { memberContactIds: contacts.filter((contact) => finalLocationByContact.get(contact.id) === locationId).map((contact) => contact.id) })
+    }
+  }
   return updates.length
 }
 
@@ -384,6 +410,116 @@ export async function resolveLocationParticipants(locationId: string): Promise<L
     }
   }
   return { here, audible, away, activeMembers: [...here, ...audible.map((item) => item.contact)] }
+}
+
+/** SLG scenes have a hard spatial boundary: nearby/acoustic contacts are visible
+ * to the world simulation but never become speakers in the current scene. */
+export async function resolveExactLocationParticipants(locationId: string): Promise<LocationParticipants> {
+  await ensureLocationsInitialized()
+  const contacts = await db.contacts.toArray().then((items) => items.filter((item) => !isAiTestId(item.id)))
+  const here = contacts.filter((contact) => contact.currentLocationId === locationId)
+  const hereIds = new Set(here.map((contact) => contact.id))
+  return { here, audible: [], away: contacts.filter((contact) => !hereIds.has(contact.id)), activeMembers: here }
+}
+
+export function slgGroupId(locationId: string) {
+  return `${SLG_GROUP_PREFIX}${locationId}`
+}
+
+export function slgConversationId(locationId: string) {
+  return `${SLG_CONVERSATION_PREFIX}${locationId}`
+}
+
+async function appendSlgLocationEvent(conversationId: string, content: string, requested = Date.now()) {
+  const messages = await db.messages.where('conversationId').equals(conversationId).toArray()
+  const latest = messages.reduce((value, message) => Math.max(value, message.createdAt), 0)
+  const createdAt = Math.max(requested, latest + 1)
+  await db.messages.add({ id: crypto.randomUUID(), conversationId, role: 'assistant', type: 'locationEvent', content, createdAt })
+  await db.conversations.update(conversationId, { updatedAt: createdAt })
+}
+
+/** Ensure the player has a valid concrete map position without discarding any
+ * legacy location state. Existing positions are reused whenever possible. */
+export async function ensureSlgPlayerLocation() {
+  await ensureLocationsInitialized()
+  const [state, locations] = await Promise.all([db.locationModuleState.get('active'), db.locations.toArray()])
+  if (state?.slgCurrentLocationId && isLeafLocation(state.slgCurrentLocationId, locations)) return state.slgCurrentLocationId
+  const legacyPosition = state?.currentLocationId && isLeafLocation(state.currentLocationId, locations) ? locations.find((location) => location.id === state.currentLocationId) : undefined
+  const preferred = legacyPosition
+    ?? locations.find((location) => location.id === 'home-living')
+    ?? locations.find((location) => isLeafLocation(location.id, locations))
+  if (!preferred) return undefined
+  await db.locationModuleState.put({ ...state, id: 'active', slgCurrentLocationId: preferred.id, updatedAt: Date.now() })
+  return preferred.id
+}
+
+/** Move the player into one exact leaf and open that location's persistent
+ * SLG scene. Disabling SLG never calls this cleanup-free path, so every scene,
+ * memory and visit event remains available when the mode is enabled again. */
+export async function enterSlgLocation(locationId: string) {
+  await syncContactLocationsAt(new Date())
+  const [location, allLocations, state] = await Promise.all([
+    db.locations.get(locationId),
+    db.locations.toArray(),
+    db.locationModuleState.get('active'),
+  ])
+  if (!location || !isLeafLocation(location.id, allLocations)) throw new Error('请选择建筑内的具体地点')
+  const currentId = state?.slgCurrentLocationId
+  if (currentId === location.id) {
+    const existing = await db.conversations.get(slgConversationId(location.id))
+    if (existing) return existing.id
+  }
+
+  const participants = await resolveExactLocationParticipants(location.id)
+  const now = Date.now()
+  const groupId = slgGroupId(location.id)
+  const conversationId = slgConversationId(location.id)
+  const existingGroup = await db.groups.get(groupId)
+  const existingConversation = await db.conversations.get(conversationId)
+  const worldviewId = useSettingsStore.getState().activeWorldId || useSettingsStore.getState().defaultWorldviewId
+  const previousConversationId = currentId ? slgConversationId(currentId) : undefined
+  const previousConversation = previousConversationId ? await db.conversations.get(previousConversationId) : undefined
+  const previousLocation = currentId ? await db.locations.get(currentId) : undefined
+
+  await db.transaction('rw', db.groups, db.conversations, db.locationModuleState, async () => {
+    if (previousConversation) await db.conversations.update(previousConversation.id, { systemPinned: false })
+    await db.groups.put({
+      id: groupId,
+      name: location.name,
+      avatar: '📍',
+      avatarColor: '#315c4a',
+      memberContactIds: participants.here.map((contact) => contact.id),
+      worldviewId,
+      memory: existingGroup?.memory,
+      vibe: existingGroup?.vibe,
+      speakerLimit: existingGroup?.speakerLimit ?? 3,
+      allowAiChatter: existingGroup?.allowAiChatter ?? true,
+      energyLevel: existingGroup?.energyLevel ?? 'normal',
+      memoryTurnCount: existingGroup?.memoryTurnCount,
+      memoryMessageCursor: existingGroup?.memoryMessageCursor,
+      momentSharing: existingGroup?.momentSharing ?? 'private',
+      createdAt: existingGroup?.createdAt ?? now,
+      kind: 'location',
+      sceneMode: 'slg',
+      locationId: location.id,
+    })
+    await db.conversations.put({
+      id: conversationId,
+      groupId,
+      pinned: true,
+      systemPinned: true,
+      createdAt: existingConversation?.createdAt ?? now,
+      updatedAt: now,
+      lastReadAt: existingConversation?.lastReadAt,
+    })
+    await db.locationModuleState.put({ ...state, id: 'active', slgCurrentLocationId: location.id, updatedAt: now })
+  })
+
+  if (previousConversation && previousLocation && previousLocation.id !== location.id) {
+    await appendSlgLocationEvent(previousConversation.id, `你离开了${previousLocation.name}`, now)
+  }
+  await appendSlgLocationEvent(conversationId, `你进入了${location.name}`, now + 1)
+  return conversationId
 }
 
 export function locationCounts(contacts: Contact[], locations: LocationNode[]) {

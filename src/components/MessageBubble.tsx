@@ -83,6 +83,13 @@ export const MessageBubble = memo(function MessageBubble({
         .map(displayName),
     [message.mentions, memberById],
   )
+  if (message.type === 'locationEvent') {
+    return (
+      <div ref={(el) => registerRef?.(message.id, el)} data-message-id={message.id} className="px-4 py-2 text-center">
+        <span className="inline-flex rounded-full bg-black/5 px-3 py-1 text-[11px] text-gray-500">{message.content}</span>
+      </div>
+    )
+  }
   return (
     <div
       ref={(el) => registerRef?.(message.id, el)}

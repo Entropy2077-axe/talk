@@ -109,12 +109,13 @@ export const useSettingsStore = create<SettingsState>()(
       moodExpiryMs: 30 * 60 * 1000,
       chatResponseTimeoutMs: 60 * 1000,
       adminModeEnabled: false,
+      slgLocationWasEnabled: undefined,
       enabledModules: ['shop', 'warehouse', 'saveLoad', 'knowledgeBase', 'relationship', 'personalityTraits', 'intent', 'storyOutline', 'career', 'location'],
       setSettings: (patch) => set(patch),
     }),
     {
       name: 'talk-settings',
-      version: 24,
+      version: 25,
       migrate: (persisted, version) => {
         const next = persisted as Partial<SettingsState>
         if (next.experienceMode !== 'immersive' && next.experienceMode !== 'free') next.experienceMode = 'free'
