@@ -87,6 +87,18 @@ export function privateChatTools(opts: Pick<AgentToolOptions, 'stickerNames' | '
     ...commonProperties(),
   }, ['locationId', 'activity', 'durationMinutes', 'phoneAccess', 'thought', 'mood']))
   tools.push(
+    fn('recommend_contact', '当你以当前角色的身份，确实想到一位自己认识、尚未与用户建立联系的人，而且此刻自然适合牵线时调用。不要为了活跃气氛、完成任务或仅因工具可用而调用；同一人不要重复推荐。调用后还要用 send_text 自然引出推荐卡。', {
+      candidateName: { type: 'string', description: '被推荐人的姓名或常用昵称。必须是当前角色确实认识的人。' },
+      relationToRecommender: { type: 'string', description: '被推荐人与当前角色的真实关系，例如同事、大学室友、表姐。' },
+      recommendationReason: { type: 'string', description: '为什么此刻觉得用户和对方值得认识，要具体且符合当前聊天语境。' },
+      shortDescription: { type: 'string', description: '当前角色可以向用户公开的一两句人物介绍，不得泄露隐私。' },
+      gender: { type: 'string', description: '已知性别；不确定时填写“不确定”。' },
+      ageRange: { type: 'string', description: '已知年龄或年龄段；不确定时填写“不确定”。' },
+      occupation: { type: 'string', description: '已知职业或身份；不确定时填写“不确定”。' },
+      hobbies: { type: 'array', maxItems: 6, items: { type: 'string' }, description: '当前角色确实知道的兴趣，未知可为空数组。' },
+      personalityClues: { type: 'array', maxItems: 6, items: { type: 'string' }, description: '当前角色通过相处知道的性格线索，不要写全知视角设定。' },
+      ...commonProperties(),
+    }, ['candidateName', 'relationToRecommender', 'recommendationReason', 'shortDescription', 'gender', 'ageRange', 'occupation', 'hobbies', 'personalityClues', 'thought', 'mood']),
     fn('transfer_money', '角色决定立即向用户转账时调用。', { amount: { type: 'integer', minimum: 1 }, note: { type: 'string' }, ...commonProperties() }, ['amount', 'note', 'thought', 'mood']),
     fn('send_red_packet', '角色决定立即向用户发送红包时调用。', { amount: { type: 'integer', minimum: 1 }, blessing: { type: 'string' }, ...commonProperties() }, ['amount', 'blessing', 'thought', 'mood']),
     fn('request_loan', '角色决定向用户借钱时调用。', { amount: { type: 'integer', minimum: 1 }, reason: { type: 'string' }, ...commonProperties() }, ['amount', 'reason', 'thought', 'mood']),
@@ -102,7 +114,7 @@ function privateTurnTool(opts: Pick<AgentToolOptions, 'stickerNames' | 'stickerS
     ...(opts.stickerNames.length || opts.stickerSearchEnabled ? ['sticker'] : []),
     ...(opts.imageEnabled ? ['image'] : []),
     ...(opts.scheduleEnabled && opts.locationIds.length ? ['schedule', 'activity_now'] : []),
-    'transfer', 'red_packet', 'loan_request', 'loan_decision', 'gift_purchase',
+    'contact_recommendation', 'transfer', 'red_packet', 'loan_request', 'loan_decision', 'gift_purchase',
   ]
   return fn(PRIVATE_TURN_TOOL_NAME, '一次提交本轮完整回复。events 按真实发送顺序排列，可以包含任意数量的文字、图片、表情和动作；不要机械地让每张图片固定搭配一句文字。图片和行动不能单独作为回复，但只要求整轮至少有一条自然文字，文字可以位于其前后。', {
     events: {
@@ -113,7 +125,7 @@ function privateTurnTool(opts: Pick<AgentToolOptions, 'stickerNames' | 'stickerS
         properties: {
           type: {
             type: 'string', enum: eventTypes,
-            description: '事件类型及必填字段：text→content；sticker→name；image→query/kind/participants；schedule→date/startHour/endHour/locationId/activity/phoneAccess/summary；activity_now→locationId/activity/durationMinutes/phoneAccess；transfer→amount/note；red_packet→amount/blessing；loan_request→amount/reason；loan_decision→loanId/decision/amount；gift_purchase→amount/name/icon/description。',
+            description: '事件类型及必填字段：text→content；sticker→name；image→query/kind/participants；schedule→date/startHour/endHour/locationId/activity/phoneAccess/summary；activity_now→locationId/activity/durationMinutes/phoneAccess；contact_recommendation→candidateName/relationToRecommender/recommendationReason/shortDescription/gender/ageRange/occupation/hobbies/personalityClues；transfer→amount/note；red_packet→amount/blessing；loan_request→amount/reason；loan_decision→loanId/decision/amount；gift_purchase→amount/name/icon/description。',
           },
           content: { type: 'string', description: 'type=text 时的自然聊天正文。' },
           name: opts.stickerSearchEnabled
@@ -138,6 +150,15 @@ function privateTurnTool(opts: Pick<AgentToolOptions, 'stickerNames' | 'stickerS
           decision: { type: 'string', enum: ['accept', 'reject'] },
           icon: { type: 'string' },
           description: { type: 'string' },
+          candidateName: { type: 'string' },
+          relationToRecommender: { type: 'string' },
+          recommendationReason: { type: 'string' },
+          shortDescription: { type: 'string' },
+          gender: { type: 'string' },
+          ageRange: { type: 'string' },
+          occupation: { type: 'string' },
+          hobbies: { type: 'array', maxItems: 6, items: { type: 'string' } },
+          personalityClues: { type: 'array', maxItems: 6, items: { type: 'string' } },
         },
         required: ['type'],
       },
@@ -199,6 +220,20 @@ export function parsePrivateToolCalls(calls: ChatToolCall[]): ParsedAiTurn {
     } else if (call.function.name === 'purchase_gift') {
       const amount = positiveInteger(args.amount), name = text(args.name, 30)
       if (amount && name) bubbles.push({ type: 'giftPurchase', amount, name, icon: text(args.icon, 8), description: text(args.description, 80) })
+    } else if (call.function.name === 'recommend_contact') {
+      const candidateName = text(args.candidateName, 40)
+      const relationToRecommender = text(args.relationToRecommender, 40)
+      const recommendationReason = text(args.recommendationReason, 240)
+      const shortDescription = text(args.shortDescription, 300)
+      const list = (value: unknown) => Array.isArray(value) ? value.map((item) => text(item, 60)).filter(Boolean).slice(0, 6) : []
+      if (candidateName && relationToRecommender && recommendationReason && shortDescription) bubbles.push({
+        type: 'link', app: 'contact_recommendation', label: candidateName,
+        data: {
+          version: 1, candidateName, relationToRecommender, recommendationReason, shortDescription,
+          gender: text(args.gender, 30), ageRange: text(args.ageRange, 30), occupation: text(args.occupation, 60),
+          hobbies: list(args.hobbies), personalityClues: list(args.personalityClues), status: 'pending',
+        },
+      })
     }
   }
   return { bubbles, knowledgeQueries, mood, thought: thoughts.join('；').slice(0, 100) || undefined, immediateActivities }
@@ -207,7 +242,7 @@ export function parsePrivateToolCalls(calls: ChatToolCall[]): ParsedAiTurn {
 const PRIVATE_EVENT_TOOL_NAMES: Record<string, string> = {
   text: 'send_text', sticker: 'send_sticker', image: 'send_image', schedule: 'create_schedule',
   activity_now: 'start_activity_now', transfer: 'transfer_money', red_packet: 'send_red_packet',
-  loan_request: 'request_loan', loan_decision: 'decide_loan', gift_purchase: 'purchase_gift',
+  contact_recommendation: 'recommend_contact', loan_request: 'request_loan', loan_decision: 'decide_loan', gift_purchase: 'purchase_gift',
 }
 
 function parsePrivateTurnCall(call: ChatToolCall): ParsedAiTurn {
@@ -239,7 +274,7 @@ function privateTurnIsValid(parsed: ParsedAiTurn): boolean {
   if (parsed.knowledgeQueries.length > 0) return true
   if (parsed.bubbles.length === 0 && !parsed.immediateActivities?.length) return false
   const requiresText = !!parsed.immediateActivities?.length || parsed.bubbles.some((bubble) =>
-    ['image', 'scheduleChange', 'transfer', 'redPacket', 'loanRequest', 'loanDecision', 'giftPurchase'].includes(bubble.type))
+    ['image', 'link', 'scheduleChange', 'transfer', 'redPacket', 'loanRequest', 'loanDecision', 'giftPurchase'].includes(bubble.type))
   return !requiresText || parsed.bubbles.some((bubble) => bubble.type === 'text')
 }
 

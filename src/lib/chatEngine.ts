@@ -32,7 +32,7 @@ import { isImageProviderReady, isStickerProviderReady } from './mediaProviders'
 import { featureActive, promptModuleEnabled } from './promptModules'
 import { realisticReplyDelayMs } from './replyTiming'
 import { buildExperiencePromptSlice, ensureOfflineExperiences } from './experiences'
-import { ensureLocationsInitialized, reassignUnknownContactLocation, syncContactLocationsAt } from './locations'
+import { canUsePlayerHome, ensureLocationsInitialized, reassignUnknownContactLocation, syncContactLocationsAt } from './locations'
 import { evaluateDirectSpecialTask, runActionCommittee, type ActionCommitteeDebug } from './actionCommittee'
 import type { CreateSpecialTaskResult } from './agentTasks'
 import { createScheduleInternalTask } from './internalTasks'
@@ -425,7 +425,7 @@ async function runAiTurn(
       locationActionContext = `【地点与特殊任务】你当前位于：${currentLocation?.name ?? '未知地点'}（${contact.currentLocationId ?? '未知'}）。你可以按照自己的人设和意愿接受、拒绝，也可以主动提出行动。角色明确决定现在立刻前往某地并开始活动时，在 submit_turn.events 中加入 type=activity_now；未来安排只有日期、整点开始和结束时间、地点都明确且角色已经作出具体承诺时才加入 type=schedule。两种动作都不能代替自然聊天，整轮 events 必须至少包含一条 type=text。仅讨论可能性、拒绝、附带未满足条件或信息不全时不要执行动作。特殊任务一旦与某条默认任务重叠，那条默认任务会整项取消。以下列表是当前唯一可确认并执行的具体地点：${locationCatalog}。玩家提到列表外地点，或名称无法可靠对应列表时，不能假装去过、看过、知道它存在，也不能直接答应；请保持角色口吻自然询问位置或让对方进一步说明，不要提“系统”“目录”或地点ID。`
     }
     const memoryPromptOn = promptModuleEnabled(contactPromptSettings, 'memory')
-    const [recentMemories, financeContext, socialMemories, sharedOriginalContext, lifeEventText, experienceText, worldbookTrace] = await Promise.all([
+    const [recentMemories, financeContext, socialMemories, sharedOriginalContext, lifeEventText, experienceText, worldbookTrace, existingContacts] = await Promise.all([
       memoryPromptOn ? recentMemoriesText(contact.id) : Promise.resolve(''),
       featureActive(contactPromptSettings, 'career')
         ? Promise.all([
@@ -448,8 +448,18 @@ async function runAiTurn(
         _triggeringUserText, proactiveContext, contact.name, contact.systemPrompt, contact.memoryFacts,
         history.slice(-8).map((m) => m.content).join(' '),
       ].filter(Boolean).join('\n'), { worldviewId: contactPromptSettings.activeWorldId || contactPromptSettings.defaultWorldviewId }) : Promise.resolve({ text: '', matches: [] }),
+      db.contacts.toArray(),
     ])
     const worldbookText = worldbookTrace.text
+    const unavailableRecommendationNames = Array.from(new Set(existingContacts.flatMap((candidate) => [
+      candidate.name,
+      candidate.realName,
+      candidate.nickname,
+      displayName(candidate),
+    ]).map((name) => name?.trim()).filter((name): name is string => !!name))).slice(0, 200)
+    const recommendationConstraint = unavailableRecommendationNames.length
+      ? `【联系人推荐硬限制】以下姓名、真名或昵称已经属于用户现有联系人：${unavailableRecommendationNames.join('、')}。绝不能推荐其中任意一个名字，也不能把同名者说成“其实是另一个人”；同名在本应用中一律视为重复联系人。若想不到一个不在名单中的、自己确实认识且适合介绍的人，就正常聊天，不要调用 contact_recommendation。`
+      : '【联系人推荐硬限制】只有确实认识、且尚未成为用户联系人的新人物才能推荐。'
     const contactAge = contact.birthday ? ageFromBirthday(contact.birthday) : null
     const runtimeAgeFact = contactAge === null ? '' : `\n【当前年龄硬事实】生日为${contact.birthday}，按当前日期计算为${contactAge}岁；若旧人设文本中的年龄不同，以这里为准。`
     const relationshipText = `【你和对方的关系】${relationshipLine(
@@ -534,7 +544,7 @@ async function runAiTurn(
     } else {
       const generated = await generatePrivateAgentTurn({
         apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, utilityModel: settings.utilityModel,
-        messages: [...chatMessages, { role: 'system', content: `本轮必须通过唯一的 submit_turn 原生函数一次性提交完整回复。events 按实际发送顺序排列，可以自然地连续发送多段文字、多张图片或穿插消息与行动，不要固定成“一张图片配一句话”。image、activity_now、schedule、transfer、red_packet、loan_request、loan_decision、gift_purchase 等事件不能单独作为回复，但只要求整轮至少有一条 text，文字可以在行动前后；sticker 可以单独发送。填写真实想法和中文文字心情，心情禁止使用 emoji。不要在普通 content 中输出 JSON、工具名或协议。${locationActionContext ? `\n${locationActionContext}` : ''}` }],
+        messages: [...chatMessages, { role: 'system', content: `本轮必须通过唯一的 submit_turn 原生函数一次性提交完整回复。events 按实际发送顺序排列，可以自然地连续发送多段文字、多张图片或穿插消息与行动，不要固定成“一张图片配一句话”。image、activity_now、schedule、contact_recommendation、transfer、red_packet、loan_request、loan_decision、gift_purchase 等事件不能单独作为回复，但只要求整轮至少有一条 text，文字可以在行动前后；sticker 可以单独发送。contact_recommendation 仅在你以当前角色身份确实认识某人、此刻自然适合牵线时使用，禁止为了展示功能、活跃气氛或完成任务而调用。${recommendationConstraint} 填写真实想法和中文文字心情，心情禁止使用 emoji。不要在普通 content 中输出 JSON、工具名或协议。${locationActionContext ? `\n${locationActionContext}` : ''}` }],
         signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext,
         trace: { turnId: streamId, stage: 'original_generation', conversationId },
         stickerNames: stickers.map((sticker) => sticker.name), stickerSearchEnabled: isStickerProviderReady(settings),
@@ -665,6 +675,7 @@ async function runAiTurn(
     if (!directOutput && !qualityCheckDebug.detectedInvalid && immediateActivities.length > 0 && isModuleEnabled('location')) {
       const action = immediateActivities[0]
       const location = actionLocations.find((candidate) => candidate.id === action.locationId)
+      const playerHomeVisit = /来我家|到我家|去我家|来家里|到家里|去家里|邀请你.*家/.test(_triggeringUserText)
       const toolResult = await createScheduleInternalTask(contact.id, conversationId, {
         startsAt: now,
         endsAt: now + action.durationMinutes * 60_000,
@@ -673,6 +684,7 @@ async function runAiTurn(
         summary: `${action.activity} · ${location?.name ?? action.locationId}`,
         phoneAccess: action.phoneAccess,
         sourceConversationId: conversationId,
+        playerHomeVisit,
       }, now)
       if (toolResult.success) {
         internalTask = toolResult.internalTask
@@ -708,7 +720,8 @@ async function runAiTurn(
       })
       if (!turns.isCurrent(conversationId, streamId)) return
       if (actionCommittee.approved && actionCommittee.task) {
-        const toolResult = await createScheduleInternalTask(contact.id, conversationId, { ...actionCommittee.task, sourceConversationId: conversationId }, now)
+        const playerHomeVisit = /来我家|到我家|去我家|来家里|到家里|去家里|邀请你.*家/.test(_triggeringUserText)
+        const toolResult = await createScheduleInternalTask(contact.id, conversationId, { ...actionCommittee.task, sourceConversationId: conversationId, playerHomeVisit }, now)
         actionCommittee = { ...actionCommittee, toolResult }
         if (!toolResult.success) {
           console.warn(`[agent] 特殊任务执行失败 contact=${displayName(contact)} code=${toolResult.code}`)
@@ -803,6 +816,24 @@ function revealBubbles(
     delayMs: (bubble, i) => i > 0 ? typingDelayMs(bubble) : 0,
     reveal: async (bubble, i) => {
       let executionError = ''
+      if (bubble.type === 'link' && bubble.app === 'contact_recommendation') {
+        const candidateName = typeof bubble.data?.candidateName === 'string' ? bubble.data.candidateName.trim().toLocaleLowerCase() : ''
+        const existingContact = candidateName
+          ? await db.contacts.filter((candidate) => [candidate.name, candidate.realName, candidate.nickname, displayName(candidate)]
+              .some((name) => name?.trim().toLocaleLowerCase() === candidateName)).first()
+          : undefined
+        const recentRecommendations = candidateName
+          ? await db.messages.where('conversationId').equals(conversationId).filter((message) =>
+              message.type === 'link'
+              && message.link?.app === 'contact_recommendation'
+              && typeof message.link.data?.candidateName === 'string'
+              && message.link.data.candidateName.trim().toLocaleLowerCase() === candidateName,
+            ).count()
+          : 0
+        if (!candidateName) executionError = '这次介绍的信息不完整，暂时没法把人推荐给你。'
+        else if (existingContact) executionError = `${displayName(existingContact)}已经在你的联系人里了。`
+        else if (recentRecommendations > 0) executionError = '这个人之前已经介绍过了，我就不重复发推荐了。'
+      }
       if (bubble.type === 'scheduleChange') {
         // Re-fetch rather than reusing the `contact` this whole turn was
         // handed — that snapshot predates this write, and stashing a stale
@@ -811,9 +842,11 @@ function revealBubbles(
         const fresh = await db.contacts.get(contact.id)
         const pruned = pruneExpiredOverrides(fresh?.scheduleOverrides ?? [], new Date(turnNow))
         const location = bubble.locationId ? await db.locations.get(bubble.locationId) : undefined
+        const playerHomeVisit = /来我家|到我家|去我家|来家里|到家里|去家里|邀请你.*家/.test(_triggeringUserText)
         // Markers carry IDs, never free-form locations.  An invalid ID is a
         // rejected execution, not an invitation for a later model to guess.
         if (bubble.locationId && !location) executionError = '这个地点已经不可用了，日程没有创建成功。'
+        else if (location && !canUsePlayerHome(contact, location.id, playerHomeVisit)) executionError = '没有明确邀请，不能把对方安排到你家。'
         const override: ScheduleOverride | undefined = executionError ? undefined : {
           id: uuid(),
           date: bubble.date,
@@ -825,6 +858,7 @@ function revealBubbles(
           activity: bubble.activity,
           summary: bubble.summary,
           priority: 'special',
+          playerHomeVisit,
           createdAt: turnNow,
         }
         // Multiple non-overlapping special tasks may coexist on the same day.
@@ -899,7 +933,13 @@ function revealBubbles(
               ? 'text'
               : bubble.type,
         content,
-        link: bubble.type === 'link' ? { app: bubble.app, label: bubble.label, data: bubble.data } : undefined,
+        link: !executionError && bubble.type === 'link' ? {
+          app: bubble.app,
+          label: bubble.label,
+          data: bubble.app === 'contact_recommendation'
+            ? { ...bubble.data, recommenderContactId: contact.id, recommenderName: displayName(contact), status: 'pending' }
+            : bubble.data,
+        } : undefined,
         scheduleChange:
           !executionError && bubble.type === 'scheduleChange'
             ? {

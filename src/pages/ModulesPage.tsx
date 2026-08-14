@@ -16,22 +16,6 @@ export function ModulesPage() {
 
   function toggle(id: string) {
     if (!isModuleAllowedInExperienceMode(id, experienceMode) || (experienceMode === 'immersive' && id === 'realisticReplies')) return
-    if (id === 'location' && enabledModules.includes('slg')) return
-    if (id === 'slg') {
-      if (enabledModules.includes('slg')) {
-        const withoutSlg = enabledModules.filter((moduleId) => moduleId !== 'slg')
-        const restored = useSettingsStore.getState().slgLocationWasEnabled
-          ? Array.from(new Set([...withoutSlg, 'location']))
-          : withoutSlg.filter((moduleId) => moduleId !== 'location')
-        setSettings({ enabledModules: restored, slgLocationWasEnabled: undefined })
-      } else {
-        setSettings({
-          enabledModules: Array.from(new Set([...enabledModules, 'location', 'slg'])),
-          slgLocationWasEnabled: enabledModules.includes('location'),
-        })
-      }
-      return
-    }
     const next = enabledModules.includes(id)
       ? enabledModules.filter((m) => m !== id)
       : [...enabledModules, id]
@@ -134,9 +118,8 @@ export function ModulesPage() {
 
           {/* Standalone modules (no parent) */}
           {STANDALONE_MODULES.map((mod) => {
-            const forcedBySlg = mod.id === 'location' && enabledModules.includes('slg')
-            const locked = forcedBySlg || !isModuleAllowedInExperienceMode(mod.id, experienceMode) || (experienceMode === 'immersive' && mod.id === 'realisticReplies')
-            const on = forcedBySlg || (experienceMode === 'immersive' && mod.id === 'realisticReplies') ? true : !locked && enabledModules.includes(mod.id)
+            const locked = !isModuleAllowedInExperienceMode(mod.id, experienceMode) || (experienceMode === 'immersive' && mod.id === 'realisticReplies')
+            const on = experienceMode === 'immersive' && mod.id === 'realisticReplies' ? true : !locked && enabledModules.includes(mod.id)
             return (
               <div
                 key={mod.id}
@@ -147,7 +130,7 @@ export function ModulesPage() {
                   <div>
                     <p className="text-[15px] font-medium text-gray-900">{mod.name}</p>
                     <p className="mt-0.5 text-xs text-gray-400">{mod.description}</p>
-                    {locked && <p className="mt-0.5 text-[10px] text-amber-600">{forcedBySlg ? '虚拟人生 SLG 模式强制开启' : mod.id === 'realisticReplies' ? '沉浸模式强制开启' : '沉浸模式不可用'}</p>}
+                    {locked && <p className="mt-0.5 text-[10px] text-amber-600">{mod.id === 'realisticReplies' ? '沉浸模式强制开启' : '沉浸模式不可用'}</p>}
                   </div>
                 </div>
                 <ToggleSwitch

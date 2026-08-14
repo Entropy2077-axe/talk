@@ -484,7 +484,12 @@ issues 要用简短中文列出具体错误。` },
           personalityTrait: values.personalityTrait,
           personalityTraitContent,
           roleDescription: extra.trim(),
-          personaSetting: isNuwaMode ? currentNuwaPersonaText().trim() : '',
+          // Structured fields (name, age, birthday, relationship, etc.) are
+          // already sent through their dedicated task-input properties. Putting
+          // the assembled form text here used to send them a second time as a
+          // free-form persona setting, which then reappeared in the runtime
+          // prompt alongside the generated profile.
+          personaSetting: isNuwaMode ? nuwaPersonaSetting.trim() : '',
           sharedHistory: (isNuwaMode ? (sharedHistory || extra) : sharedHistory).trim(),
           realName: isNuwaMode ? customRealName.trim() : undefined,
           nickname: isNuwaMode ? customNickname.trim() : undefined,

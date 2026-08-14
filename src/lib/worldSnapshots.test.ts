@@ -3,7 +3,7 @@ import { db } from '../db/db'
 import { useSettingsStore } from '../store/useSettingsStore'
 import type { Contact, WorldSnapshotData } from '../types'
 import {
-  captureWorldData, createEmptyWorld, createWorldBranch, createWorldSnapshot, deleteWorld,
+  addContactToWorldSnapshots, captureWorldData, createEmptyWorld, createWorldBranch, createWorldSnapshot, deleteWorld,
   ensureWorldSnapshotsMigrated, hydrateWorldSnapshotContacts, normalizeWorldSnapshotData, restoreWorldSnapshot, switchWorld,
   WORLD_SNAPSHOT_MIGRATION_VERSION,
 } from './worldSnapshots'
@@ -41,7 +41,7 @@ beforeEach(async () => {
 })
 
 describe('world story backups', () => {
-  it('restores exactly the contacts that belonged to the selected world backup', async () => {
+  it('keeps contacts shared when restoring an older save in the same world', async () => {
     await addWorld('world-a', '世界 A')
     await db.contacts.put(contact('red', '小红', { memoryFacts: 'A里的旧记忆', warmth: 66, sharedHistory: 'A里的共同经历' }))
     await db.conversations.put({ id: 'conv-red', contactId: 'red', pinned: false, createdAt: 1, updatedAt: 1 })
@@ -59,9 +59,9 @@ describe('world story backups', () => {
     await restoreWorldSnapshot(old.id)
 
     const contacts = await db.contacts.toArray()
-    expect(contacts.map((item) => item.id)).toEqual(['red'])
-    expect(await db.contacts.get('red')).toMatchObject({ name: '小红', avatar: '小红-avatar', systemPrompt: '小红-persona', memoryFacts: 'A里的旧记忆', warmth: 66 })
-    expect(await db.contacts.get('blue')).toBeUndefined()
+    expect(contacts.map((item) => item.id).sort()).toEqual(['blue', 'red'])
+    expect(await db.contacts.get('red')).toMatchObject({ name: '小红新名字', avatar: 'new-avatar', systemPrompt: 'new-persona', memoryFacts: 'A里的旧记忆', warmth: 66 })
+    expect(await db.contacts.get('blue')).toMatchObject({ name: '小明', memoryFacts: '' })
     expect(await db.conversations.get('conv-blue')).toBeUndefined()
     expect((await db.moments.toArray()).map((item) => item.id)).toEqual(['moment-red'])
     expect((await db.contactExperiences.toArray()).map((item) => item.id)).toEqual(['exp-red'])
@@ -75,6 +75,44 @@ describe('world story backups', () => {
     await db.contacts.delete('red')
     await restoreWorldSnapshot(backup.id)
     expect(await db.contacts.get('red')).toMatchObject({ name: '小红', memoryFacts: '旧记忆' })
+  })
+
+  it('adds a new contact to every existing save in its world', async () => {
+    await addWorld('world-a', '世界 A')
+    await db.contacts.put(contact('red', '小红', { worldviewId: 'world-a' }))
+    await createWorldSnapshot('world-a', '早期手动存档', 'manual')
+    const blue = contact('blue', '小蓝', { worldviewId: 'world-a', memoryFacts: '刚创建后的当前状态' })
+    await db.contacts.put(blue)
+    await addContactToWorldSnapshots(blue)
+
+    const snapshots = await db.worldSnapshots.where('worldId').equals('world-a').toArray()
+    expect(snapshots).not.toHaveLength(0)
+    for (const snapshot of snapshots) {
+      const data = normalizeWorldSnapshotData(snapshot.snapshot)
+      expect(data.contactIds).toContain('blue')
+      expect(data.contactStates?.blue).toMatchObject({ memoryFacts: '' })
+    }
+  })
+
+  it("repairs old saves from the world's full historic contact roster", async () => {
+    await addWorld('world-a', '世界 A')
+    const red = contact('red', '小红', { worldviewId: 'world-a' })
+    const blue = contact('blue', '小蓝', { worldviewId: 'world-a' })
+    const green = contact('green', '小绿', { worldviewId: 'world-a' })
+    // Simulate the old restore behavior: the newest live state lost 小绿,
+    // while an earlier save still has the complete roster.
+    await db.contacts.bulkPut([red, blue])
+    const compact: WorldSnapshotData = { schemaVersion: 3, contacts: [red, blue], contactIds: ['red', 'blue'], contactStates: { red: {}, blue: {} }, tables: {} }
+    const complete: WorldSnapshotData = { schemaVersion: 3, contacts: [red, blue, green], contactIds: ['red', 'blue', 'green'], contactStates: { red: {}, blue: {}, green: {} }, tables: {} }
+    await db.worldSnapshots.bulkPut([
+      { id: 'compact', worldId: 'world-a', name: '较新的两人存档', kind: 'automatic', createdAt: 2, updatedAt: 2, contentHash: 'compact', contactCount: 2, estimatedWorldviewTokens: 0, snapshotVersion: 3, snapshot: compact },
+      { id: 'complete', worldId: 'world-a', name: '较早的三人存档', kind: 'manual', createdAt: 1, updatedAt: 1, contentHash: 'complete', contactCount: 3, estimatedWorldviewTokens: 0, snapshotVersion: 3, snapshot: complete },
+    ])
+    useSettingsStore.setState({ worldSnapshotMigrationVersion: 5 })
+
+    await ensureWorldSnapshotsMigrated()
+    expect(normalizeWorldSnapshotData((await db.worldSnapshots.get('compact'))!.snapshot).contactIds?.sort()).toEqual(['blue', 'green', 'red'])
+    expect((await db.worldSnapshots.get('compact'))?.contactCount).toBe(3)
   })
 
   it('copies complete story state and independently cloned worldview entries into a normal branch', async () => {
@@ -215,7 +253,7 @@ describe('world story backups', () => {
     expect(migrated.snapshot.tables.contacts).toBeUndefined()
 
     await restoreWorldSnapshot('legacy-backup')
-    expect(await db.contacts.get('same')).toMatchObject({ name: '旧名字', avatar: 'old-avatar', systemPrompt: 'old-persona', memoryFacts: '旧快照记忆', warmth: 77 })
+    expect(await db.contacts.get('same')).toMatchObject({ name: '当前名字', avatar: 'current-avatar', systemPrompt: 'current-persona', memoryFacts: '旧快照记忆', warmth: 77 })
     expect((await db.worldbookEntries.where('collectionId').equals('world-a').toArray()).map((entry) => entry.content)).toEqual(['当前最新世界观'])
   })
 

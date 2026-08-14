@@ -23,6 +23,8 @@ export async function extractWorldbookPersonaCanon(opts: {
   worldbookText: string
   requestedCharacter: string
   existingContactNames: string[]
+  /** Cancels the extraction together with its parent contact-generation job. */
+  signal?: AbortSignal
 }): Promise<WorldbookPersonaCanon> {
   if (!opts.worldbookText.trim()) return { relationship: '', sharedHistory: '', facts: [], boundaries: [], pastExperiences: [] }
   const raw = await chatCompletionText({
@@ -33,6 +35,7 @@ export async function extractWorldbookPersonaCanon(opts: {
     jsonMode: true,
     thinking: 'disabled',
     purpose: 'worldbook',
+    signal: opts.signal,
     temperature: 0,
     maxTokens: 1600,
   })

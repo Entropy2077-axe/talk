@@ -8,6 +8,7 @@ import { selectedWorldbookEntriesText, retrieveWorldbookContext } from './worldb
 import { uniqueRelationPairs } from './contactRelations'
 import { displayName } from './contact'
 import { isPhoneAvailable } from './schedule'
+import { isLeafLocation, resolveContactRuntimeAt } from './locations'
 
 const HOUR = 60 * 60 * 1000
 const DAY = 24 * HOUR
@@ -115,6 +116,9 @@ export async function ensureOfflineExperiences(opts: {
     interactionCandidates(contact, from, to),
     db.contactLifeStates.get(contact.id),
   ])
+  const mapLocations = await db.locations.toArray()
+  const leafLocationIds = new Set(mapLocations.filter((location) => isLeafLocation(location.id, mapLocations)).map((location) => location.id))
+  const locationNameById = new Map(mapLocations.map((location) => [location.id, location.name]))
   const maxMinutes = Math.max(60, Math.floor(gap / 60000))
   const prompt = `你是角色离线经历补全器。根据自由人设、世界观、自然语言日程和时间区间，补全角色在用户没有回复时真实经历的生活。职业和活动完全开放，禁止套用固定的上班/上学模板。
 
@@ -125,6 +129,7 @@ export async function ensureOfflineExperiences(opts: {
 【区间】${new Date(from).toLocaleString()} 至 ${new Date(to).toLocaleString()}，共${durationText(gap)}
 【区间日程】\n${scheduleSlice(contact, from, to)}
 【开始状态】${lifeState ? `${lifeState.location}；${lifeState.activity}；精力${lifeState.energy}；压力${lifeState.stress}；${lifeState.situation || ''}` : '暂无，谨慎补全'}
+【住所与地点硬规则】常住地=${locationNameById.get(resolveContactRuntimeAt(contact, new Date(from), leafLocationIds).locationId) ?? '未知'}。地点不是自由剧情：只可描述当时已生效的日程地点或角色常住地；没有明确日程、约会或用户邀请时，不得去商场、公园、咖啡馆、用户家或他人住处。非同住角色绝不能在用户家休息或过夜。
 ${worldbook ? `【所属世界正史与创建参考资料】\n${worldbook.slice(0, 5000)}` : ''}
 【唯一允许考虑的互动对象】\n${candidatePlan.text}
 
@@ -158,6 +163,13 @@ ${worldbook ? `【所属世界正史与创建参考资料】\n${worldbook.slice(
     if (!item || typeof item.summary !== 'string' || !item.summary.trim()) continue
     const startOffset = Math.max(0, Math.min(maxMinutes, Number(item.offsetStartMinutes) || 0))
     const endOffset = Math.max(startOffset, Math.min(maxMinutes, Number(item.offsetEndMinutes) || startOffset))
+    const midpoint = new Date(from + ((startOffset + endOffset) / 2) * 60000)
+    const runtime = resolveContactRuntimeAt(contact, midpoint, leafLocationIds)
+    const resolvedLocation = locationNameById.get(runtime.locationId)
+    // The model may narrate an activity but it cannot create a new physical
+    // location. Persist the schedule/residence-derived location only.
+    const claimedLocation = String(item.location || '').trim()
+    if (claimedLocation && resolvedLocation && claimedLocation !== resolvedLocation && /我家|家里|商场|公园|咖啡|餐厅|酒店|住/.test(claimedLocation)) continue
     const participantIds = Array.isArray(item.participantContactIds) ? item.participantContactIds.filter((id) => allowedIds.has(id)) : []
     const interactionMode = item.interactionMode ?? 'none'
     if (participantIds.length > 0) {
@@ -176,7 +188,7 @@ ${worldbook ? `【所属世界正史与创建参考资料】\n${worldbook.slice(
     const experience: ContactExperience = {
       id: uuid(), contactIds: [contact.id, ...participantIds], kind: 'offline', memoryTier: importance >= 70 ? 'long' : 'short',
       title: String(item.title || '生活片段').trim().slice(0, 80), summary: item.summary.trim().slice(0, 500), details: String(item.details || '').trim().slice(0, 1200) || undefined,
-      startedAt: from + startOffset * 60000, endedAt, location: String(item.location || '').trim().slice(0, 100) || undefined,
+      startedAt: from + startOffset * 60000, endedAt, location: resolvedLocation || undefined,
       importance, sources: ['simulation'], createdAt: endedAt, expiresAt: importance >= 70 ? undefined : endedAt + 3 * DAY,
     }
     await db.contactExperiences.add(experience)

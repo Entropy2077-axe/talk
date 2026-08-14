@@ -64,7 +64,6 @@
     "src/pages/ContactGenerationTaskPage.tsx": "联系人生成任务包含实时阶段、错误诊断和初稿审阅",
     "src/pages/ModulesPage.tsx": "模块树使用可展开层级与状态切换效果",
     "src/pages/MomentsPage.tsx": "朋友圈使用仿社交动态的专用排版",
-    "src/pages/RelationshipsPage.tsx": "关系网是数据可视化页面",
-    "src/pages/SlgLocationsPage.tsx": "SLG城市态势图需要独立地图、单位和行动面板视觉"
+    "src/pages/RelationshipsPage.tsx": "关系网是数据可视化页面"
   }
 }

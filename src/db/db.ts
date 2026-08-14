@@ -446,6 +446,31 @@ export class TalkDB extends Dexie {
     this.version(40).stores({
       worldContactStates: 'id, worldId, contactId, [worldId+contactId], updatedAt',
     })
+    // Remove retired virtual-life scene data while preserving the standard
+    // location map, its shared conversation, and all contact positions.
+    this.version(41).upgrade(async (tx) => {
+      const groups = await tx.table('groups').toArray() as Array<Record<string, any>>
+      const retiredGroupIds = groups
+        .filter((group) => group.sceneMode === 'slg' || String(group.id || '').startsWith('talk-slg-location-group:'))
+        .map((group) => String(group.id))
+      const retiredGroupIdSet = new Set(retiredGroupIds)
+      const conversations = await tx.table('conversations').toArray() as Array<Record<string, any>>
+      const retiredConversationIds = conversations
+        .filter((conversation) => retiredGroupIdSet.has(String(conversation.groupId || '')) || String(conversation.id || '').startsWith('talk-slg-location-conversation:'))
+        .map((conversation) => String(conversation.id))
+      if (retiredConversationIds.length) {
+        const retiredConversationIdSet = new Set(retiredConversationIds)
+        const messages = await tx.table('messages').toArray() as Array<Record<string, any>>
+        await tx.table('messages').bulkDelete(messages.filter((message) => retiredConversationIdSet.has(String(message.conversationId || ''))).map((message) => message.id))
+        await tx.table('conversations').bulkDelete(retiredConversationIds)
+      }
+      if (retiredGroupIds.length) await tx.table('groups').bulkDelete(retiredGroupIds)
+      const locationState = await tx.table('locationModuleState').get('active') as Record<string, any> | undefined
+      if (locationState && 'slgCurrentLocationId' in locationState) {
+        delete locationState.slgCurrentLocationId
+        await tx.table('locationModuleState').put(locationState)
+      }
+    })
   }
 }
 

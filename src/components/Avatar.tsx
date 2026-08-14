@@ -5,14 +5,14 @@ interface AvatarProps {
   name?: string
   color?: string
   size?: number | 'md'
-  rounded?: 'full' | 'lg'
+  rounded?: 'full' | 'lg' | 'md'
 }
 
 export function Avatar({ avatar: avatarProp, src, color = '#eef0f3', size: sizeProp = 48, rounded = 'lg' }: AvatarProps) {
   const avatar = avatarProp ?? src ?? ''
   const size = sizeProp === 'md' ? 44 : sizeProp
   const isImage = avatar.startsWith('data:') || avatar.startsWith('http')
-  const radiusClass = rounded === 'full' ? 'rounded-full' : 'rounded-xl'
+  const radiusClass = rounded === 'full' ? 'rounded-full' : rounded === 'md' ? 'rounded-md' : 'rounded-xl'
   return (
     <div
       data-ui-scope="special"

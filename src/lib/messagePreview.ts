@@ -9,7 +9,7 @@ export function previewForMessage(m?: Message, speakerName?: string): string {
   if (!m) return '暂无消息'
   const body = (() => {
     if (m.type === 'sticker') return '[表情]'
-    if (m.type === 'link') return `[链接] ${m.content}`
+    if (m.type === 'link') return m.link?.app === 'contact_recommendation' ? `[联系人推荐] ${m.content}` : `[链接] ${m.content}`
     if (m.type === 'gift') return `[礼物] ${m.content}`
     if (m.type === 'scheduleChange') return `[日程] ${m.content}`
     if (m.type === 'internalTask') return `[安排更新] ${m.content}`

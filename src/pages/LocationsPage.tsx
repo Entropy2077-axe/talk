@@ -11,8 +11,6 @@ import { getLocationIcon, LOCATION_ICON_CATEGORIES, LOCATION_ICON_OPTIONS, type 
 import { isLocationPlacementAvailable } from '../lib/locationMap'
 import { childLocations, deleteLocationTree, enterLocation, realSeason, regenerateLocationMap, syncContactLocationsAt } from '../lib/locations'
 import type { Contact, LocationAudibility, LocationNode, TerrainType } from '../types'
-import { useModuleEnabled } from '../features'
-import { SlgLocationsPage } from './SlgLocationsPage'
 
 const EMPTY_LOCATIONS: LocationNode[] = []
 const EMPTY_CONTACTS: Contact[] = []
@@ -46,11 +44,6 @@ function readImage(file: File) {
 }
 
 export function LocationsPage() {
-  const slgEnabled = useModuleEnabled('slg')
-  return slgEnabled ? <SlgLocationsPage /> : <LegacyLocationsPage />
-}
-
-function LegacyLocationsPage() {
   const navigate = useNavigate()
   const [selectedId, setSelectedId] = useState<string>()
   const [error, setError] = useState('')

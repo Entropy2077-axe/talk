@@ -3,7 +3,7 @@
   "description": "A local-first AI companion app for Android, Windows and the web.",
   "author": "Entropy2077-axe",
   "private": true,
-  "version": "0.1.56",
+  "version": "0.1.57",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {

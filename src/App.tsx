@@ -61,6 +61,7 @@ const ProfileEditPage = lazy(() => import('./pages/ProfileEditPage').then((m) =>
 const ModulesPage = lazy(() => import('./pages/ModulesPage').then((m) => ({ default: m.ModulesPage })))
 const SkyEyePage = lazy(() => import('./pages/SkyEyePage').then((m) => ({ default: m.SkyEyePage })))
 const SocialInboxPage = lazy(() => import('./pages/SocialInboxPage').then((m) => ({ default: m.SocialInboxPage })))
+const RelationshipsPage = lazy(() => import('./pages/RelationshipsPage').then((m) => ({ default: m.RelationshipsPage })))
 import { WebPrivacyNotice } from './components/WebPrivacyNotice'
 // Runs once at module load, regardless of admin mode — so there's already
 // log history by the time someone opens "天眼".
@@ -252,6 +253,7 @@ function App() {
         <Route path="/group/:groupId" element={<GroupInfoPage />} />
         <Route path="/moments" element={<MomentsPage />} />
         <Route path="/social-inbox" element={<SocialInboxPage />} />
+        <Route path="/relationships" element={<RelationshipsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/settings/other-interfaces" element={<OtherInterfacesPage />} />
         <Route path="/presets" element={<GlobalPromptModulesPage />} />

@@ -22,7 +22,7 @@ import { claimRedPacket, transferFunds, USER_WALLET_ID } from '../lib/finance'
 import { searchRemoteStickers, trackRemoteStickerSend, type RemoteStickerResult } from '../lib/remoteMedia'
 import { isStickerProviderReady, stickerProviderName } from '../lib/mediaProviders'
 import { normalizeChatPageSize } from '../lib/chatPagination'
-import { resolveExactLocationParticipants, resolveLocationParticipants, syncContactLocationsAt } from '../lib/locations'
+import { resolveLocationParticipants, syncContactLocationsAt } from '../lib/locations'
 import { revertInternalTask } from '../lib/internalTasks'
 import { ArrowLeftRight, BriefcaseBusiness, CircleDollarSign, Gift, HandCoins, Package, Plus, ShoppingBag, Sticker as StickerIcon } from 'lucide-react'
 import { UiIcon } from '../components/UiIcon'
@@ -30,6 +30,7 @@ import { isAiTestId } from '../lib/aiTestIsolation'
 import { contactSpeechVoice, isSpeechProviderReady } from '../lib/speechProviders'
 import { cacheSpeechForMessage, speechSignature } from '../lib/speechSynthesis'
 import { playSpeechMessage, playSpeechRecord, stopSpeechPlayback, useSpeechPlayerStore } from '../lib/speechPlayer'
+import { acceptContactRecommendation, declineContactRecommendation, recommendationFromMessage } from '../lib/contactRecommendations'
 
 const EMPTY_MESSAGES: Message[] = []
 const EMPTY_STICKERS: Sticker[] = []
@@ -46,6 +47,8 @@ export function ChatPage() {
   const setActiveConversation = useChatUiStore((s) => s.setActiveConversation)
   const mindReadingEnabled = useModuleEnabled('mindReading')
   const careerEnabled = useModuleEnabled('career')
+  const relationshipEnabled = useModuleEnabled('relationship')
+  const locationEnabled = useModuleEnabled('location')
   const shopEnabled = useModuleEnabled('shop')
   const warehouseEnabled = useModuleEnabled('warehouse')
   const desktop = Boolean(window.talkDesktop)
@@ -76,11 +79,11 @@ export function ChatPage() {
     let cancelled = false
     void (async () => {
       await syncContactLocationsAt(new Date())
-      const participants = await (group.sceneMode === 'slg' ? resolveExactLocationParticipants(group.locationId!) : resolveLocationParticipants(group.locationId!))
+      const participants = await resolveLocationParticipants(group.locationId!)
       if (!cancelled) await db.groups.update(group.id, { memberContactIds: participants.activeMembers.map((contact) => contact.id) })
     })()
     return () => { cancelled = true }
-  }, [group?.id, group?.kind, group?.locationId, group?.sceneMode])
+  }, [group?.id, group?.kind, group?.locationId])
   const groupMembersRaw = useLiveQuery(
     () => (group ? db.contacts.bulkGet(group.memberContactIds) : []),
     [group],
@@ -561,6 +564,28 @@ export function ChatPage() {
     if (path) void navigate(path)
     else setToast('暂不支持这个小程序')
   }, [navigate])
+  const handleContactRecommendation = useCallback(async (message: Message, action: 'accept' | 'decline' | 'open') => {
+    const recommendation = recommendationFromMessage(message)
+    if (!recommendation) { setToast('这张推荐卡的信息不完整'); return }
+    if (action === 'open') {
+      if (recommendation.contactId) void navigate(`/contact/${recommendation.contactId}`)
+      else if (recommendation.taskId) void navigate(`/contact-generation/${recommendation.taskId}`)
+      return
+    }
+    if (action === 'decline') {
+      await declineContactRecommendation(message)
+      setToast('已婉拒这次推荐')
+      return
+    }
+    if (!contact) return
+    try {
+      const taskId = await acceptContactRecommendation({ message, recommender: contact, settings, careerEnabled, relationshipEnabled, locationEnabled })
+      setToast('已开始生成联系人资料')
+      void navigate(`/contact-generation/${taskId}`)
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : String(error))
+    }
+  }, [careerEnabled, contact, locationEnabled, navigate, relationshipEnabled, settings])
   const handleAvatarClick = useCallback((message: Message) => {
     if (message.role === 'user') {
       void navigate('/profile/edit')
@@ -680,7 +705,7 @@ export function ChatPage() {
   }
 
   const headerTitle = isGroupConv
-    ? group!.sceneMode === 'slg' ? `${groupLocation?.name ?? group!.name} · 现场` : group!.kind === 'location' ? `${group!.name} · ${groupLocation?.name ?? '未选择地点'}` : group!.name
+    ? group!.kind === 'location' ? `${group!.name} · ${groupLocation?.name ?? '未选择地点'}` : group!.name
     : displayName(contact!)
   const visibleHeaderTitle = aiTyping && typingLabel ? `${typingLabel}正在输入中...` : headerTitle
   const headerInfoPath = isGroupConv ? `/group/${group!.id}` : `/contact/${contact!.id}`
@@ -785,6 +810,7 @@ export function ChatPage() {
               onReply={!selectingMessages && isGroupConv ? handleBubbleReply : undefined}
               onLongPress={handleBubbleLongPress}
               onLinkClick={selectingMessages ? undefined : handleLinkClick}
+              onContactRecommendation={selectingMessages ? undefined : handleContactRecommendation}
               onFinanceClick={selectingMessages ? undefined : handleFinanceCard}
               onInternalTaskUndo={selectingMessages ? undefined : handleInternalTaskUndo}
               onAvatarClick={selectingMessages ? undefined : handleAvatarClick}

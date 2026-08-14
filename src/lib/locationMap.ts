@@ -10,7 +10,7 @@ export const TERRAIN_LABELS: Record<TerrainType, string> = {
 }
 
 export const TERRAIN_COLORS: Record<TerrainType, string> = {
-  river: '#59a9d8', grassland: '#84bd72', beach: '#dfca88', hill: '#91a96c', mountain: '#71806f', urban: '#c7ccc3', rural: '#adbf72',
+  river: '#8fc6d2', grassland: '#c4d6b5', beach: '#ead7a6', hill: '#a9c092', mountain: '#7f9683', urban: '#d9d8cf', rural: '#bdcfa2',
 }
 
 function seedHash(value: string) {

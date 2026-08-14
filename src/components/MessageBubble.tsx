@@ -9,6 +9,7 @@ import { UiIcon } from './UiIcon'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/db'
 import { retryMediaAsset } from '../lib/imageAssets'
+import { recommendationFromMessage } from '../lib/contactRecommendations'
 
 interface MessageBubbleProps {
   message: Message
@@ -28,6 +29,7 @@ interface MessageBubbleProps {
   onLongPress?: (id: string) => void
   onSelect?: (id: string) => void
   onLinkClick?: (message: Message) => void
+  onContactRecommendation?: (message: Message, action: 'accept' | 'decline' | 'open') => void
   onFinanceClick?: (message: Message) => void
   onInternalTaskUndo?: (message: Message) => void
   speechAvailable?: boolean
@@ -57,6 +59,7 @@ export const MessageBubble = memo(function MessageBubble({
   onLongPress,
   onSelect,
   onLinkClick,
+  onContactRecommendation,
   onFinanceClick,
   onInternalTaskUndo,
   speechAvailable,
@@ -83,6 +86,7 @@ export const MessageBubble = memo(function MessageBubble({
         .map(displayName),
     [message.mentions, memberById],
   )
+  const contactRecommendation = recommendationFromMessage(message)
   if (message.type === 'locationEvent') {
     return (
       <div ref={(el) => registerRef?.(message.id, el)} data-message-id={message.id} className="px-4 py-2 text-center">
@@ -159,7 +163,28 @@ export const MessageBubble = memo(function MessageBubble({
             </div>
           )}
 
-          {message.type === 'link' && (
+          {message.type === 'link' && contactRecommendation && (
+            <div data-ui-scope="special" className="w-64 overflow-hidden rounded-xl border border-[var(--ui-special-border)] bg-white text-left shadow-sm">
+              <div className="bg-[var(--ui-special-soft)] px-3.5 py-3">
+                <p className="text-[11px] text-[var(--ui-special-ink)]">联系人推荐 · {contactRecommendation.recommenderName || contactName}</p>
+                <div className="mt-2 flex items-center gap-2.5">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-xl">👤</span>
+                  <div className="min-w-0"><p className="truncate text-[15px] font-medium text-gray-900">{contactRecommendation.candidateName}</p><p className="truncate text-[11px] text-gray-500">与推荐人是{contactRecommendation.relationToRecommender}</p></div>
+                </div>
+              </div>
+              <div className="px-3.5 py-3">
+                <p className="text-[12.5px] leading-relaxed text-gray-700">{contactRecommendation.shortDescription}</p>
+                <p className="mt-2 text-[11px] leading-relaxed text-gray-400">推荐理由：{contactRecommendation.recommendationReason}</p>
+                {(contactRecommendation.occupation || contactRecommendation.hobbies.length > 0) && <p className="mt-2 text-[11px] text-gray-500">{[contactRecommendation.occupation && contactRecommendation.occupation !== '不确定' ? contactRecommendation.occupation : '', ...contactRecommendation.hobbies].filter(Boolean).join(' · ')}</p>}
+                {contactRecommendation.status === 'pending' ? <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button type="button" onClick={(event) => { event.stopPropagation(); onContactRecommendation?.(message, 'decline') }} className="rounded-lg bg-gray-100 py-2 text-xs text-gray-500">暂时不用</button>
+                  <button type="button" onClick={(event) => { event.stopPropagation(); onContactRecommendation?.(message, 'accept') }} className="rounded-lg bg-gray-900 py-2 text-xs text-white">认识一下</button>
+                </div> : contactRecommendation.status === 'accepted' ? <button type="button" onClick={(event) => { event.stopPropagation(); onContactRecommendation?.(message, 'open') }} className="mt-3 w-full rounded-lg bg-[var(--ui-special-soft)] py-2 text-xs text-[var(--ui-special-ink)]">{contactRecommendation.contactId ? '查看联系人' : contactRecommendation.taskId ? '查看联系人生成进度' : '已接受推荐'}</button> : <p className="mt-3 text-center text-xs text-gray-400">已婉拒这次推荐</p>}
+              </div>
+            </div>
+          )}
+
+          {message.type === 'link' && !contactRecommendation && (
             <button
               onClick={() => onLinkClick?.(message)}
               className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-left"

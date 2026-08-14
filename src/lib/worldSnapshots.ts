@@ -14,7 +14,7 @@ import { resumeMediaAssets } from './imageAssets'
 import { isAiTestId } from './aiTestIsolation'
 
 export const WORLD_SNAPSHOT_SCHEMA_VERSION = 3
-export const WORLD_SNAPSHOT_MIGRATION_VERSION = 5
+export const WORLD_SNAPSHOT_MIGRATION_VERSION = 6
 export const WORLD_CONTACT_STATE_SCHEMA_VERSION = 1
 
 /** Tables whose live rows always represent the active world's story. */
@@ -232,6 +232,74 @@ export async function hydrateWorldSnapshotContacts(data: WorldSnapshotData, iden
   return normalized
 }
 
+/**
+ * Contacts are shared by every save in the same world. A snapshot freezes its
+ * story, not the world's roster: people created afterwards start blank when an
+ * older save is opened.
+ */
+function mergeSharedWorldContacts(data: WorldSnapshotData, contacts: Contact[]): WorldSnapshotData {
+  const normalized = normalizeWorldSnapshotData(data)
+  const knownIds = new Set(normalized.contactIds ?? [])
+  const additions = contacts
+    .filter((contact) => !isAiTestId(contact.id) && !knownIds.has(contact.id))
+    .map((contact) => ({ ...contactBase(contact), worldviewId: contact.worldviewId }))
+  if (!additions.length) return normalized
+  normalized.contacts = [...(normalized.contacts ?? []), ...additions]
+  normalized.contactIds = [...(normalized.contactIds ?? []), ...additions.map((contact) => contact.id)]
+  normalized.contactStates = {
+    ...(normalized.contactStates ?? {}),
+    ...Object.fromEntries(additions.map((contact) => [contact.id, blankContactStoryState()])),
+  }
+  return normalized
+}
+
+/** Add a newly created contact to all existing saves in its world. */
+export async function addContactToWorldSnapshots(contact: Contact, worldId?: string) {
+  const targetWorldId = worldId || contact.worldviewId
+  if (!targetWorldId || isAiTestId(contact.id)) return
+  const snapshots = await db.worldSnapshots.where('worldId').equals(targetWorldId).toArray()
+  for (const snapshot of snapshots) {
+    const previous = normalizeWorldSnapshotData(snapshot.snapshot)
+    const next = mergeSharedWorldContacts(previous, [contact])
+    if ((next.contactIds?.length ?? 0) === (previous.contactIds?.length ?? 0)) continue
+    await db.worldSnapshots.update(snapshot.id, {
+      snapshot: next,
+      snapshotVersion: WORLD_SNAPSHOT_SCHEMA_VERSION,
+      contactCount: next.contactIds?.length ?? 0,
+      contentHash: await hashSnapshot(next),
+    })
+  }
+}
+
+/**
+ * Repairs saves made before shared world rosters existed.  A contact may have
+ * vanished from the live table after an old save was restored, so the source
+ * of truth here must be the union of every save in this world, not just the
+ * contacts currently on screen.
+ */
+async function synchronizeWorldRoster(worldId: string, liveContacts: Contact[] = []) {
+  const snapshots = (await db.worldSnapshots.where('worldId').equals(worldId).toArray())
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+  const identities = new Map<string, Contact>()
+  const add = (contact: Contact) => {
+    if (!isAiTestId(contact.id) && !identities.has(contact.id)) identities.set(contact.id, contact)
+  }
+  for (const contact of liveContacts) add(contact)
+  for (const snapshot of snapshots) for (const contact of snapshotContacts(snapshot.snapshot)) add(contact)
+  const roster = [...identities.values()]
+  for (const snapshot of snapshots) {
+    const previous = normalizeWorldSnapshotData(snapshot.snapshot)
+    const next = mergeSharedWorldContacts(previous, roster)
+    if ((next.contactIds?.length ?? 0) === (previous.contactIds?.length ?? 0)) continue
+    await db.worldSnapshots.update(snapshot.id, {
+      snapshot: next,
+      snapshotVersion: WORLD_SNAPSHOT_SCHEMA_VERSION,
+      contactCount: next.contactIds?.length ?? 0,
+      contentHash: await hashSnapshot(next),
+    })
+  }
+}
+
 async function syncWorldContactStates(worldId: string, states: Record<string, Partial<Contact>>) {
   const now = Date.now()
   const rows: WorldContactState[] = Object.entries(states).map(([contactId, state]) => ({
@@ -349,6 +417,7 @@ export async function createEmptyWorld(name: string) {
 function sanitizeStoryTables(tables: Record<string, unknown[]>, currentContactIds: Set<string>) {
   const next = clone(tables)
   const groups: Array<Record<string, any>> = ((next.groups ?? []) as Array<Record<string, any>>)
+    .filter((row) => row.sceneMode !== 'slg' && !String(row.id || '').startsWith('talk-slg-location-group:'))
     .map((row): Record<string, any> => ({ ...row, memberContactIds: (row.memberContactIds ?? []).filter((id: string) => currentContactIds.has(id)) }))
     .filter((row) => row.memberContactIds.length >= 2)
   const groupIds = new Set(groups.map((row) => row.id))
@@ -380,7 +449,10 @@ async function restoreStoryData(worldId: string, source: WorldSnapshotData, isol
   const data = normalizeWorldSnapshotData(source)
   const currentContacts = (await db.contacts.toArray()).filter((contact) => !isAiTestId(contact.id))
   const currentById = new Map(currentContacts.map((contact) => [contact.id, contact]))
+  // Persona/identity belongs to the shared contact. Snapshots only rewind the
+  // story fields, so later edits to a person's profile are not rolled back.
   const contactRecords = (data.contacts?.length ? data.contacts : (data.contactIds ?? []).flatMap((id) => currentById.get(id) ? [currentById.get(id)!] : []))
+    .map((saved) => currentById.get(saved.id) ?? saved)
     .filter((contact) => !isAiTestId(contact.id))
   const contactIds = new Set(contactRecords.map((contact) => contact.id))
   const sanitized = sanitizeStoryTables(data.tables, contactIds)
@@ -416,11 +488,23 @@ export interface RestoreWorldSnapshotOptions { backupCurrent?: boolean }
 export async function restoreWorldSnapshot(snapshotId: string, options: RestoreWorldSnapshotOptions = {}) {
   const target = await db.worldSnapshots.get(snapshotId)
   if (!target) throw new Error('该备份不存在')
-  const hydrated = await hydrateWorldSnapshotContacts(target.snapshot)
+  let hydrated = await hydrateWorldSnapshotContacts(target.snapshot)
+  const activeWorldId = useSettingsStore.getState().activeWorldId || useSettingsStore.getState().defaultWorldviewId
+  // Compatibility for older saves: opening a save in the active world enrolls
+  // contacts created after that save with a blank story state.
+  if (activeWorldId === target.worldId) {
+    const liveContacts = (await db.contacts.toArray()).filter((contact) => !contact.worldviewId || contact.worldviewId === target.worldId)
+    hydrated = mergeSharedWorldContacts(hydrated, liveContacts)
+  }
   const missingContactCount = (hydrated.contactIds?.length ?? 0) - (hydrated.contacts?.length ?? 0)
   if (missingContactCount > 0) throw new Error(`这个旧备份有 ${missingContactCount} 位联系人只剩 ID，完整资料无法恢复。已阻止读取，当前数据没有改变。`)
-  if ((target.snapshot.contacts?.length ?? 0) !== (hydrated.contacts?.length ?? 0)) {
-    await db.worldSnapshots.update(target.id, { snapshot: hydrated, snapshotVersion: WORLD_SNAPSHOT_SCHEMA_VERSION })
+  if (JSON.stringify(normalizeWorldSnapshotData(target.snapshot)) !== JSON.stringify(hydrated)) {
+    await db.worldSnapshots.update(target.id, {
+      snapshot: hydrated,
+      snapshotVersion: WORLD_SNAPSHOT_SCHEMA_VERSION,
+      contactCount: hydrated.contactIds?.length ?? 0,
+      contentHash: await hashSnapshot(hydrated),
+    })
   }
   const settings = useSettingsStore.getState()
   const currentWorldId = settings.activeWorldId || settings.defaultWorldviewId
@@ -690,6 +774,17 @@ async function runWorldSnapshotsMigration() {
   if (repairedActiveSnapshotId) {
     const repaired = await db.worldSnapshots.get(repairedActiveSnapshotId)
     if (repaired) await restoreStoryData(activeId, repaired.snapshot, settings.worldEconomyIsolated === true)
+  }
+
+  // V6: make the roster of each world the union of all its saved timelines.
+  // This also restores a person that a previous version had removed from the
+  // live table while opening an old save.
+  const activeLiveContacts = await db.contacts.toArray()
+  for (const world of worlds) {
+    const liveForWorld = world.id === activeId
+      ? activeLiveContacts.filter((contact) => contact.worldviewId === world.id)
+      : []
+    await synchronizeWorldRoster(world.id, liveForWorld)
   }
 
   // Keep a materialized latest-state index for every world. It is not used to

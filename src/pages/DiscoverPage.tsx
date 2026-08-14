@@ -14,6 +14,7 @@ import { momentsUnreadCount } from '../lib/momentsUnread'
 const BASE_ENTRIES = [
   { to: '/social-inbox', icon: '🔔', label: '互动收件箱' },
   { to: '/moments', icon: '📸', label: '朋友圈' },
+  { to: '/relationships', icon: 'network', label: '关系网' },
 ]
 
 export function DiscoverPage() {

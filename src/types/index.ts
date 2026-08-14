@@ -69,6 +69,8 @@ export interface Contact {
   monthlySalary?: number
   jobStartedDate?: string
   lastSalaryDate?: string
+  /** Stable home used when no concrete schedule or visit is active. */
+  residence?: ContactResidence
   /** Optional home/current map anchor used by the 地点 module. */
   currentLocationId?: string
   locationUpdatedAt?: number
@@ -91,6 +93,22 @@ export interface Contact {
   promptSnapshotUpdatedAt?: number
   /** Admin-only per-contact override for the step-two JSON conversion protocol. */
   jsonProtocolOverride?: string
+  /** How this contact first entered the user's social graph. */
+  acquisition?: {
+    type: 'recommendation'
+    recommenderContactId: string
+    recommenderName: string
+    sourceMessageId: string
+    acceptedAt: number
+  }
+}
+
+/** A character fact; it cannot be casually changed by generated chat or experiences. */
+export interface ContactResidence {
+  locationId: string
+  kind: 'player_home' | 'apartment' | 'dorm' | 'other'
+  cohabitsWithUser: boolean
+  establishedBy: 'generation' | 'legacy' | 'user' | 'worldbook'
 }
 
 /** A recurring weekly time block — generated at contact creation and editable in administrator tools. */
@@ -131,6 +149,8 @@ export interface ScheduleOverride {
   status?: 'scheduled' | 'completed' | 'cancelled'
   sourceConversationId?: string
   sourceMessageId?: string
+  /** Explicit invitation required for a non-cohabiting contact's one-off visit to the player's home. */
+  playerHomeVisit?: boolean
   /** Default task occurrences cancelled in full because this task overlaps them. */
   cancelledDefaultTaskIds?: string[]
   createdAt: number
@@ -390,8 +410,6 @@ export interface Group {
   /** The location module reuses the normal Talk group engine and settings. */
   kind?: 'standard' | 'location'
   locationId?: string
-  /** SLG scenes are persistent per-leaf-location and only admit people physically in that exact leaf. */
-  sceneMode?: 'slg'
   /** Groups are single-world scenes; every member must belong to this world. */
   worldviewId?: string
 }
@@ -445,8 +463,6 @@ export interface WorldMapRecord {
 export interface LocationModuleState {
   id: 'active'
   currentLocationId?: string
-  /** Independent player position for virtual-life SLG; legacy location mode keeps using currentLocationId. */
-  slgCurrentLocationId?: string
   /** Built-in locations removed by the user must not be recreated during initialization. */
   deletedLocationIds?: string[]
   updatedAt: number
@@ -970,8 +986,6 @@ export interface AppSettings {
   chatResponseTimeoutMs: number
   /** Feature-module toggles — see src/features/. Every module id listed here is active. */
   enabledModules: string[]
-  /** Remembers whether 地点 was independently enabled before SLG forced it on. */
-  slgLocationWasEnabled?: boolean
 }
 
 export type PromptModuleId =
@@ -1495,6 +1509,13 @@ export interface ContactGenerationInput {
   careerEnabled: boolean
   relationshipEnabled: boolean
   locationEnabled: boolean
+  /** Present only when this generation was started from an in-chat recommendation card. */
+  recommendation?: {
+    sourceMessageId: string
+    recommenderContactId: string
+    recommenderName: string
+    acceptedAt: number
+  }
 }
 
 export interface ContactGenerationError {

@@ -427,6 +427,28 @@ export function formatPersonaProfile(profile: PersonaProfile | undefined): strin
 }
 
 /**
+ * Compatibility for contacts created before persona settings stopped being
+ * prepended to the generated narrative. The original setting is still passed
+ * below as a hard constraint, so an identical leading copy only creates
+ * duplicated (and sometimes contradictory) identity information.
+ */
+export function personaNarrativeForPrompt(persona: string, personaConstraints?: string): string {
+  const source = persona.trim()
+  if (!source || !personaConstraints?.trim()) return source
+  const candidates = personaConstraints
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+    .sort((a, b) => b.length - a.length)
+  for (const duplicate of candidates) {
+    if (!source.startsWith(duplicate)) continue
+    const remainder = source.slice(duplicate.length).trimStart()
+    if (remainder) return remainder
+  }
+  return source
+}
+
+/**
  * Step 1: Prompt the main model to generate natural chat text.
  * No JSON — just natural chat text. Structured callers collect thoughts and
  * textual moods through native tool arguments.
@@ -503,7 +525,7 @@ export function buildRawChatPromptParts(opts: {
   const mbtiLine = opts.mbti ? ` MBTI: ${opts.mbti}（你的性格底层框架 一切反应和决定都要符合这个类型）` : ''
   const identityBlock = render('chat', 'identity', {
     name: opts.name,
-    persona: opts.persona || '（自由发挥，扮演一个普通朋友）',
+    persona: personaNarrativeForPrompt(opts.persona, opts.personaConstraints) || '（自由发挥，扮演一个普通朋友）',
     hardPersona: hardPersona ? `【人设硬约束】\n${hardPersona}` : '',
   })
   const worldbookBlock = opts.worldviewText ? render('worldview', 'privateRuntime', { worldbookEntries: opts.worldviewText }) : ''

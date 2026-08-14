@@ -52,6 +52,18 @@ export function ContactGenerationTaskPage() {
     void navigate('/contacts')
   }
 
+  async function cancelAndReturn() {
+    // Android WebView can retain a native input/keyboard session for a short
+    // time when navigation races an in-flight request. Release it before the
+    // route changes; otherwise the next form can receive taps but fail to
+    // summon its keyboard until WebView eventually cleans the session up.
+    const activeElement = document.activeElement
+    if (activeElement instanceof HTMLElement) activeElement.blur()
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    await deleteContactGenerationTask(currentTask.id)
+    void navigate('/contacts')
+  }
+
   return (
     <div className="ui-page">
       <TopBar title={immersive ? '寻找联系人' : task.method === 'precision' ? '精细创建 · 女娲模式' : '联系人生成'} showBack />
@@ -116,7 +128,7 @@ export function ContactGenerationTaskPage() {
           </section>
         )}
 
-        {(active || task.status === 'paused' || task.status === 'failed') && <button onClick={() => { if (window.confirm('确定取消并删除这个生成任务吗？')) void deleteContactGenerationTask(task.id).then(() => navigate('/contacts')) }} className="mt-4 w-full rounded-lg bg-white py-2.5 text-sm text-red-500">取消并删除任务</button>}
+        {(active || task.status === 'paused' || task.status === 'failed') && <button onClick={() => { if (window.confirm('确定取消并删除这个生成任务吗？')) void cancelAndReturn() }} className="mt-4 w-full rounded-lg bg-white py-2.5 text-sm text-red-500">取消并删除任务</button>}
         {active && <button onClick={() => void pauseContactGenerationTask(task.id)} className="mt-2 w-full py-2 text-xs text-gray-400">暂停当前任务</button>}
       </div>
     </div>

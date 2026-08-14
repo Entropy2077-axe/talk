@@ -15,7 +15,6 @@ import { saveLoadModule } from './saveLoad'
 import { realisticRepliesModule } from './realisticReplies'
 import { locationModule } from './location'
 import { directOutputModule } from './directOutput'
-import { slgModule } from './slg'
 import type { FeatureModule, ParentModule } from './types'
 
 // ---- parent modules (accordion groups in the UI) ----
@@ -60,14 +59,13 @@ export const ALL_MODULES: FeatureModule[] = [
   saveLoadModule,
   realisticRepliesModule,
   locationModule,
-  slgModule,
   directOutputModule,
 ]
 
 /** Modules that don't belong to any parent — shown as standalone toggles. */
 export const STANDALONE_MODULES = ALL_MODULES.filter((m) => !m.parentId)
 
-export const IMMERSIVE_RESTRICTED_MODULES = new Set(['location', 'slg', 'mindReading', 'intent', 'lifeSimulation', 'storyOutline'])
+export const IMMERSIVE_RESTRICTED_MODULES = new Set(['location', 'mindReading', 'intent', 'lifeSimulation', 'storyOutline'])
 
 export function isModuleAllowedInExperienceMode(id: string, mode = useSettingsStore.getState().experienceMode): boolean {
   return mode !== 'immersive' || !IMMERSIVE_RESTRICTED_MODULES.has(id)
@@ -76,7 +74,6 @@ export function isModuleAllowedInExperienceMode(id: string, mode = useSettingsSt
 function moduleEffectivelyEnabled(id: string, state = useSettingsStore.getState()): boolean {
   if (state.experienceMode === 'immersive' && id === 'realisticReplies') return true
   const effectiveId = id === 'worldview' ? 'saveLoad' : id
-  if (effectiveId === 'location' && state.enabledModules.includes('slg')) return isModuleAllowedInExperienceMode('location', state.experienceMode)
   return isModuleAllowedInExperienceMode(effectiveId, state.experienceMode) && (state.enabledModules.includes(effectiveId) || (id === 'worldview' && state.enabledModules.includes('worldview')))
 }
 
@@ -86,9 +83,7 @@ function moduleEffectivelyEnabled(id: string, state = useSettingsStore.getState(
 export function useModuleEnabled(id: string): boolean {
   return useSettingsStore((s) => s.experienceMode === 'immersive' && id === 'realisticReplies'
     ? true
-    : id === 'location' && s.enabledModules.includes('slg')
-      ? isModuleAllowedInExperienceMode('location', s.experienceMode)
-      : isModuleAllowedInExperienceMode(id === 'worldview' ? 'saveLoad' : id, s.experienceMode) && (s.enabledModules.includes(id === 'worldview' ? 'saveLoad' : id) || (id === 'worldview' && s.enabledModules.includes('worldview'))))
+    : isModuleAllowedInExperienceMode(id === 'worldview' ? 'saveLoad' : id, s.experienceMode) && (s.enabledModules.includes(id === 'worldview' ? 'saveLoad' : id) || (id === 'worldview' && s.enabledModules.includes('worldview'))))
 }
 
 /** Non-reactive read for use outside React components (e.g. chat engine). */
@@ -152,5 +147,5 @@ export function getEnabledDiscoverEntries(): { to: string; icon: string; label: 
 
 /** Every module is on by default except opt-in background/debug modules. */
 export const DEFAULT_ENABLED_MODULES: string[] = ALL_MODULES
-  .filter((m) => m.id !== 'proactiveChat' && m.id !== 'mindReading' && m.id !== 'lifeSimulation' && m.id !== 'realisticReplies' && m.id !== 'directOutput' && m.id !== 'slg')
+  .filter((m) => m.id !== 'proactiveChat' && m.id !== 'mindReading' && m.id !== 'lifeSimulation' && m.id !== 'realisticReplies' && m.id !== 'directOutput')
   .map((m) => m.id)

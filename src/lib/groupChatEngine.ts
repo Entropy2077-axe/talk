@@ -25,7 +25,7 @@ import { trackRemoteStickerSend } from './remoteMedia'
 import { resolveBubbleMedia } from './bubbleMedia'
 import { createTurnController, revealSequentially } from './conversationRuntime'
 import { isImageProviderReady, isStickerProviderReady } from './mediaProviders'
-import { realSeason, resolveExactLocationParticipants, resolveLocationParticipants, syncContactLocationsAt, type LocationParticipants } from './locations'
+import { realSeason, resolveLocationParticipants, syncContactLocationsAt, type LocationParticipants } from './locations'
 import { recentSocialEventsText, recordSocialEvent } from './socialEvents'
 import { recentSharedOriginalContext } from './sharedRecentContext'
 import { createGroupPlan, planCardMessage } from './groupPlans'
@@ -260,7 +260,7 @@ export async function sendGroupMessage(
   if (!text.trim()) return
   if (group.kind === 'location' && group.locationId) {
     await syncContactLocationsAt(new Date())
-    const participants = await (group.sceneMode === 'slg' ? resolveExactLocationParticipants(group.locationId) : resolveLocationParticipants(group.locationId))
+    const participants = await resolveLocationParticipants(group.locationId)
     members = participants.activeMembers
     group = { ...group, memberContactIds: members.map((member) => member.id) }
     await db.groups.update(group.id, { memberContactIds: group.memberContactIds })
@@ -389,7 +389,7 @@ async function runGroupAiTurn(
     let locationParticipants: LocationParticipants | undefined
     if (group.kind === 'location' && group.locationId) {
       await syncContactLocationsAt(new Date())
-      locationParticipants = await (group.sceneMode === 'slg' ? resolveExactLocationParticipants(group.locationId) : resolveLocationParticipants(group.locationId))
+      locationParticipants = await resolveLocationParticipants(group.locationId)
       members = locationParticipants.activeMembers
       group = { ...group, memberContactIds: members.map((member) => member.id) }
       await db.groups.update(group.id, { memberContactIds: group.memberContactIds })
@@ -457,7 +457,7 @@ async function runGroupAiTurn(
       speakerMemoriesMap,
       aiRelationshipText,
       locationContextText: location
-        ? `当前地点：${location.name}\n地点描述：${location.description}\n设备现实时间：${describeCurrentTime(new Date())}\n现实季节：${realSeason(new Date())}\n人物位置与听觉状态：\n${participantPositions || '当前没有任何人物能听见'}\n模型只能从本轮可发言成员中选择说话人。${group.sceneMode === 'slg' ? '这是虚拟人生现场，只有与用户处于同一具体地点的人物能参与；不得让其他人物隔墙接话、远程发言或凭空到场。' : 'muffled人物只能隔墙、隔门或从远处搭话。'}`
+        ? `当前地点：${location.name}\n地点描述：${location.description}\n设备现实时间：${describeCurrentTime(new Date())}\n现实季节：${realSeason(new Date())}\n人物位置与听觉状态：\n${participantPositions || '当前没有任何人物能听见'}\n模型只能从本轮可发言成员中选择说话人。muffled人物只能隔墙、隔门或从远处搭话。`
         : undefined,
       promptModules: settings.promptModules,
       enabledModules: settings.enabledModules,
@@ -468,7 +468,7 @@ async function runGroupAiTurn(
     const controller = new AbortController()
     turns.setAbortController(conversationId, controller)
 
-    // ChatSLG retired per-turn pre-draft outlines because they add a complete
+    // Per-turn pre-draft outlines add a complete
     // serial model request before every group reply. The main prompt already
     // contains the same planning, persona, pacing, and topic contracts.
     const storyOutline = ''

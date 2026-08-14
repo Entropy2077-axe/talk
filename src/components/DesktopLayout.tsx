@@ -202,7 +202,11 @@ function DiscoverList({ query }: { query: string }) {
   const enabledModules = useSettingsStore((state) => state.enabledModules)
   const adminModeEnabled = useSettingsStore((state) => state.adminModeEnabled)
   const entries = useMemo(() => {
-    const result = [{ to: '/moments', label: '朋友圈', icon: '◉', note: '查看朋友们的最新动态' }, { to: '/social-inbox', label: '互动收件箱', icon: '✦', note: '点赞、评论与回复' }]
+    const result = [
+      { to: '/moments', label: '朋友圈', icon: '◉', note: '查看朋友们的最新动态' },
+      { to: '/social-inbox', label: '互动收件箱', icon: '✦', note: '点赞、评论与回复' },
+      { to: '/relationships', label: '关系网', icon: 'network', note: '查看 AI 之间的关系连接' },
+    ]
     if (adminModeEnabled) result.push({ to: '/ai-test-cards', label: 'AI 自动测试', icon: '🧪', note: '后台运行人工评测用例' })
     for (const module of ALL_MODULES) {
       if (!enabledModules.includes(module.id)) continue

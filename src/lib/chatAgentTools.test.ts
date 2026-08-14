@@ -54,6 +54,18 @@ describe('native chat agent tools', () => {
     expect(parsed.bubbles[0]).toMatchObject({ type: 'scheduleChange', location: 'cafe-1', locationId: 'cafe-1' })
   })
 
+  it('turns a contact recommendation tool call into a structured card', () => {
+    const parsed = parsePrivateToolCalls([call('recommend_contact', {
+      candidateName: '林晚', relationToRecommender: '大学室友', recommendationReason: '你们都喜欢街头摄影',
+      shortDescription: '她是个做事很细致的摄影师。', gender: '女', ageRange: '25岁', occupation: '摄影师',
+      hobbies: ['摄影', '徒步'], personalityClues: ['慢热', '细心'], thought: '他们应该聊得来', mood: '期待',
+    })])
+    expect(parsed.bubbles).toEqual([expect.objectContaining({
+      type: 'link', app: 'contact_recommendation', label: '林晚',
+      data: expect.objectContaining({ relationToRecommender: '大学室友', status: 'pending' }),
+    })])
+  })
+
   it('only exposes tools that are currently available', () => {
     const names = privateChatTools({ stickerNames: [], stickerSearchEnabled: false, imageEnabled: false, knowledgeEnabled: false, scheduleEnabled: false, locationIds: [] }).map((tool) => tool.function.name)
     expect(names).not.toContain('send_sticker')
@@ -98,6 +110,16 @@ describe('native chat agent tools', () => {
 
     expect(result.parsed.bubbles.map((bubble) => bubble.type)).toEqual(['text', 'transfer', 'text'])
     expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('submits a recommendation card with natural introduction text', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => completion([turnCall([
+      { type: 'text', content: '我想到一个也许和你聊得来的人。' },
+      { type: 'contact_recommendation', candidateName: '林晚', relationToRecommender: '大学室友', recommendationReason: '你们都喜欢摄影', shortDescription: '她是摄影师，性格慢热但很细心。', gender: '女', ageRange: '25岁', occupation: '摄影师', hobbies: ['摄影'], personalityClues: ['慢热'] },
+    ])])))
+    const result = await generatePrivateAgentTurn(agentOptions)
+    expect(result.parsed.bubbles.map((bubble) => bubble.type)).toEqual(['text', 'link'])
+    expect(result.parsed.bubbles[1]).toMatchObject({ app: 'contact_recommendation', label: '林晚' })
   })
 
   it('retries an invalid action-only turn as a complete turn instead of requesting one fixed text', async () => {

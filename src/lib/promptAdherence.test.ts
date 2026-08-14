@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { buildPersonaGenerationPrompt, buildRawChatPrompt } from './prompt'
+import { buildPersonaGenerationPrompt, buildRawChatPrompt, personaNarrativeForPrompt } from './prompt'
 import { createDefaultPromptModules, getPromptTemplate } from './promptModules'
 
 describe('relationship and persona adherence prompts', () => {
+  it('removes a legacy persona-setting prefix duplicated by the generated narrative', () => {
+    const setting = '年龄：14\n关系定位：青梅竹马'
+    expect(personaNarrativeForPrompt(`${setting}\n\n她表面嘴硬，实际很在意用户。`, setting))
+      .toBe('她表面嘴硬，实际很在意用户。')
+  })
+
   it('puts relationship, shared history, trait, and speech examples in the first-turn contract', () => {
     const prompt = buildRawChatPrompt({
       name: '小满',

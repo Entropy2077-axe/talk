@@ -24,7 +24,6 @@ export function MessagesPage() {
   const [showAddMenu, setShowAddMenu] = useState(false)
   const navigate = useNavigate()
   const locationEnabled = useSettingsStore((state) => state.enabledModules.includes('location'))
-  const slgEnabled = useSettingsStore((state) => state.enabledModules.includes('slg'))
 
   const conversations = useLiveQuery(() => db.conversations.toArray(), []) ?? EMPTY_ARRAY
   const contacts = useLiveQuery(() => db.contacts.toArray(), []) ?? EMPTY_ARRAY
@@ -46,9 +45,6 @@ export function MessagesPage() {
       .filter((conversation) => !isAiTestId(conversation.id) && !isAiTestId(conversation.contactId) && !isAiTestId(conversation.groupId))
       .filter((conversation) => {
         if (!conversation.groupId) return locationEnabled || !conversation.systemPinned
-        const group = groupById.get(conversation.groupId)
-        if (group?.sceneMode === 'slg') return slgEnabled
-        if (group?.kind === 'location' && slgEnabled) return false
         return locationEnabled || !conversation.systemPinned
       })
       .map((conv) => {
@@ -65,7 +61,7 @@ export function MessagesPage() {
             conv,
             avatar: group.avatar,
             avatarColor: group.avatarColor,
-            name: group.sceneMode === 'slg' ? `${locationById.get(group.locationId ?? '')?.name ?? group.name} · 现场` : group.kind === 'location' ? `${group.name} · ${locationById.get(group.locationId ?? '')?.name ?? '未选择地点'}` : group.name,
+            name: group.kind === 'location' ? `${group.name} · ${locationById.get(group.locationId ?? '')?.name ?? '未选择地点'}` : group.name,
             preview: previewForMessage(lastMessage, speaker ? displayName(speaker) : undefined),
             unread,
           }
@@ -87,7 +83,7 @@ export function MessagesPage() {
         if (a.conv.pinned !== b.conv.pinned) return a.conv.pinned ? -1 : 1
         return b.conv.updatedAt - a.conv.updatedAt
       })
-  }, [conversations, contacts, groups, locations, locationEnabled, slgEnabled, lastMessageByConversation, unreadByConversation])
+  }, [conversations, contacts, groups, locations, locationEnabled, lastMessageByConversation, unreadByConversation])
 
   const openConversation = useCallback((id: string) => navigate(`/chat/${id}`), [navigate])
   const openConversationMenu = useCallback((id: string) => setMenuFor(id), [])

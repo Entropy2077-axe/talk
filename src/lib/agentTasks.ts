@@ -2,7 +2,7 @@ import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import type { ScheduleOverride } from '../types'
 import { defaultTasksOverlappingRange, pruneExpiredOverrides, specialTaskRange } from './schedule'
-import { isLeafLocation, syncContactLocationAt } from './locations'
+import { canUsePlayerHome, isLeafLocation, syncContactLocationAt } from './locations'
 import { toDateKey } from './time'
 
 export interface CreateSpecialTaskInput {
@@ -13,6 +13,7 @@ export interface CreateSpecialTaskInput {
   summary: string
   phoneAccess?: 'available' | 'unavailable'
   sourceConversationId?: string
+  playerHomeVisit?: boolean
 }
 
 export type CreateSpecialTaskResult =
@@ -27,6 +28,7 @@ export async function createSpecialTask(contactId: string, input: CreateSpecialT
   ])
   if (!contact) return { success: false, code: 'CONTACT_NOT_FOUND', message: '联系人不存在' }
   if (!location || !isLeafLocation(location.id, locations)) return { success: false, code: 'INVALID_LOCATION', message: '目标必须是一个已存在的具体地点' }
+  if (!canUsePlayerHome(contact, location.id, input.playerHomeVisit)) return { success: false, code: 'PLAYER_HOME_NOT_AUTHORIZED', message: '该联系人没有在用户家停留的明确许可' }
   if (!Number.isFinite(input.startsAt) || !Number.isFinite(input.endsAt) || input.endsAt <= input.startsAt) return { success: false, code: 'INVALID_TIME', message: '特殊任务的起止时间无效' }
   if (input.startsAt < now - 5 * 60_000) return { success: false, code: 'START_IN_PAST', message: '特殊任务不能从已经过去的时间开始' }
   if (input.startsAt > now + 14 * 86_400_000) return { success: false, code: 'TOO_FAR_AHEAD', message: '特殊任务最多提前十四天安排' }
@@ -53,6 +55,7 @@ export async function createSpecialTask(contactId: string, input: CreateSpecialT
     priority: 'special',
     status: 'scheduled',
     sourceConversationId: input.sourceConversationId,
+    playerHomeVisit: input.playerHomeVisit,
     cancelledDefaultTaskIds: cancelledDefaults.map((task) => task.id),
     createdAt: now,
   }

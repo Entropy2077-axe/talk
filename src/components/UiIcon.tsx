@@ -29,6 +29,7 @@ import {
   MessageCircleMore,
   MessageSquare,
   Moon,
+  Network,
   Package,
   Palette,
   PenLine,
@@ -103,6 +104,7 @@ const ICONS: Record<string, LucideIcon> = {
   shop: Store,
   users: Users,
   warehouse: Warehouse,
+  network: Network,
 }
 
 export function UiIcon({ name, ...props }: { name: string } & Omit<LucideProps, 'ref'>) {

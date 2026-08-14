@@ -29,6 +29,7 @@ import { displayName } from './contact'
 import { syncContactLocationsAt } from './locations'
 import { activePromptPreset, clonePromptModules } from './promptPresets'
 import { generatePersonaWithTools } from './personaAgentTools'
+import { addContactToWorldSnapshots } from './worldSnapshots'
 
 const ACTIVE_STATUSES: ContactGenerationStatus[] = [
   'preparing', 'retrieving_context', 'extracting_canon', 'generating', 'validating', 'fetching_avatar', 'committing',
@@ -283,6 +284,7 @@ async function preparePersona(task: ContactGenerationTask, settings: AppSettings
         worldbookText,
         requestedCharacter: [input.roleDescription, input.personaSetting, input.relationship].filter(Boolean).join('\n'),
         existingContactNames: contacts.flatMap((contact) => [contact.name, contact.realName, contact.nickname, displayName(contact)].filter((name): name is string => !!name)),
+        signal,
       })
     } catch (error) {
       const explicitlyBound = input.selectedWorldbookEntryIds.length > 0 || !!input.importedWorldbook?.entries.length
@@ -349,6 +351,7 @@ async function preparePersona(task: ContactGenerationTask, settings: AppSettings
       temperature: 0,
       maxTokens: 2600,
       purpose: 'persona',
+      signal,
       trace: { turnId: task.id, stage: 'other' },
     })
     const repairedValidation = diagnosePersonaGeneration(repaired)
@@ -393,7 +396,14 @@ async function preparePersona(task: ContactGenerationTask, settings: AppSettings
       },
     }
   }
-  if (input.personaSetting && !parsed.persona.includes(input.personaSetting)) parsed = { ...parsed, persona: `${input.personaSetting}\n\n${parsed.persona}` }
+  // `personaSetting` is already retained in `personaConstraints` and injected
+  // as the highest-priority user-authored constraint at chat time. Prepending
+  // it to `persona` as well made the identity block appear twice. Worse, the
+  // copied source and the model's completed draft could disagree on an age or
+  // name, leaving the chat model with contradictory facts.
+  //
+  // Keep `persona` as the single, clean generated narrative; the original
+  // input remains available as a separate hard constraint below.
   if (task.method === 'precision') parsed.initialWarmth ??= initialWarmthForBase(relationship || parsed.relationship || '朋友', input.personalityTrait || parsed.personalityTrait)
   const generatedVoiceId = parsed.speechVoiceId
   if (voiceContext && !voiceContext.options.some((option) => option.id === generatedVoiceId)) {
@@ -491,6 +501,17 @@ async function commitTask(task: ContactGenerationTask) {
       relationshipBase: relationship,
       initialRelationshipBase: relationship,
       relationshipDynamic: '',
+      residence: (() => {
+        const profile = `${relationship} ${input.occupation || parsed.occupation || ''} ${parsed.persona}`
+        const cohabitsWithUser = /女仆|佣人|管家|保姆|住家|同居|室友|妹妹|姐姐|弟弟|哥哥|家人|妻子|丈夫|未婚妻|未婚夫/.test(profile)
+        const student = /学生|大学|高中|初中|学校|上课/.test(profile)
+        return {
+          locationId: cohabitsWithUser ? 'home-living' : student ? 'student-dorm-room' : 'riverside-apartment-room',
+          kind: cohabitsWithUser ? 'player_home' as const : student ? 'dorm' as const : 'apartment' as const,
+          cohabitsWithUser,
+          establishedBy: 'generation' as const,
+        }
+      })(),
       personalityTrait: input.personalityTrait || parsed.personalityTrait || '无',
       schedule: parsed.schedule,
       initialSchedule: parsed.schedule,
@@ -503,9 +524,24 @@ async function commitTask(task: ContactGenerationTask) {
       promptPresetSourceId: task.promptPresetSourceId,
       promptPresetSourceName: task.promptPresetSourceName,
       promptSnapshotUpdatedAt: now,
+      acquisition: input.recommendation ? {
+        type: 'recommendation',
+        recommenderContactId: input.recommendation.recommenderContactId,
+        recommenderName: input.recommendation.recommenderName,
+        sourceMessageId: input.recommendation.sourceMessageId,
+        acceptedAt: input.recommendation.acceptedAt,
+      } : undefined,
       ...(input.careerEnabled && (input.occupation || parsed.occupation) ? employmentPatch(input.occupation || parsed.occupation || '', parsed.monthlySalary ?? 6000) : {}),
     }
     await db.contacts.add(contact)
+    if (input.recommendation) {
+      const sourceMessage = await db.messages.get(input.recommendation.sourceMessageId)
+      if (sourceMessage?.link?.app === 'contact_recommendation') {
+        await db.messages.update(sourceMessage.id, {
+          link: { ...sourceMessage.link, data: { ...sourceMessage.link.data, status: 'accepted', contactId, resolvedAt: now } },
+        })
+      }
+    }
     await db.conversations.add({ id: conversationId, contactId, pinned: false, createdAt: now, updatedAt: now })
     if (input.importedFirstMessage?.trim()) {
       await db.messages.add({ id: uuid(), conversationId, role: 'assistant', type: 'text', content: input.importedFirstMessage.trim(), createdAt: now + 1 })
@@ -539,6 +575,8 @@ async function commitTask(task: ContactGenerationTask) {
   } catch (error) {
     throw codedError('DATABASE_COMMIT_FAILED', error instanceof Error ? error.message : String(error), true)
   }
+  const createdContact = await db.contacts.get(contactId)
+  if (createdContact) await addContactToWorldSnapshots(createdContact)
   if (input.locationEnabled) void syncContactLocationsAt(new Date(now)).catch(() => undefined)
 }
 
