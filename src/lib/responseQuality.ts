@@ -2,7 +2,6 @@ import { chatCompletionText as chatCompletion } from './deepseek'
 import { displayName } from './contact'
 import { activeUpcomingPlansText } from './memory'
 import { describeCurrentSchedule, describeUpcomingScheduleText } from './schedule'
-import { formatPersonaProfile, personalityTraitLine } from './prompt'
 import type { AdminAiTraceStage, AiBubble, AppSettings, Contact, GroupAiBubble, GroupEnergyLevel } from '../types'
 
 interface QualityResult {
@@ -101,7 +100,7 @@ export async function auditAndRepairRawTurn(opts: {
   // prompt. The reviewer must inspect what was actually written, rather than
   // merely remembering the requested format after a large context window.
   const jsonSchema = opts.scene === 'group'
-    ? '{"messages":[{"speakerIndex":1,"speakerName":"...","type":"text","content":"...","thought":"...","mood":"..."},{"speakerIndex":1,"type":"sticker","name":"表情包名称或搜索词"},{"speakerIndex":1,"type":"image","query":"English image prompt","caption":"配文","kind":"selfie|portrait|group|scene|object","participantIndexes":[1],"includeUser":false}],"turnSummary":"...","groupVibe":"...","knowledgeQueries":[],"planCandidates":[]}'
+    ? '{"messages":[{"speakerIndex":1,"speakerName":"...","type":"text","content":"...","thought":"...","mood":"..."},{"speakerIndex":1,"type":"sticker","name":"表情包名称或搜索词"},{"speakerIndex":1,"type":"image","query":"English image prompt","caption":"配文","kind":"selfie|portrait|group|scene|object","participantIndexes":[1],"includeUser":false}],"turnSummary":"...","knowledgeQueries":[],"planCandidates":[]}'
     : '{"messages":[{"type":"text","content":"..."},{"type":"sticker","name":"表情包名称或搜索词"},{"type":"image","query":"English image prompt","caption":"配文","scene":"...","kind":"selfie|portrait|scene|object","participants":["self"]}],"mood":"...","thought":"...","knowledgeQueries":[]}'
   const prompt = `【待审核原文｜必须逐行核对，优先阅读】
 ${opts.rawDraft}
@@ -216,7 +215,7 @@ export async function validatePrivateTurn(opts: {
   const systemPrompt = `You are a strict roleplay response reviewer. Output JSON only: {"valid":true/false,"reason":"short","fixedRaw":"optional"}.
 Mandatory primary check: logical grounding. Decide whether the reply's inference is tightly supported by its premises: persona/identity, memory, relationship, mood, location, schedule/plans, recent events,${opts.worldbookText ? ' worldbook (see user prompt),' : ''} and the latest user message.
 Then check: (1) reply fits persona and personality trait, (2) never violates user-authored persona constraints, (3) answers user, (4) no invented facts — BUT worldbook entries define canonical world rules; content grounded in an active worldbook entry is NOT "invented" even if it seems fantastical, (5) mood/thought are present. A trait may be subtle, but a reply that directly contradicts its behavioral anchor is invalid.
-Treat persona adherence as a logical validity requirement, not a style preference. When facts allow more than one reply, the selected reply must be the one this particular persona would naturally choose. Reject a generic, flattened response if the persona's special trait, stated boundary, habit, MBTI, or behavioral anchor should materially affect motivation, tone, initiative, or emotional reaction in this situation.
+Treat persona adherence as a logical validity requirement, not a style preference. When facts allow more than one reply, the selected reply must be the one this particular persona would naturally choose. Reject a generic, flattened response if the unified persona should materially affect motivation, tone, initiative, or emotional reaction in this situation.
 If the prose feels good but the premise→reply logic is weak, unsupported, contradictory, or loosely associated, it is invalid.
 If valid, return valid=true.
 If invalid, rewrite as fixedRaw. Must include mood and thought: {"messages":[{"type":"text","content":"..."}],"mood":"15字情绪","thought":"30字内心想法 和嘴上说的不一样"}. Keep it short.`
@@ -234,9 +233,7 @@ If invalid, rewrite as fixedRaw. Must include mood and thought: {"messages":[{"t
 When rewriting, answer the latest user message first, keep it short, and admit a mistake naturally if needed.`
   const userPrompt = `Persona name: ${name}
 Persona: ${truncate(opts.contact.systemPrompt || '', 700)}
-User-authored persona constraints: ${truncate(opts.contact.personaConstraints || '(none)', 500)}
-Structured persona anchors: ${truncate(formatPersonaProfile(opts.contact.personaProfile) || '(none)', 700)}
-Personality trait: ${truncate(personalityTraitLine(opts.contact.personalityTrait, opts.contact.warmth ?? 0) || '(none)', 900)}
+Unified persona: ${truncate(opts.contact.systemPrompt || '(none)', 1200)}
 Relationship: ${opts.contact.relationshipBase || '朋友'} ${truncate(opts.contact.relationshipDynamic || '', 160)}
 Memory/style: ${truncate(opts.contact.memoryStyle || opts.contact.memoryFacts || '', 260)}
 Current mood: ${activeMood || '(none)'}
@@ -283,10 +280,10 @@ ${opts.worldbookText}` : ''
   const systemPrompt = `You are a strict group-chat response reviewer. Output JSON only: {"valid":true/false,"reason":"short","fixedRaw":"optional"}.
 Judge whether each speaker follows their persona, the reply handles @mentions/replies, and the scene remains a natural group chat rather than several private replies to the user.
 Treat a later explicit state as replacing an earlier one. A speaker must not repeat an already-settled transition as “你不睡了？”/“你起来了？” merely to show memory; answer the newest invitation, question, or request first unless the timeline is genuinely contradictory or uncertain.
-Persona is a hard logical premise for every speaker: reject a speaker whose response could be factually possible but is generic or contradicts the speaker's stated trait, boundary, habit, MBTI, or behavior anchor. In any plausible alternative, require the response that best reflects that speaker's distinctive personality without inventing facts.
-Also check the protocol: speakerIndex must be one of the listed speakers; content must not contain leaked <name>, speaker-name prefixes, parenthesized thoughts, bracketed moods, or wrapping quotes; every message must include non-empty thought and mood, and they must not leak into content; groupVibe must be present and non-empty.${opts.worldbookText ? ' Content grounded in an active worldbook entry is NOT "invented facts" — worldbook defines canon world rules.' : ''}
+The unified persona is a hard logical premise for every speaker: reject a speaker whose response could be factually possible but is generic or contradicts that persona. In any plausible alternative, require the response that best reflects that speaker's distinctive personality without inventing facts.
+Also check the protocol: speakerIndex must be one of the listed speakers; content must not contain leaked <name>, speaker-name prefixes, parenthesized thoughts, bracketed moods, or wrapping quotes; every message must include non-empty thought and mood, and they must not leak into content.${opts.worldbookText ? ' Content grounded in an active worldbook entry is NOT "invented facts" — worldbook defines canon world rules.' : ''}
 If valid, return valid=true and omit fixedRaw.
-If invalid, rewrite fixedRaw using this exact protocol JSON: {"messages":[{"speakerIndex":1,"speakerName":"...","type":"text","content":"...","thought":"...","mood":"..."}],"turnSummary":"...","groupVibe":"...","knowledgeQueries":[]}. Only use listed speakerIndex values. Keep it short.`
+If invalid, rewrite fixedRaw using this exact protocol JSON: {"messages":[{"speakerIndex":1,"speakerName":"...","type":"text","content":"...","thought":"...","mood":"..."}],"turnSummary":"...","knowledgeQueries":[]}. Only use listed speakerIndex values. Keep it short.`
   const userPrompt = `Group: ${opts.groupName}
 Speakers:
 ${speakerText}
@@ -314,7 +311,6 @@ export async function validateGroupDraft(opts: {
   groupName: string
   speakers: Contact[]
   rawText: string
-  allowAiChatter: boolean
   energyLevel: GroupEnergyLevel
   targetedContext: string
   sharedRecentContext?: string
@@ -329,11 +325,9 @@ export async function validateGroupDraft(opts: {
       : opts.energyLevel === 'lively'
         ? '热闹: 整轮应有6到12句话，可以多次穿插发言。'
         : '普通: 整轮应有3到7句话。'
-  const chatterRule = opts.allowAiChatter
-    ? opts.speakers.length >= 2
-      ? 'AI互聊已开启: 有自然接点时可以出现AI之间互动；不能为了满足规则而强行点名或接话。'
-      : '本轮只有一位AI发言人: 不要求AI之间互动。'
-    : 'AI互聊已关闭: 草稿必须围绕用户、用户@/回复对象或用户相关话题，不要发展AI之间的旁支闲聊。'
+  const chatterRule = opts.speakers.length >= 2
+    ? '群成员始终允许自然互相接话；不能为了满足规则而强行点名或接话。'
+    : '本轮只有一位AI发言人，不要求AI之间互动。'
 
   try {
     const judged = await chatCompletion({
@@ -354,12 +348,12 @@ export async function validateGroupDraft(opts: {
 2. 每一行是否都有非空“想法”和“心情”，括号是否为中文全角圆括号（），心情是否为半角方括号[]，消息是否为中文弯引号“”。
 3. 人名是否只来自本轮发言人。
 4. 是否符合群聊热闹程度: ${energyRule}
-5. 是否符合AI互聊规则: ${chatterRule}
+5. 群成员是否能自然接话、且没有机械地只围绕用户重复表态: ${chatterRule}
 6. 发言顺序是否自然，允许同一人多次插入，不要求按发言人顺序轮流。
 7. 草稿是否像真实群聊，而不是每个人机械回答用户。
 8. 草稿是否过度复读同一个特殊词、梗、比喻、称号或外号；如果多名AI都围绕同一个词解释/吐槽/复述，应判为无效。
 9. 草稿是否有话题推进；如果同一个梗已经被反复接住，除非用户明确继续问这个梗，否则应该收束或自然转到相邻话题。
-10. 每位发言人是否把人设、用户补充约束、结构化人设、MBTI 和特色人格当作逻辑前提；如果事实允许多种回应，是否选择了最符合该角色的反应，而非泛化的普通聊天口吻。违反即无效。
+10. 每位发言人是否把统一人设当作逻辑前提；如果事实允许多种回应，是否选择了最符合该角色的反应，而非泛化的普通聊天口吻。违反即无效。
 
 只要违反任一必需规则，就 valid=false，并用一句话指出最重要的问题。${opts.worldbookText ? `\n\n注意：以下世界书条目定义了这个世界的规则。草稿中符合世界书设定的内容不属于"编造"或"偏离人设"，是合理的世界构建。\n世界书：\n${opts.worldbookText}` : ''}`,
         },

@@ -1,4 +1,4 @@
-import type { AppSettings, Contact, ContactExperience, PromptModuleSettings } from '../types'
+import type { AppSettings, Contact, PromptModuleSettings } from '../types'
 import { chatCompletionText } from './deepseek'
 import { parseJsonLoose } from './aiProtocol'
 
@@ -6,15 +6,12 @@ export interface ContactAdminSuggestion {
   summary: string
   contactPatch?: Partial<Contact>
   promptModulePatches?: Partial<PromptModuleSettings>
-  jsonProtocolOverride?: string
-  experiencePatches?: Array<Partial<ContactExperience> & { id: string }>
 }
 
 export async function suggestContactAdminEdit(input: {
   settings: AppSettings
   contact: Contact
   promptModules: PromptModuleSettings
-  experiences: ContactExperience[]
   instruction: string
 }): Promise<ContactAdminSuggestion> {
   const raw = await chatCompletionText({
@@ -22,18 +19,21 @@ export async function suggestContactAdminEdit(input: {
     baseUrl: input.settings.baseUrl,
     model: input.settings.utilityModel || input.settings.model,
     provider: input.settings.aiProvider,
-    messages: [{ role: 'system', content: `你是联系人设定二次编辑助手。根据管理员的明确要求提出最小修改，不得擅自改变未被要求的身份、共同经历、关系、职业或世界观。只输出JSON：
-{"summary":"修改说明","contactPatch":{},"promptModulePatches":{},"jsonProtocolOverride":"可省略","experiencePatches":[{"id":"原经历ID","summary":"修改后内容"}]}
-contactPatch只放需要改变的Contact字段；不得修改id、createdAt、记忆游标或后台时间戳。promptModulePatches只放需要改变的模块和模板。经历只能引用输入中已有ID，不能凭空新增事实。` }, { role: 'user', content: `管理员要求：${input.instruction}
+    messages: [{
+      role: 'system',
+      content: `你是联系人设定二次编辑助手。根据管理员的明确要求提出最小修改，不得擅自改变未被要求的身份、人设、记忆、关系、职业或世界观。只输出 JSON：
+{"summary":"修改说明","contactPatch":{},"promptModulePatches":{}}
+contactPatch 只放需要改变的 Contact 字段；不得修改 id、createdAt、记忆游标或后台时间戳。所有人设、性格、边界、习惯、行为方式、口癖和实际说话示例都必须直接修改 systemPrompt，不能创建 personaConstraints、personaProfile、personalityTrait、customPersonalityTraits、speechSamples、mbti、sharedHistory 等并行或退役字段。过去事实只能进入记忆系统，不得伪装成人设。promptModulePatches 只放当前仍存在的模块和模板，不得使用 sharedHistory、hardPersona、aiChatterMode、energyLevel 等退役占位符。`,
+    }, {
+      role: 'user',
+      content: `管理员要求：${input.instruction}
 
 当前联系人：
 ${JSON.stringify(input.contact)}
 
 当前固定提示词：
-${JSON.stringify(input.promptModules)}
-
-当前经历：
-${JSON.stringify(input.experiences)}` }],
+${JSON.stringify(input.promptModules)}`,
+    }],
     jsonMode: true,
     thinking: 'disabled',
     temperature: 0.25,

@@ -1,8 +1,8 @@
 import { validateScheduleBlocks } from './schedule'
 import { extractJsonObject, parseJsonLoose } from './aiProtocol'
 import type { AvatarCategory } from './avatarCategory'
-import { PERSONALITY_TRAIT_OPTIONS, type ContactGenerationValidationDiagnostics, type ContactGenerationValidationIssue, type PersonaProfile, type PromptModuleSettings, type ScheduleBlock } from '../types'
-import { createDefaultPromptModules, getPromptTemplate, promptModuleEnabled } from './promptModules'
+import type { ContactGenerationValidationDiagnostics, ContactGenerationValidationIssue, PersonaProfile, PromptModuleSettings, ScheduleBlock } from '../types'
+import { createDefaultPromptModules, getPromptTemplate, normalizePromptModules, promptModuleEnabled } from './promptModules'
 
 const GENERATED_SCHEDULE_LOCATION_IDS = new Set([
   'home-living', 'home-kitchen', 'riverside-apartment-room', 'youth-apartment-room', 'student-dorm-room', 'old-residences-lane', 'villa-district-lane',
@@ -119,46 +119,6 @@ const TRAIT_SPEECH_EXAMPLES: Record<string, string[]> = {
   大小姐: ['“这种事本小姐本来不管的……不过你例外。”'],
 }
 
-/** Short version for group chat — just flags the trait without the full behavioral detail. */
-export function customPersonalityTraitsLine(traits: import('../types').CustomPersonalityTrait[] | undefined, warmth = 0): string {
-  if (!traits?.length) return ''
-  const blocks = traits.map((trait) => {
-    const prompts = trait.rules.filter((r) => warmth >= r.minWarmth && warmth <= r.maxWarmth && r.prompt.trim()).map((r) => r.prompt.trim())
-    return `- ${trait.name}: ${trait.meaning}${prompts.length ? `\n  当前阶段要求: ${prompts.join('；')}` : ''}`
-  })
-  return `\n\n【女娲自定义特质 — 高优先级】\n${blocks.join('\n')}\n这些特质必须共同体现；不要向用户解释规则或数值。`
-}
-
-export function personalityTraitLine(trait: string | undefined, warmth?: number, relationshipBase?: string): string {
-  if (!trait || trait === '无') return ''
-  const prompt = TRAIT_PROMPTS[trait]
-  const personaDescription = TRAIT_PERSONA_DESCRIPTIONS[trait]
-  const examples = TRAIT_SPEECH_EXAMPLES[trait]
-  const establishedRelationship = relationshipBase && /恋人|情侣|夫妻|伴侣|爱人|暧昧|家人|亲属|父|母|兄|姐|弟|妹/.test(relationshipBase)
-  const stage = warmth === undefined ? '' : establishedRelationship && warmth <= 60
-    ? '【当前亲密阶段：关系已确立】保持既有关系应有的熟悉感，并按当前好感强度控制亲密表达；不要写成刚认识或正在建立关系。'
-    : warmth <= 20
-    ? '【当前亲密阶段：保留边界】维持属性底色，但不主动交付私密感或过度亲近。'
-    : warmth <= 60
-      ? '【当前亲密阶段：逐渐熟悉】用该属性特有的方式自然建立熟悉互动。'
-      : '【当前亲密阶段：私密解锁】可以主动亲近并露出只给在意之人的反差，但不违背核心人格或硬设定。'
-  const examplesBlock = examples?.length ? `\n【语气示例 — 只模仿节奏和意图，禁止逐句照抄】\n${examples.map((example) => `- ${example}`).join('\n')}` : ''
-  return prompt ? `\n\n【特色人格底稿 — 你内在的稳定相处基调】\n${personaDescription || prompt}\n\n【性格特质 — 高优先级行为契约】\n${prompt}\n${stage}${examplesBlock}\n执行要求：不要解释“我有这个属性”，要把它落实在本轮的措辞、主动性和情绪反应里。出现该特质的典型触发场景时必须明显体现；普通日常也要保留其底色。强度来自稳定的行为逻辑，不是机械复读同一句口头禅。` : ''
-}
-
-export function formatSpeechSamplesForScene(samples: string[] | undefined, scene: 'private' | 'group' | 'moment', max = 3): string {
-  if (!samples || samples.length === 0) return ''
-  const sceneWords =
-    scene === 'private'
-      ? ['私聊', '亲近', '生气', '敷衍']
-      : scene === 'group'
-        ? ['群聊', '@', '插话']
-        : ['朋友圈', '动态', '评论']
-  const preferred = samples.filter((sample) => sceneWords.some((word) => sample.includes(word)))
-  const picked = (preferred.length > 0 ? preferred : samples).slice(0, max)
-  return picked.map((sample) => `- ${sample}`).join('\n')
-}
-
 export const AVAILABLE_LINK_APPS: { app: string; desc: string }[] = [
   { app: 'shop', desc: '虚拟网购小程序' },
   { app: 'work', desc: '求职与职业小程序' },
@@ -174,7 +134,7 @@ export interface PersonaAnswers {
   personalityTrait: string
   hobbies: string[]
   extra: string
-  /** Concrete shared history with the user; a relationship anchor rather than a generic bio. */
+  /** Optional initial fact that is saved into unified memory after creation. */
   sharedHistory?: string
   /** When true, unspecified identity fields are intentionally delegated to the model. */
   /** Nuwa mode asks the model for an editable first draft before creation. */
@@ -191,21 +151,19 @@ export interface PersonaGenerationResult {
   schedule: ScheduleBlock[]
   avatarKeyword: string
   visualIdentity?: string
-  personalityTrait: string
-  speechSamples?: string[]
-  mbti: string
-  personaProfile?: PersonaProfile
   monthlySalary?: number
   relationship?: string
   gender?: string
   ageRange?: string
   occupation?: string
+  /** Structured during generation, then merged into the sole persona text. */
+  speechExamples?: string[]
   /** Chosen only from the voice candidates injected for this generation. */
   speechVoiceId?: string
   speechStyleInstruction?: string
   /** Nuwa mode lets the model choose this from the completed persona. */
   initialWarmth?: number
-  pastExperiences?: Array<{
+  initialMemories?: Array<{
     title: string
     period: string
     summary: string
@@ -217,7 +175,7 @@ export interface PersonaGenerationResult {
 export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCategory: AvatarCategory, promptModules?: PromptModuleSettings, worldbookText = '', speechVoiceContext?: { provider: string; options: Array<{ id: string; name: string; gender: string; language: string }> }): string {
   const today = new Date()
   const generationDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-  const promptSettings = { promptModules: promptModules ?? createDefaultPromptModules() }
+  const promptSettings = { promptModules: normalizePromptModules(promptModules ?? createDefaultPromptModules()) }
   if (!promptModuleEnabled(promptSettings, 'nuwaMode')) return ''
   const isCohabitingRole = /女仆|佣人|管家|保姆|住家|同居|室友|妹妹|姐姐|弟弟|哥哥|家人|妻子|丈夫|未婚妻|未婚夫/.test([
     answers.relationship, answers.extra, answers.sharedHistory,
@@ -250,8 +208,15 @@ export function buildPersonaGenerationPrompt(answers: PersonaAnswers, avatarCate
 - 兴趣爱好: ${answers.hobbies.length > 0 ? answers.hobbies.join('、') : '未填写'}
 - 补充要求: ${answers.extra || '未填写'}
 - 职业: ${answers.occupation || '未填写'}
-- 与用户的过往/共同经历: ${answers.sharedHistory?.trim() || '未提供'}`
+- 将写入记忆的初始事实: ${answers.sharedHistory?.trim() || '未提供'}`
   const editable = getPromptTemplate(promptSettings, 'nuwaMode', 'persona', { personaAnswers }) ?? ''
+  const styleBaseline = promptSettings.promptModules.chat?.templates?.style?.trim() || ''
+  const characterVoiceBlock = styleBaseline ? `
+
+【聊天感觉基线——低权重】
+${styleBaseline}
+
+这只是所有联系人共用的自然聊天底色，不能覆盖人物差异。请把这个角色独有的句子节奏、常用称呼、关心/生气/害羞/拒绝时的表达反应，以及0到2个自然口癖明确写进高权重 persona；口癖不能句句复读。10条 speechExamples 必须实际体现这些差异，并覆盖不同情境。` : ''
 
   const worldbookBlock = worldbookText.trim() ? `
 
@@ -264,11 +229,11 @@ ${worldbookText.trim()}` : ''
 当前已配置语音服务为 ${speechVoiceContext.provider}。请根据角色的性别、年龄、语言、气质和说话方式，从下面候选中选择最合适的一项；speechVoiceId 必须逐字复制候选 id，不能自造。speechStyleInstruction 用一句简短自然语言描述语速、情绪和声线表演方式。
 ${speechVoiceContext.options.map((option) => `- ${option.id}｜${option.name}｜${option.gender}｜${option.language}`).join('\n')}` : ''
 
-  return `${editable}${worldbookBlock}${speechVoiceBlock}
+  return `${editable}${characterVoiceBlock}${worldbookBlock}${speechVoiceBlock}
 
 当前日期：${generationDate}。birthday、ageRange和persona中写出的年龄必须按该日期互相一致；不要生成一个生日对应另一年龄的角色。
 
-固定输出协议：只输出下列结构的JSON，不要Markdown代码块或解释：
+结构化初稿协议：支持原生工具时，把下列结构作为 submit_contact_draft 的参数提交；接口不支持工具时，才直接输出同结构JSON。不要Markdown代码块或解释：
 {
   "name": "这个人的名字或者网名",
   "gender": "自然的性别描述",
@@ -279,12 +244,10 @@ ${speechVoiceContext.options.map((option) => `- ${option.id}｜${option.name}｜
   "realName": "真实姓名",
   "nickname": "网名/昵称",
   "birthday": "YYYY-MM-DD",
-  "persona": "第三人称描述这个人的性格、说话习惯、大概的背景和生活状态、和用户的关系细节 写成一段自然语言 200到400字之间 要具体真实 不要写成产品说明书",
+  "persona": "唯一且完整的人设正文。第三人称自然写明身份背景、性格、边界、日常习惯、典型行为反应、说话特点、生活状态和与用户的关系细节。300到600字，要具体真实，不要写成产品说明书",
+  "speechExamples": ["[日常闲聊] 实际消息1", "[关心对方] 实际消息2", "[开心分享] 实际消息3", "[生气不满] 实际消息4", "[被人夸奖] 实际消息5", "[发生争执] 实际消息6", "[亲密互动] 实际消息7", "[明确拒绝] 实际消息8", "[低落脆弱] 实际消息9", "[认真讨论] 实际消息10"],
   "visualIdentity": "English only. Stable physical identity: apparent age, face shape, facial features, skin tone, hairstyle, build and distinctive features. Never include clothing, pose, scene, lighting or art style.",
-  "mbti": "这个人的MBTI类型 根据你设计的人设推断最符合的四字母 比如INFP/ESTJ/INTJ等 必须是一个有效的MBTI类型",
-  "speechSamples": ["[日常] 一句符合这个人说话方式的短消息", "[被关心] 一句短消息", "[情绪触发] 一句短消息", "[亲近互动] 一句短消息"],
-  "personaProfile": {"facts":["不可改变的身份/背景事实"],"boundaries":["关系边界或禁忌"],"habits":["稳定习惯/口癖"],"behaviorAnchors":["遇到某类情境会如何自然反应"]},
-  "pastExperiences": [{"title":"经历标题","period":"人生阶段或大致时间","summary":"具体发生过什么以及如何影响现在的性格、生活或关系","relatedContactNames":["只填写本次输入中明确存在的其他联系人姓名"],"importance":85}],
+  "initialMemories": [{"title":"记忆标题","period":"人生阶段或大致时间","summary":"已经发生、值得角色长期记住的具体事实","relatedContactNames":["只填写本次输入中明确存在的其他联系人姓名"],"relatedContactIds":[],"importance":85}],
   ${answers.draftMode ? '"initialWarmth": 35,' : ''}
   "monthlySalary": 8000,
   "schedule": [
@@ -306,35 +269,25 @@ export function diagnosePersonaGeneration(raw: string): { result: PersonaGenerat
       }
       requiredString('name', '姓名')
       requiredString('persona', '完整人设')
+      if (!Array.isArray(parsed.speechExamples)) issues.push({ code: 'required_field_missing', field: 'speechExamples', message: '缺少10条说话示例' })
+      else {
+        const examples = parsed.speechExamples.filter((item): item is string => typeof item === 'string' && !!item.trim())
+        if (examples.length !== 10) issues.push({ code: 'required_field_invalid', field: 'speechExamples', message: `说话示例必须正好10条，实际为${examples.length}条` })
+      }
       if (issues.length) return { result: null, diagnostics: { outputChars: raw.length, jsonState: 'valid', issues } }
       const name = parsed.name as string
       const persona = parsed.persona as string
-      const trait = typeof parsed.personalityTrait === 'string' ? parsed.personalityTrait.trim() : ''
-      const speechSamples = Array.isArray(parsed.speechSamples)
-        ? parsed.speechSamples
-            .filter((sample: unknown): sample is string => typeof sample === 'string' && sample.trim().length > 0)
-            .map((sample: string) => sample.trim().slice(0, 80))
-            .slice(0, 8)
-        : []
-      const mbtiRaw = typeof parsed.mbti === 'string' ? parsed.mbti.trim().toUpperCase() : ''
-      const profileRaw = parsed.personaProfile && typeof parsed.personaProfile === 'object' ? parsed.personaProfile as Record<string, unknown> : undefined
-      const profileList = (key: string) => Array.isArray(profileRaw?.[key])
-        ? profileRaw![key].filter((v): v is string => typeof v === 'string' && v.trim().length > 0).map((v) => v.trim().slice(0, 120)).slice(0, 6)
-        : []
-      const personaProfile: PersonaProfile | undefined = profileRaw ? { facts: profileList('facts'), boundaries: profileList('boundaries'), habits: profileList('habits'), behaviorAnchors: profileList('behaviorAnchors') } : undefined
-      const pastExperiences = Array.isArray(parsed.pastExperiences)
-        ? parsed.pastExperiences.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item) && typeof (item as Record<string, unknown>).summary === 'string')
+      const initialMemories = Array.isArray(parsed.initialMemories)
+        ? parsed.initialMemories.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item) && typeof (item as Record<string, unknown>).summary === 'string')
             .slice(0, 10)
             .map((item) => ({
-              title: typeof item.title === 'string' ? item.title.trim().slice(0, 80) : '过去的经历',
+              title: typeof item.title === 'string' ? item.title.trim().slice(0, 80) : '既有记忆',
               period: typeof item.period === 'string' ? item.period.trim().slice(0, 80) : '',
               summary: String(item.summary).trim().slice(0, 800),
               relatedContactNames: Array.isArray(item.relatedContactNames) ? item.relatedContactNames.filter((name): name is string => typeof name === 'string').map((name) => name.trim()).filter(Boolean).slice(0, 8) : [],
               importance: Math.max(0, Math.min(100, Math.round(Number(item.importance) || 70))),
             }))
         : []
-      // Validate: must be exactly 4 letters from the MBTI dimensions.
-      const mbti = /^[IE][SN][TF][JP]$/.test(mbtiRaw) ? mbtiRaw : ''
       return { result: {
         avatarKeyword: typeof parsed.avatarKeyword === 'string' ? parsed.avatarKeyword.trim() : '',
         visualIdentity: typeof parsed.visualIdentity === 'string' ? parsed.visualIdentity.trim().slice(0, 800) : undefined,
@@ -346,6 +299,9 @@ export function diagnosePersonaGeneration(raw: string): { result: PersonaGenerat
         ageRange: typeof parsed.ageRange === 'string' ? parsed.ageRange.trim().slice(0, 30) : undefined,
         relationship: typeof parsed.relationship === 'string' ? parsed.relationship.trim().slice(0, 40) : undefined,
         occupation: typeof parsed.occupation === 'string' ? parsed.occupation.trim().slice(0, 60) : undefined,
+        speechExamples: Array.isArray(parsed.speechExamples)
+          ? parsed.speechExamples.filter((item): item is string => typeof item === 'string').map((item) => item.trim().slice(0, 160)).filter(Boolean).slice(0, 10)
+          : undefined,
         speechVoiceId: typeof parsed.speechVoiceId === 'string' ? parsed.speechVoiceId.trim().slice(0, 160) : undefined,
         speechStyleInstruction: typeof parsed.speechStyleInstruction === 'string' ? parsed.speechStyleInstruction.trim().slice(0, 240) : undefined,
         persona: persona.trim(),
@@ -353,13 +309,9 @@ export function diagnosePersonaGeneration(raw: string): { result: PersonaGenerat
         // block without a real map anchor instead of letting free text drive
         // the location runtime later.
         schedule: validateScheduleBlocks(parsed.schedule).filter((block) => !!block.locationId && GENERATED_SCHEDULE_LOCATION_IDS.has(block.locationId)),
-        personalityTrait: PERSONALITY_TRAIT_OPTIONS.some((opt) => opt.value === trait) ? trait : '无',
-        speechSamples,
-        mbti,
-        personaProfile,
         monthlySalary: typeof parsed.monthlySalary === 'number' && Number.isFinite(parsed.monthlySalary) ? Math.max(1000, Math.min(200000, Math.round(parsed.monthlySalary))) : undefined,
         initialWarmth: typeof parsed.initialWarmth === 'number' && Number.isFinite(parsed.initialWarmth) ? Math.max(-100, Math.min(100, Math.round(parsed.initialWarmth))) : undefined,
-        pastExperiences,
+        initialMemories,
       }, diagnostics: { outputChars: raw.length, jsonState: 'valid', issues: [] } }
   }
   const text = typeof raw === 'string' ? raw.trim() : ''
@@ -408,7 +360,7 @@ export const AGE_RANGE_OPTIONS = ['18-22', '23-27', '28-35', '35+']
 export const GENDER_OPTIONS = ['不限', '男', '女']
 export const RELATIONSHIP_OPTIONS = ['朋友', '暧昧对象', '恋人', '损友', '前辈/同事', '家人']
 
-// ---- two-step generation: raw text → JSON conversion ----
+// ---- canonical chat system prompt ----
 
 export interface RawChatPromptParts {
   logic: string
@@ -419,11 +371,41 @@ export interface RawChatPromptParts {
 export function formatPersonaProfile(profile: PersonaProfile | undefined): string {
   if (!profile) return ''
   return [
-    profile.facts?.length ? `身份事实: ${profile.facts.join('；')}` : '',
+    profile.facts?.length ? `人物事实: ${profile.facts.join('；')}` : '',
     profile.boundaries?.length ? `关系边界/禁忌: ${profile.boundaries.join('；')}` : '',
-    profile.habits?.length ? `固定习惯: ${profile.habits.join('；')}` : '',
-    profile.behaviorAnchors?.length ? `行为锚点: ${profile.behaviorAnchors.join('；')}` : '',
+    profile.habits?.length ? `日常习惯: ${profile.habits.join('；')}` : '',
+    profile.behaviorAnchors?.length ? `典型反应: ${profile.behaviorAnchors.join('；')}` : '',
   ].filter(Boolean).join('\n')
+}
+
+/** Builds the single canonical persona text used at runtime. Legacy persona
+ * fragments are folded into this text once instead of being injected as
+ * parallel prompt modules on every turn. */
+export function composeCanonicalPersona(opts: {
+  persona: string
+  supplemental?: string
+  profile?: PersonaProfile
+  traitName?: string
+  traitContent?: string
+  customTraits?: import('../types').CustomPersonalityTrait[]
+  speechSamples?: string[]
+}): string {
+  const profile = formatPersonaProfile(opts.profile)
+  const customTraits = (opts.customTraits ?? []).map((trait) => {
+    const rules = trait.rules.map((rule) => rule.prompt.trim()).filter(Boolean)
+    return `${trait.name}：${trait.meaning}${rules.length ? `；行为要求：${rules.join('；')}` : ''}`
+  })
+  const trait = opts.traitName && opts.traitName !== '无'
+    ? `${opts.traitName}：${opts.traitContent?.trim() || TRAIT_PERSONA_DESCRIPTIONS[opts.traitName] || TRAIT_PROMPTS[opts.traitName] || '作为稳定性格底色自然体现在判断、措辞和行动中。'}${TRAIT_SPEECH_EXAMPLES[opts.traitName]?.length ? `\n语气参考：${TRAIT_SPEECH_EXAMPLES[opts.traitName].join('；')}` : ''}`
+    : ''
+  const sections = [
+    opts.persona.trim(),
+    opts.supplemental?.trim() ? `补充设定：${opts.supplemental.trim()}` : '',
+    profile ? `人物事实与行为：\n${profile}` : '',
+    trait || customTraits.length ? `性格表现：\n${[trait, ...customTraits].filter(Boolean).join('\n')}` : '',
+    opts.speechSamples?.length ? `说话方式参考：\n${opts.speechSamples.map((sample) => `- ${sample}`).join('\n')}` : '',
+  ].filter(Boolean)
+  return Array.from(new Set(sections)).join('\n\n')
 }
 
 /**
@@ -449,31 +431,23 @@ export function personaNarrativeForPrompt(persona: string, personaConstraints?: 
 }
 
 /**
- * Step 1: Prompt the main model to generate natural chat text.
- * No JSON — just natural chat text. Structured callers collect thoughts and
- * textual moods through native tool arguments.
+ * Builds the system prompt sent alongside native chat tools. Structured
+ * callers collect visible messages, thoughts and textual moods from tool
+ * arguments rather than from a second conversion prompt.
  */
 export function buildRawChatPrompt(opts: {
   name: string
   persona: string
   stylePrompt: string
   relationshipBase?: string
-  personalityTrait?: string
-  personalityWarmth?: number
   worldviewText?: string
   recentContext: string
   latestUserText?: string
-  activeIntentText?: string
   stickerNames: string[]
   remoteStickerSearchEnabled?: boolean
   imageGenerationEnabled?: boolean
   imageSearchEnabled?: boolean
-  mbti?: string
   recentMemoriesText?: string
-  speechSamplesText?: string
-  personaConstraints?: string
-  personaProfile?: PersonaProfile
-  sharedHistory?: string
   promptModules?: PromptModuleSettings
   relationshipContext?: string
   memoryContext?: string
@@ -487,22 +461,14 @@ export function buildRawChatPromptParts(opts: {
   persona: string
   stylePrompt: string
   relationshipBase?: string
-  personalityTrait?: string
-  personalityWarmth?: number
   worldviewText?: string
   recentContext: string
   latestUserText?: string
-  activeIntentText?: string
   stickerNames: string[]
   remoteStickerSearchEnabled?: boolean
   imageGenerationEnabled?: boolean
   imageSearchEnabled?: boolean
-  mbti?: string
   recentMemoriesText?: string
-  speechSamplesText?: string
-  personaConstraints?: string
-  personaProfile?: PersonaProfile
-  sharedHistory?: string
   promptModules?: PromptModuleSettings
   relationshipContext?: string
   memoryContext?: string
@@ -514,36 +480,23 @@ export function buildRawChatPromptParts(opts: {
   if (!promptModuleEnabled(promptSettings, 'chat')) return { logic: '', feeling: '', full: '' }
   const render = (moduleId: Parameters<typeof getPromptTemplate>[1], templateId: string, variables: Record<string, unknown> = {}) =>
     getPromptTemplate(promptSettings, moduleId, templateId, variables) ?? ''
-  const traitLine = personalityTraitLine(opts.personalityTrait, opts.personalityWarmth, opts.relationshipBase)
-  const hardPersona = [
-    opts.personaConstraints?.trim() ? `用户补充说明（原文，不可遗忘或违背）: ${opts.personaConstraints.trim()}` : '',
-    formatPersonaProfile(opts.personaProfile),
-  ].filter(Boolean).join('\n')
-  const sharedHistoryLine = opts.sharedHistory?.trim()
-    ? `【与用户的共同过往】\n${opts.sharedHistory.trim().slice(0, 1800)}`
-    : '【与用户的共同过往】\n暂无具体共同经历。'
-  const mbtiLine = opts.mbti ? ` MBTI: ${opts.mbti}（你的性格底层框架 一切反应和决定都要符合这个类型）` : ''
   const identityBlock = render('chat', 'identity', {
     name: opts.name,
-    persona: personaNarrativeForPrompt(opts.persona, opts.personaConstraints) || '（自由发挥，扮演一个普通朋友）',
-    hardPersona: hardPersona ? `【人设硬约束】\n${hardPersona}` : '',
+    persona: opts.persona.trim() || '（自由发挥，扮演一个普通朋友）',
   })
   const worldbookBlock = opts.worldviewText ? render('worldview', 'privateRuntime', { worldbookEntries: opts.worldviewText }) : ''
   const relationshipBlock = render('relationship', 'chat', { relationshipContext: opts.relationshipContext ?? '' })
-  const personalityContext = [mbtiLine.trim(), traitLine, opts.speechSamplesText ? `【说话样例】\n${opts.speechSamplesText}` : ''].filter(Boolean).join('\n')
-  const personalityBlock = personalityContext ? render('personalityTraits', 'chat', { personalityContext }) : ''
   const memoryBlock = render('memory', 'chat', {
     memoryContext: opts.memoryContext ?? '',
-    sharedHistory: sharedHistoryLine,
     recentMemories: opts.recentMemoriesText ? `【最近的记忆碎片】\n${opts.recentMemoriesText}` : '',
   })
-  const situationSource = opts.situationContext ?? opts.recentContext
+  const situationSource = (opts.situationContext ?? opts.recentContext)
+    .replace(/^\s*【当前情境】\s*/, '')
   const contextBlock = render('chat', 'context', { situationContext: situationSource, latestUserText: opts.latestUserText || '（后台事件）' })
-  const intentBlock = opts.activeIntentText ? render('intent', 'chat', { intentContext: opts.activeIntentText }) : ''
   // One canonical ordering for every private turn.  Do not move memory or
   // worldbook text ahead of identity/current-turn evidence: it makes old
   // recollections outweigh what the user just said.
-  const logicModules = [identityBlock, relationshipBlock, personalityBlock, contextBlock, intentBlock, memoryBlock, worldbookBlock].filter(Boolean).join('\n\n')
+  const logicModules = [identityBlock, relationshipBlock, contextBlock, memoryBlock, worldbookBlock].filter(Boolean).join('\n\n')
   const logic = render('chat', 'logicWrapper', { logicModules })
   const styleBlock = render('chat', 'style')
   const feelingModules = [styleBlock].filter(Boolean).join('\n\n')
@@ -555,13 +508,13 @@ export function buildRawChatPromptParts(opts: {
   - 用自然的句子和段落完成回复，不要为了格式刻意逐行拆句
   - 每条消息都必须有自己独立、符合人设的想法；不同消息的想法不能机械重复
   - 心情使用简短中文文字（如开心、担心、期待、平静），不要使用 emoji
-  - 只输出自然聊天正文，不要输出任何协议、JSON、工具名或分析`
+  - 所有用户可见的消息正文都必须是自然聊天内容，不要把协议、JSON、工具名或分析写进消息正文`
 
   return {
     logic,
     feeling,
     full: `${logic}\n\n${feeling}
-【发送前最终检查】只输出自然聊天正文；不要输出检查过程、解释或JSON。`,
+【发送前最终检查】通过本轮指定的原生工具提交；用户可见正文只写自然聊天内容，不输出检查过程、解释或协议。`,
   }
 }
 

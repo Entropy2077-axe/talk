@@ -6,30 +6,25 @@ import { isAiTestId } from '../lib/aiTestIsolation'
 import { TopBar } from '../components/TopBar'
 import { Avatar } from '../components/Avatar'
 import { displayName } from '../lib/contact'
-import { activeIntents } from '../lib/intent'
 import { buildUserProfileText } from '../lib/chatEngine'
-import { buildGroupJsonConversionPrompt, buildGroupRawChatPrompt, buildLocationRawChatPrompt } from '../lib/groupChat'
+import { buildGroupRawChatPrompt, buildLocationRawChatPrompt } from '../lib/groupChat'
+import { groupChatTools, privateChatTools } from '../lib/chatAgentTools'
 import { describeCurrentTime } from '../lib/time'
 import { isModuleEnabled } from '../features'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { setGroupPlanStatus } from '../lib/groupPlans'
 import type { Contact, Group, GroupEnergyLevel, GroupPlan, GroupSpeakerLimit } from '../types'
 import { realSeason, resolveLocationParticipants, syncContactLocationsAt } from '../lib/locations'
+import { isImageProviderReady, isStickerProviderReady } from '../lib/mediaProviders'
+import { featureActive } from '../lib/promptModules'
 
 const EMPTY_CONTACTS: Contact[] = []
 const SPEAKER_LIMIT_OPTIONS: GroupSpeakerLimit[] = [2, 3, 4, 5, 'all']
 const ENERGY_OPTIONS: { value: GroupEnergyLevel; label: string; description: string }[] = [
-  { value: 'cold', label: '冷淡', description: '每个发言人回一句话' },
-  { value: 'normal', label: '普通', description: '每个发言人回2~3句话' },
-  { value: 'lively', label: '热闹', description: '每个发言人回4句话以上' },
+  { value: 'cold', label: '简短', description: '整轮约1~3条消息' },
+  { value: 'normal', label: '标准', description: '整轮约2~7条消息' },
+  { value: 'lively', label: '活跃', description: '整轮约3~12条消息' },
 ]
-
-function latestUsedIntents(contact: Contact) {
-  return (contact.intentQueue ?? [])
-    .filter((intent) => intent.status === 'used')
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, 3)
-}
 
 function LatestGroupAiTurnJson({ groupId }: { groupId: string }) {
   const latestTurn = useLiveQuery(async () => {
@@ -45,63 +40,6 @@ function LatestGroupAiTurnJson({ groupId }: { groupId: string }) {
     <pre className="whitespace-pre-wrap break-words rounded-lg bg-gray-50 p-2.5 font-mono text-[10px] leading-relaxed text-gray-600">
       {latestTurn.raw}
     </pre>
-  )
-}
-
-function AdminIntentList({ members }: { members: Contact[] }) {
-  if (members.length === 0) return <p className="text-sm text-gray-400">暂无成员</p>
-
-  return (
-    <div className="space-y-3">
-      {members.map((member) => {
-        const active = activeIntents(member, Date.now(), 10)
-        const used = latestUsedIntents(member)
-        return (
-          <div key={member.id} className="rounded-lg bg-gray-50 px-3 py-2.5">
-            <div className="mb-2 flex items-center gap-2">
-              <Avatar avatar={member.avatar} color={member.avatarColor} size={28} />
-              <p className="ui-font-display text-sm font-medium text-gray-800">{displayName(member)}</p>
-            </div>
-            <div className="space-y-2 text-xs text-gray-600">
-              <div>
-                <p className="mb-1 text-[11px] text-gray-400">Active</p>
-                {active.length === 0 ? (
-                  <p className="text-gray-400">暂无</p>
-                ) : (
-                  <ul className="space-y-1">
-                    {active.map((intent) => (
-                      <li key={intent.id} className="rounded-md bg-white px-2 py-1.5">
-                        <p>{intent.text}</p>
-                        <p className="mt-0.5 text-[10px] text-gray-400">
-                          {intent.kind} / {intent.confidence} / {new Date(intent.createdAt).toLocaleString()}
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              <div>
-                <p className="mb-1 text-[11px] text-gray-400">Used 最近3条</p>
-                {used.length === 0 ? (
-                  <p className="text-gray-400">暂无</p>
-                ) : (
-                  <ul className="space-y-1">
-                    {used.map((intent) => (
-                      <li key={intent.id} className="rounded-md bg-white px-2 py-1.5">
-                        <p>{intent.text}</p>
-                        <p className="mt-0.5 text-[10px] text-gray-400">
-                          {intent.kind} / {intent.confidence} / {new Date(intent.createdAt).toLocaleString()}
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          </div>
-        )
-      })}
-    </div>
   )
 }
 
@@ -133,6 +71,7 @@ export function GroupInfoPage() {
   const allContacts = (useLiveQuery(() => db.contacts.toArray(), []) ?? EMPTY_CONTACTS).filter((item) => !isAiTestId(item.id))
   const membersRaw = useLiveQuery(() => (group ? db.contacts.bulkGet(group.memberContactIds) : []), [group])
   const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? []
+  const allLocations = useLiveQuery(() => db.locations.toArray(), []) ?? []
   const groupWorldview = useLiveQuery(() => settings.activeWorldId ? db.worldbookCollections.get(settings.activeWorldId) : undefined, [settings.activeWorldId])
   const members = useMemo(() => locationParticipants?.activeMembers ?? (membersRaw ?? []).filter((c): c is Contact => !!c), [locationParticipants, membersRaw])
 
@@ -157,9 +96,6 @@ export function GroupInfoPage() {
           speakers: promptPreviewSpeakers,
           stickerNames: stickers.map((s) => s.name),
           groupMemoryText: group.memory,
-          groupVibeText: group.vibe,
-          allowAiChatter: group.allowAiChatter ?? true,
-          energyLevel: group.energyLevel ?? 'normal',
           currentTimeText: describeCurrentTime(new Date()),
           userProfileText: buildUserProfileText(settings),
           targetedContextText: '【预览】这里会放入用户本轮@、回复对象等定向上下文。',
@@ -176,11 +112,20 @@ export function GroupInfoPage() {
             : undefined,
         })
       : ''
-
-  const conversionPreview =
-    adminEnabled && promptPreviewSpeakers.length > 0
-      ? buildGroupJsonConversionPrompt('【主模型群聊纯文本草稿会放在这里】', promptPreviewSpeakers, stickers.map((s) => s.name))
-      : ''
+  const groupToolPreview = adminEnabled && promptPreviewSpeakers.length > 0
+    ? groupChatTools(
+        promptPreviewSpeakers.map((speaker) => displayName(speaker)),
+        members.map((member) => displayName(member)),
+        privateChatTools({
+          stickerNames: stickers.map((sticker) => sticker.name),
+          stickerSearchEnabled: isStickerProviderReady(settings),
+          imageEnabled: isImageProviderReady(settings) || !!settings.pexelsApiKey,
+          knowledgeEnabled: featureActive(settings, 'knowledgeBase'),
+          scheduleEnabled: isModuleEnabled('location'),
+          locationIds: allLocations.filter((location) => !allLocations.some((candidate) => candidate.parentId === location.id)).map((location) => location.id),
+        }),
+      )
+    : []
 
   function toggleAdd(id: string) {
     setSelectedToAdd((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
@@ -259,7 +204,7 @@ export function GroupInfoPage() {
           <div className="mt-4 grid grid-cols-3 gap-2 text-center">
             <div className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] px-2 py-2.5"><p className="text-[10px] text-[var(--ui-text-3)]">成员</p><p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{members.length} 人</p></div>
             <div className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] px-2 py-2.5"><p className="text-[10px] text-[var(--ui-text-3)]">共同计划</p><p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{groupPlans.length} 项</p></div>
-            <div className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] px-2 py-2.5"><p className="text-[10px] text-[var(--ui-text-3)]">群聊近况</p><p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{group.memory || group.vibe ? '已沉淀' : '待形成'}</p></div>
+            <div className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] px-2 py-2.5"><p className="text-[10px] text-[var(--ui-text-3)]">群聊近况</p><p className="mt-1 text-sm font-semibold text-[var(--ui-text)]">{group.memory ? '已沉淀' : '待形成'}</p></div>
           </div>
         </section>
 
@@ -286,7 +231,6 @@ export function GroupInfoPage() {
           <p className="mt-1 text-[11px] text-[var(--ui-text-3)]">由群聊总结逐渐沉淀，帮助成员保持共同语境。</p>
           <div className="mt-3 space-y-2">
             <div className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] px-3 py-3"><p className="text-[11px] text-[var(--ui-text-3)]">共同记忆</p><p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-[var(--ui-text-2)]">{group.memory || '还没有形成稳定的群聊记忆。'}</p></div>
-            <div className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] px-3 py-3"><p className="text-[11px] text-[var(--ui-text-3)]">相处氛围</p><p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-[var(--ui-text-2)]">{group.vibe || '还没有形成明确的群聊氛围。'}</p></div>
           </div>
         </section>
 
@@ -298,7 +242,7 @@ export function GroupInfoPage() {
 
         <details className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 shadow-[var(--ui-shadow)]">
           <summary className="flex cursor-pointer list-none items-center justify-between py-4">
-            <span><span className="ui-font-display block text-sm font-semibold text-[var(--ui-text)]">群聊互动设置</span><span className="mt-1 block text-[11px] text-[var(--ui-text-3)]">发言人数、互动方式、热闹程度与朋友圈引用</span></span>
+            <span><span className="ui-font-display block text-sm font-semibold text-[var(--ui-text)]">群聊互动设置</span><span className="mt-1 block text-[11px] text-[var(--ui-text-3)]">发言人数、每轮消息量与朋友圈引用；成员始终可以自然互相接话</span></span>
             <span className="text-[var(--ui-text-3)]">⌄</span>
           </summary>
           <div className="border-t border-[var(--ui-border-soft)] pb-4 pt-4">
@@ -319,30 +263,7 @@ export function GroupInfoPage() {
               )
             })}
           </div>
-          <h3 className="mb-2 mt-5 text-xs font-medium text-[var(--ui-text-3)]">AI 是否可以互相聊起来</h3>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { label: '可以', value: true, description: '允许接话、吐槽、短暂发展群内互动' },
-              { label: '不可以', value: false, description: '只围绕用户和用户相关话题回应' },
-            ].map((option) => {
-              const checked = (group.allowAiChatter ?? true) === option.value
-              return (
-                <button
-                  key={option.label}
-                  onClick={() => void updateGroup({ allowAiChatter: option.value })}
-                  className={`rounded-lg border px-3 py-2 text-left ${
-                    checked ? 'border-[var(--ui-action)] bg-[var(--ui-action)] text-[var(--ui-on-action)]' : 'border-[var(--ui-border)] bg-[var(--ui-surface)] text-[var(--ui-text-2)]'
-                  }`}
-                >
-                  <span className="block text-sm font-medium">{option.label}</span>
-                  <span className={`mt-0.5 block text-[11px] ${checked ? 'text-gray-200' : 'text-gray-400'}`}>
-                    {option.description}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-          <h3 className="mb-2 mt-5 text-xs font-medium text-[var(--ui-text-3)]">群聊热闹程度</h3>
+          <h3 className="mb-2 mt-5 text-xs font-medium text-[var(--ui-text-3)]">每轮消息量</h3>
           <div className="grid grid-cols-3 gap-2">
             {ENERGY_OPTIONS.map((option) => {
               const checked = (group.energyLevel ?? 'normal') === option.value
@@ -445,11 +366,6 @@ export function GroupInfoPage() {
         {adminEnabled && (
           <>
             <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
-              <h3 className="mb-2 text-xs font-medium text-gray-400">各个AI的内部意图</h3>
-              <AdminIntentList members={members} />
-            </section>
-
-            <section className="mx-3 mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
               <h3 className="mb-2 text-xs font-medium text-gray-400">最新群聊原始JSON</h3>
               <LatestGroupAiTurnJson groupId={group.id} />
             </section>
@@ -461,7 +377,7 @@ export function GroupInfoPage() {
                   <div className="rounded-lg border-2 border-gray-800">
                     <div className="border-b border-gray-200 bg-gray-100 px-3 py-1.5">
                       <span className="text-xs font-bold text-gray-800">发给主模型（{settings.model}）</span>
-                      <span className="ml-2 text-[10px] text-gray-400">群聊纯文本草稿</span>
+                      <span className="ml-2 text-[10px] text-gray-400">系统提示词；回复通过下方原生工具提交</span>
                     </div>
                     <pre className="whitespace-pre-wrap break-words p-3 font-mono text-[11px] leading-relaxed text-gray-700">
                       {promptPreview}
@@ -470,13 +386,14 @@ export function GroupInfoPage() {
 
                   <div className="rounded-lg border-2 border-gray-800">
                     <div className="border-b border-gray-200 bg-gray-100 px-3 py-1.5">
-                      <span className="text-xs font-bold text-gray-800">发给多功能模型（{settings.utilityModel}）</span>
-                      <span className="ml-2 text-[10px] text-gray-400">纯文本 → 群聊JSON</span>
+                      <span className="text-xs font-bold text-gray-800">原生工具协议（同一次模型请求）</span>
+                      <span className="ml-2 text-[10px] text-gray-400">热闹程度由执行层校验整轮消息数量</span>
                     </div>
-                    <pre className="whitespace-pre-wrap break-words p-3 font-mono text-[11px] leading-relaxed text-gray-700">
-                      {conversionPreview}
+                    <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap break-words p-3 font-mono text-[11px] leading-relaxed text-gray-700">
+                      {JSON.stringify(groupToolPreview, null, 2)}
                     </pre>
                   </div>
+
                 </div>
               ) : (
                 <p className="text-sm text-gray-400">暂无可预览的成员</p>

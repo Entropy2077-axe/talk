@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { chatCompletion, separateSupplierThinking, traceableCompletionOutput } from './deepseek'
+import { chatCompletion, chatCompletionProgress, separateSupplierThinking, traceableCompletionOutput } from './deepseek'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -76,6 +76,27 @@ describe('structured chat completion result', () => {
     expect(result.status).toBe('ok')
     expect(result.toolCalls?.[0]).toMatchObject({ id: 'call-1', function: { name: 'send_text' } })
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('streams incremental native tool arguments for live generation previews', async () => {
+    const sse = [
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"submit_contact_draft","arguments":"{\\"name\\":\\"林"}}]}}]}',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"澄\\"}"}}]},"finish_reason":"tool_calls"}]}',
+      'data: [DONE]',
+      '',
+    ].join('\n')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } })))
+    const snapshots: string[] = []
+
+    const result = await chatCompletionProgress({
+      ...base,
+      tools: [{ type: 'function', function: { name: 'submit_contact_draft', description: 'submit', parameters: { type: 'object' } } }],
+      toolChoice: 'required',
+      onProgress: (snapshot) => { snapshots.push(snapshot.toolCalls[0]?.function.arguments ?? '') },
+    })
+
+    expect(result.toolCalls?.[0].function.arguments).toBe('{"name":"林澄"}')
+    expect(snapshots).toEqual(expect.arrayContaining(['{"name":"林', '{"name":"林澄"}']))
   })
 
   it('formats tool-only replies for the AI trace instead of treating them as empty output', () => {

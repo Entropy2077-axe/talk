@@ -25,7 +25,7 @@ function atlasStylePrompt(settings: AppSettings): string {
 }
 
 function fallbackContactIdentity(contact: Contact): string {
-  const facts = contact.personaProfile?.facts.slice(0, 3).join(', ') || contact.systemPrompt.slice(0, 240)
+  const facts = contact.systemPrompt.slice(0, 240)
   return `${contact.name}, ${contact.gender || 'adult person'}, stable recognizable facial features and hairstyle, ${facts}`
 }
 

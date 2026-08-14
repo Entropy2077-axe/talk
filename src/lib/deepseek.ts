@@ -423,6 +423,110 @@ export async function chatCompletionText(opts: ChatCompletionOptions): Promise<s
   throw new Error(completionStatusMessage(result))
 }
 
+export interface ChatCompletionProgressSnapshot {
+  content: string
+  toolCalls: ChatToolCall[]
+}
+
+/**
+ * Streams both visible content and native function-call arguments. The older
+ * text-only stream ignored `delta.tool_calls`, which made tool-based persona
+ * generation look frozen even though the model was actively producing JSON
+ * arguments.
+ */
+export async function chatCompletionProgress(
+  opts: ChatCompletionOptions & { onProgress: (snapshot: ChatCompletionProgressSnapshot) => void | Promise<void> },
+): Promise<ChatCompletionResult> {
+  const { onProgress, ...completionOptions } = opts
+  const purpose = opts.purpose ?? 'other'
+  const automatic = opts.automatic ?? false
+  const provider = opts.provider ?? useSettingsStore.getState().aiProvider ?? 'deepseek'
+  if (automatic) await assertAutomaticAiBudget()
+  const inputTokens = opts.messages.reduce((sum, message) => sum + estimateTokens(message.content), 0)
+  const startedAt = Date.now()
+  const key = requireApiKey(opts.apiKey, 'AI')
+  requireHttpUrl(opts.baseUrl || AI_PROVIDERS[provider].defaultBaseUrl, 'Base URL')
+
+  const res = await appFetch(resolveChatCompletionsUrl(opts.baseUrl, provider), {
+    method: 'POST', signal: opts.signal,
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...requestBody(opts, opts.messages, provider), stream: true, stream_options: { include_usage: true } }),
+  })
+  if (!res.ok || !res.body || !/text\/event-stream/i.test(res.headers.get('content-type') ?? '')) {
+    // Some compatible suppliers reject streaming tool calls or silently return
+    // an ordinary JSON response. Preserve compatibility and still publish the
+    // final snapshot so the generation page shows useful progress.
+    if (res.ok && res.body) {
+      const json = parseJsonText(await res.text(), 'AI 接口') as Record<string, any>
+      const result = extractCompletion(json, provider)
+      await onProgress({ content: result.content, toolCalls: result.toolCalls ?? [] })
+      const outputTokens = result.usage?.completionTokens ?? estimateTokens(result.content)
+      await recordAiUsage({ purpose, model: opts.model, automatic, success: result.status === 'ok', inputTokens: result.usage?.promptTokens ?? inputTokens, outputTokens, estimated: result.usage?.completionTokens === undefined })
+      await traceAiCall({ purpose, model: opts.model, messages: opts.messages, output: traceableCompletionOutput(result.content, result.toolCalls), inputTokens: result.usage?.promptTokens ?? inputTokens, outputTokens, durationMs: Date.now() - startedAt, diagnostics: { provider, status: result.status, nonStreamingFallback: true }, ...opts.trace })
+      return result
+    }
+    const fallback = await chatCompletion(completionOptions)
+    await onProgress({ content: fallback.content, toolCalls: fallback.toolCalls ?? [] })
+    return fallback
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  const calls = new Map<number, ChatToolCall>()
+  let buffer = ''
+  let content = ''
+  let finishReason: string | undefined
+  let usage: ChatCompletionResult['usage']
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue
+      const data = line.slice(5).trim()
+      if (!data || data === '[DONE]') continue
+      try {
+        const chunk = JSON.parse(data) as Record<string, any>
+        const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : undefined
+        const delta = choice?.delta
+        const textDelta = stringAt(delta?.content)
+        if (textDelta) content += textDelta
+        for (const part of Array.isArray(delta?.tool_calls) ? delta.tool_calls : []) {
+          const index = Number.isInteger(part?.index) ? Number(part.index) : calls.size
+          const current = calls.get(index) ?? { id: '', type: 'function' as const, function: { name: '', arguments: '' } }
+          if (typeof part?.id === 'string' && part.id) current.id ||= part.id
+          if (typeof part?.function?.name === 'string') current.function.name += part.function.name
+          if (typeof part?.function?.arguments === 'string') current.function.arguments += part.function.arguments
+          calls.set(index, current)
+        }
+        if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason
+        if (chunk.usage && typeof chunk.usage === 'object') usage = {
+          promptTokens: Number.isFinite(Number(chunk.usage.prompt_tokens)) ? Number(chunk.usage.prompt_tokens) : undefined,
+          completionTokens: Number.isFinite(Number(chunk.usage.completion_tokens)) ? Number(chunk.usage.completion_tokens) : undefined,
+          reasoningTokens: Number.isFinite(Number(chunk.usage.completion_tokens_details?.reasoning_tokens)) ? Number(chunk.usage.completion_tokens_details.reasoning_tokens) : undefined,
+          totalTokens: Number.isFinite(Number(chunk.usage.total_tokens)) ? Number(chunk.usage.total_tokens) : undefined,
+        }
+        await onProgress({ content, toolCalls: Array.from(calls.entries()).sort(([a], [b]) => a - b).map(([, call], index) => ({ ...call, id: call.id || `stream-tool-${index}` })) })
+      } catch {}
+    }
+  }
+  const toolCalls = Array.from(calls.entries()).sort(([a], [b]) => a - b).map(([, call], index) => ({ ...call, id: call.id || `stream-tool-${index}` }))
+  const normalizedFinish = finishReason?.toLowerCase() ?? ''
+  const status: ChatCompletionStatus = ['content_filter', 'safety', 'blocked'].includes(normalizedFinish)
+    ? 'blocked'
+    : ['length', 'max_tokens', 'max_completion_tokens'].includes(normalizedFinish)
+      ? 'length'
+      : content.trim() || toolCalls.length ? 'ok' : 'empty'
+  const result: ChatCompletionResult = { status, content: content.trim(), finishReason, usage, provider, rawShapeSummary: { streamed: true }, toolCalls }
+  const recordedInput = usage?.promptTokens ?? inputTokens
+  const recordedOutput = usage?.completionTokens ?? estimateTokens(content || toolCalls.map((call) => call.function.arguments).join(''))
+  await recordAiUsage({ purpose, model: opts.model, automatic, success: status === 'ok', inputTokens: recordedInput, outputTokens: recordedOutput, estimated: usage?.completionTokens === undefined })
+  await traceAiCall({ purpose, model: opts.model, messages: opts.messages, output: traceableCompletionOutput(result.content, toolCalls), inputTokens: recordedInput, outputTokens: recordedOutput, durationMs: Date.now() - startedAt, diagnostics: { provider, status, finishReason, streamed: true }, ...opts.trace })
+  return result
+}
+
 export async function chatCompletionStream(opts: ChatCompletionOptions & { onDelta: (text: string) => void }): Promise<string> {
   const purpose = opts.purpose ?? 'other'
   const messages = opts.messages

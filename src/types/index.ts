@@ -49,7 +49,6 @@ export interface Contact {
   pendingEvents?: string[] // short notes about notable things to naturally mention next chat (e.g. "对方刚给你的朋友圈点了赞"), cleared once used
   // ---- upcoming plans/appointments (extracted during memory updates, see memory.ts) ----
   upcomingPlans?: PlanItem[]
-  intentQueue?: IntentItem[]
   // ---- autonomous behavior (see lib/proactiveChat.ts) ----
   lastProactiveMessageAt?: number // last time this contact proactively opened a chat, used for the per-contact cooldown
   // ---- schedule (see lib/schedule.ts) ----
@@ -57,8 +56,8 @@ export interface Contact {
   /** Global creation-time routine; per-world edits live in `schedule`. */
   initialSchedule?: ScheduleBlock[]
   scheduleOverrides?: ScheduleOverride[] // one-off special tasks negotiated in chat; each overlapping default task is cancelled as a whole for that occurrence
-  // ---- MBTI (assigned by the persona-generation AI, not user-picked) ----
-  mbti?: string // e.g. "INFP" — a stable personality anchor injected into every chat prompt
+  /** @deprecated Migration-only legacy field. New contacts fold every persona signal into `systemPrompt`. */
+  mbti?: string
   // ---- auto-generated photo avatar (see lib/avatarCategory.ts + lib/photoSearch.ts) ----
   avatarPhotographer?: string // Pexels photographer credit, unset for anime avatars or manually-picked emoji/uploads
   avatarPhotographerUrl?: string
@@ -201,19 +200,6 @@ export interface PlanItem {
   date?: string // "YYYY-MM-DD" if the model could resolve a concrete date from context, empty/undefined otherwise
   createdAt: number
   confidence?: number
-}
-
-export type IntentKind = 'follow_up' | 'care' | 'avoid' | 'relationship' | 'topic'
-export type IntentStatus = 'active' | 'used' | 'dismissed'
-
-export interface IntentItem {
-  id: string
-  text: string
-  kind: IntentKind
-  createdAt: number
-  expiresAt?: number
-  status: IntentStatus
-  confidence: number
 }
 
 /** A directed relationship link between two AI contacts (set up when adding a contact), used to decide who reacts to whose moments. */
@@ -399,10 +385,8 @@ export interface Group {
   avatarColor: string
   memberContactIds: string[]
   memory?: string // group-level shared memory / lore visible to every member in group prompts
-  vibe?: string // group atmosphere, e.g. quiet study group, noisy friends, teasing tone
   speakerLimit?: GroupSpeakerLimit // how many AI members may speak in one group turn
-  allowAiChatter?: boolean // true: AIs may optionally talk to each other; false: keep replies user-centered
-  energyLevel?: GroupEnergyLevel // controls how many bubbles each selected speaker tends to send
+  energyLevel?: GroupEnergyLevel // hard bounds the total number of tool-produced messages per turn
   memoryTurnCount?: number // number of AI turns folded into group.memory; used to compress every few turns
   createdAt: number
   momentSharing?: 'enabled' | 'relationshipOnly' | 'private'
@@ -992,8 +976,6 @@ export type PromptModuleId =
   | 'chat'
   | 'relationship'
   | 'memory'
-  | 'intent'
-  | 'personalityTraits'
   | 'worldview'
   | 'moments'
   | 'knowledgeBase'
@@ -1001,7 +983,6 @@ export type PromptModuleId =
   | 'nuwaMode'
   | 'career'
   | 'shop'
-  | 'lifeSimulation'
 
 export interface PromptModuleConfig {
   enabled: boolean
@@ -1364,7 +1345,7 @@ export interface ContactExperience {
   surfacedAsMoment?: boolean
 }
 
-export type AiUsagePurpose = 'chat' | 'proactive' | 'memory' | 'moments' | 'worldbook' | 'lifeSimulation' | 'persona' | 'quality' | 'other'
+export type AiUsagePurpose = 'chat' | 'proactive' | 'memory' | 'moments' | 'worldbook' | 'offlineState' | 'persona' | 'quality' | 'other'
 
 export interface AiUsageRecord {
   id: string
@@ -1573,6 +1554,8 @@ export interface ContactGenerationTask {
   worldbookText?: string
   canon?: unknown
   rawOutput?: string
+  /** Short, user-visible milestones from native persona tool generation. */
+  generationActivity?: string[]
   validationRepairAttempted?: boolean
   validationDiagnostics?: ContactGenerationValidationDiagnostics
   personaDraft?: import('../lib/prompt').PersonaGenerationResult
@@ -1634,7 +1617,6 @@ export type GroupAiBubble = GroupAiBubbleText | GroupAiBubbleSticker | GroupAiBu
 export interface GroupAiResponse {
   messages: GroupAiBubble[]
   turnSummary?: string
-  groupVibe: string
   planCandidates?: { title: string; summary: string; participantIndexes: number[]; location?: string }[]
   memoryCandidates?: { contactName: string; content: string }[]
   knowledgeQueries?: string[]

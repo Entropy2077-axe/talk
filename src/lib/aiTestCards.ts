@@ -87,7 +87,7 @@ export async function generateAiTestCases(
         },
         {
           role: 'user',
-          content: `联系人：${contact.name}\n关系：${contact.relationshipBase || '朋友'}\n场景：${scenario.label}（${scenario.description}）\n人物设定摘要：${shortText(contact.systemPrompt, 1200)}\n已有共同经历：${shortText(contact.sharedHistory || contact.memoryFacts || '暂无', 800)}`,
+          content: `联系人：${contact.name}\n关系：${contact.relationshipBase || '朋友'}\n场景：${scenario.label}（${scenario.description}）\n人物设定摘要：${shortText(contact.systemPrompt, 1200)}\n记忆摘要：${shortText(contact.memoryFacts || '暂无', 800)}`,
         },
       ],
       jsonMode: true,

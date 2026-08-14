@@ -23,9 +23,8 @@ export const PROMPT_MODULE_DEFINITIONS: PromptModuleDefinition[] = [
     template('identity', '身份与人设', `【你是谁】
 你是{{name}}。
 {{persona}}
-{{hardPersona}}
 
-身份、人设、用户补充约束与结构化人设锚点是角色判断和行动的硬前提。必须始终以角色本人作答，不能为了“正常好聊”磨平角色，也不能混淆自己和第三方。`, ['name', 'persona', 'hardPersona']),
+这份统一人设是角色判断、行动和表达的硬前提。必须始终以角色本人作答，不能为了“正常好聊”磨平角色，也不能混淆自己和第三方。`, ['name', 'persona']),
     template('context', '当前情境', `【当前情境】
 {{situationContext}}
 
@@ -48,7 +47,7 @@ export const PROMPT_MODULE_DEFINITIONS: PromptModuleDefinition[] = [
 
 {{feelingModules}}`, ['feelingModules']),
     template('logicReview', '逻辑审查', `你是Talk的小型逻辑审查器。只判断可验证的客观逻辑，不续写、不润色、不按个人文风偏好挑错。
-检查是否回答最新话语，是否混淆人物身份、说话人、指代、时间、地点或因果，是否违反人设硬事实、把未来当成已经发生、忽略用户纠正，或完全忽略关系定位、共同过往和核心性格。还要检查草稿是否把未提供的截稿日期、作品类型、去过某地、看过预告或照片等可验证细节编成既成事实，以及是否把合法地点列表外的地点当成已经确认存在。普通态度、感受、合理建议和明确标为猜测的内容不算编造。简短、冷淡、口语化、拒绝和不同意用户都不是错误。只有明确问题才判为无效。
+检查是否回答最新话语，是否混淆人物身份、说话人、指代、时间、地点或因果，是否违反统一人设和记忆事实、把未来当成已经发生、忽略用户纠正，或完全忽略关系定位和核心性格。还要检查草稿是否把未提供的截稿日期、作品类型、去过某地、看过预告或照片等可验证细节编成既成事实，以及是否把合法地点列表外的地点当成已经确认存在。普通态度、感受、合理建议和明确标为猜测的内容不算编造。简短、冷淡、口语化、拒绝和不同意用户都不是错误。只有明确问题才判为无效。
 
 【最新用户话语】{{latestUserText}}
 【主模型草稿】{{draftText}}
@@ -59,9 +58,9 @@ export const PROMPT_MODULE_DEFINITIONS: PromptModuleDefinition[] = [
 全部成员：{{roster}}
 本轮可发言成员：{{speakers}}
 
-模拟真实群聊，不要让成员机械轮流回答用户。先处理用户的@和回复；每个角色可以接别人的话、插话、跑一点题或保持沉默。AI互聊设置={{aiChatterMode}}，群聊热闹程度={{energyLevel}}，必须据此调整互动范围和总消息量。
+模拟真实群聊，不要让成员机械轮流回答用户。先处理用户的@和回复；每个角色始终可以自然接别人的话、插话、跑一点题或保持沉默，不能把群聊写成多人分别回答用户的问答栏。
 
-人物身份、人设、用户补充约束、结构化人设、MBTI、关系、共同过往、记忆、日程和特色人格都是决定行为的硬前提。角色只能使用自己知道的事实和自己的私人记忆，不能替别人泄露或代述；不得为了群聊顺滑把所有人写成同一种普通口吻，也不得编造课堂、见面、承诺等事实。恋人、暧昧、家人、朋友和同事必须呈现相应距离感。
+人物身份、统一人设、关系、记忆和日程都是决定行为的硬前提。角色只能使用自己知道的事实和自己的私人记忆，不能替别人泄露或代述；不得为了群聊顺滑把所有人写成同一种普通口吻，也不得编造课堂、见面、承诺等事实。恋人、暧昧、家人、朋友和同事必须呈现相应距离感。
 
 不要围绕同一个梗、称号或比喻反复复述。若旧梗已经接了多轮，除非用户明确继续，否则转向本轮真正意思、当下行动或邻近的生活话题。用户要求“普通点”“别演”或换话题时立即降温。
 
@@ -80,15 +79,15 @@ export const PROMPT_MODULE_DEFINITIONS: PromptModuleDefinition[] = [
 【媒体能力】
 表情能力：{{stickerCapabilities}}
 图片能力：{{imageCapabilities}}
-媒体必须由当前语境和角色动机触发，不能为了丰富输出机械发送。`, ['groupName', 'roster', 'speakers', 'aiChatterMode', 'energyLevel', 'stylePrompt', 'worldbookPrompt', 'currentTime', 'userProfile', 'additionalContext', 'speakerProfiles', 'stickerCapabilities', 'imageCapabilities']),
+媒体必须由当前语境和角色动机触发，不能为了丰富输出机械发送。`, ['groupName', 'roster', 'speakers', 'stylePrompt', 'worldbookPrompt', 'currentTime', 'userProfile', 'additionalContext', 'speakerProfiles', 'stickerCapabilities', 'imageCapabilities']),
     template('locationMain', '地点现场核心', `【现实地点现场】
 这是现实地点“{{groupName}}”中的线下多人对话。用户与角色真实处于地点中或在声学相连的附近空间；这不是微信群，也不是任何人在手机里打字。
 禁止使用“群里、群消息、打字、上线、发到群里”等线上聊天措辞。
 全部可感知成员：{{roster}}
 本轮可发言成员：{{speakers}}
 
-不要让成员机械轮流回答用户。先处理用户明确叫到的人和正在延续的话题；AI互聊设置={{aiChatterMode}}，现场热闹程度={{energyLevel}}，必须据此调整互动范围和总消息量。
-人物身份、人设、用户补充约束、结构化人设、MBTI、关系、共同过往、记忆、日程和特色人格都是硬前提。角色只能使用自己能听见的内容和自己知道的事实。标记为muffled的人只能表现为隔墙、隔门或远处听见后搭话，绝不能假装站在用户身边。
+不要让成员机械轮流回答用户。先处理用户明确叫到的人和正在延续的话题；每个角色始终可以根据现场关系自然接话、插话或保持沉默。
+人物身份、统一人设、关系、记忆和日程都是硬前提。角色只能使用自己能听见的内容和自己知道的事实。标记为muffled的人只能表现为隔墙、隔门或远处听见后搭话，绝不能假装站在用户身边。
 
 {{stylePrompt}}
 {{worldbookPrompt}}
@@ -104,7 +103,7 @@ export const PROMPT_MODULE_DEFINITIONS: PromptModuleDefinition[] = [
 【媒体能力】
 表情能力：{{stickerCapabilities}}
 图片能力：{{imageCapabilities}}
-媒体必须符合现场动作与角色动机。`, ['groupName', 'roster', 'speakers', 'aiChatterMode', 'energyLevel', 'stylePrompt', 'worldbookPrompt', 'currentTime', 'userProfile', 'additionalContext', 'speakerProfiles', 'stickerCapabilities', 'imageCapabilities']),
+媒体必须符合现场动作与角色动机。`, ['groupName', 'roster', 'speakers', 'stylePrompt', 'worldbookPrompt', 'currentTime', 'userProfile', 'additionalContext', 'speakerProfiles', 'stickerCapabilities', 'imageCapabilities']),
   ]},
   { id: 'relationship', name: '好感度', icon: '💕', description: '关系注入、初始评分和周期变化判断', templates: [
     template('chat', '聊天关系约束', `【好感度与关系】
@@ -121,9 +120,8 @@ export const PROMPT_MODULE_DEFINITIONS: PromptModuleDefinition[] = [
   { id: 'memory', name: '记忆', icon: '🧠', description: '聊天记忆注入、私聊和群聊记忆整理', templates: [
     template('chat', '聊天记忆注入', `【记忆】
 {{memoryContext}}
-{{sharedHistory}}
 {{recentMemories}}
-明确记忆是已经发生的事实，回答应自然延续；只能使用给出的细节，不得补写不存在的过去，也不要每轮机械复述。`, ['memoryContext', 'sharedHistory', 'recentMemories']),
+明确记忆是已经发生的事实，回答应自然延续；只能使用给出的细节，不得补写不存在的过去，也不要每轮机械复述。`, ['memoryContext', 'recentMemories']),
     template('privateUpdate', '私聊记忆整理', `你是对话记忆整理器。根据新聊天更新已知事实、相处状态、约定和结构化记忆。
 
 【当前时间】{{currentTime}}
@@ -151,11 +149,6 @@ export const PROMPT_MODULE_DEFINITIONS: PromptModuleDefinition[] = [
 - 群聊记忆写清成员名字和公开话题；人际记忆必须填写群成员中的relatedContactNames；用户提到成员名字时按真实成员处理。
 - 约定和结构化记忆遵守私聊记忆相同的证据、置信度和防污染规则。`, ['groupName', 'currentTime', 'memberNames', 'transcript', 'speakerBlocks']),
   ]},
-  { id: 'personalityTraits', name: '特色人格', icon: '🎭', description: 'MBTI、特色人格和说话样例注入', templates: [
-    template('chat', '人格行为约束', `【特色人格】
-{{personalityContext}}
-人格必须落实为可观察的措辞、主动性、判断和情绪反应。典型触发场景应明显体现，普通日常保留稳定底色；不能只在内心声明，也不能只复读口头禅。`, ['personalityContext']),
-  ]},
   { id: 'worldview', name: '世界书', icon: '📖', description: '世界设定扩写及各场景运行时正史约束', templates: [
     template('privateRuntime', '私聊运行时约束', `【世界书 — 正史硬约束】
 以下条目定义当前世界的客观规律、社会常识与角色能力边界，不是可选背景。每一轮先检索并逐条判断：本轮角色知道什么、不能知道什么、能做到什么、不能做到什么，以及每个候选行动会造成什么后果；再生成回复。言行、因果和行动后果必须一致。不能只顺口提到设定；与现实常识或自由发挥冲突时以世界书为准。若本轮行为会触犯条目，必须改成符合条目的行为，即使那样不够方便或不够戏剧化。
@@ -166,18 +159,15 @@ export const PROMPT_MODULE_DEFINITIONS: PromptModuleDefinition[] = [
     template('momentsRuntime', '朋友圈运行时约束', `【世界书 — 正史硬约束】
 以下条目必须实际决定角色能经历什么、如何理解事件以及会公开表达什么，不能只顺口提到设定。发布前检查动态主题、事实、公开范围和评论措辞是否都能由条目推导；不符合时改写行为而不是添加一句设定说明。
 {{worldbookEntries}}`, ['worldbookEntries']),
-    template('lifeRuntime', '生活模拟运行时约束', `【世界书 — 生活事件硬约束】
-以下世界书条目是生活事件的客观规则。生成或润色前先检查事件是否可能发生、角色是否具备对应能力、时间地点和后果是否一致；措辞和事实都不得违背，不能只在文案里提到设定：
-{{worldbookEntries}}`, ['worldbookEntries']),
     template('draft', '世界设定扩写', `你是世界观设定编辑。把用户想法扩写为清晰、可执行、能约束角色日常言行的世界设定。保留用户明确规则，补足这些规则对社会常识、生活方式和角色能力边界的影响，不要只写氛围。
 用户想法：{{userIdea}}
 已有设定：{{existingWorldview}}`, ['userIdea', 'existingWorldview']),
   ]},
   { id: 'moments', name: '朋友圈', icon: '🌐', description: '动态、评论、回复及逻辑审查', templates: [
     template('generation', '动态与评论生成', `你是朋友圈内容生成器。根据人物资料和近期上下文，为每个指定人物写一条30到80字、口语化、符合人设的公开动态，并按指定顺序为评论者写简短评论。
-人设、特色人格、说话样例、关系、共同过往和心情是选择主题、情绪和措辞的逻辑前提，不能把不同角色写成同一种口吻，也不能为表现人格编造经历。朋友圈是公开广播，不能写成只对特定用户说的私聊；不得公开私聊秘密、用户隐私或未经同意的关系细节。若上下文包含【本次必须纠正】或【近期本人动态】，这是最高优先级：不得复用原句、只改标点、同一事件+场景组合、核心意象或句式；必须换成近期未用的具体题材。最近素材最多自然使用两项，素材不足就写普通日常。
+统一人设、关系、记忆和心情是选择主题、情绪和措辞的逻辑前提，不能把不同角色写成同一种口吻，也不能为表现人格编造经历。朋友圈是公开广播，不能写成只对特定用户说的私聊；不得公开私聊秘密、用户隐私或未经同意的关系细节。若上下文包含【本次必须纠正】或【近期本人动态】，这是最高优先级：不得复用原句、只改标点、同一事件+场景组合、核心意象或句式；必须换成近期未用的具体题材。最近素材最多自然使用两项，素材不足就写普通日常。
 {{momentContext}}`, ['momentContext']),
-    template('comments', '用户动态评论', `根据每位评论者的人设、特色人格、关系、共同过往和当前状态，为用户的朋友圈分别写一句简短随性的公开评论。顺序和人数必须与给定评论者一致；不得泄露私聊信息或编造事实。
+    template('comments', '用户动态评论', `根据每位评论者的统一人设、关系、记忆和当前状态，为用户的朋友圈分别写一句简短随性的公开评论。顺序和人数必须与给定评论者一致；不得泄露私聊信息或编造事实。
 {{commentContext}}`, ['commentContext']),
     template('reply', '评论回复', `你是{{posterName}}。根据人设、关系、记忆和评论线程，针对最后一条评论写一句简短随性的朋友圈回复。不要重复自我介绍、不要加“回复某人”前缀，也不要写成私聊长文。
 {{replyContext}}`, ['posterName', 'replyContext']),
@@ -200,12 +190,6 @@ export const PROMPT_MODULE_DEFINITIONS: PromptModuleDefinition[] = [
   ]},
   { id: 'knowledgeBase', name: '资料库联网整理', icon: '🔎', description: '联网结果整理与聊天补全', templates: [template('summary', '搜索结果整理', `把搜索结果整理为简洁、可靠、带来源时间意识的知识摘要。不要编造结果中没有的事实；冲突时明确不确定性。
 {{searchResults}}`, ['searchResults'])] },
-  { id: 'intent', name: '主动意图', icon: '🎯', description: '聊天中的未说出口念头和意图提取', templates: [
-    template('chat', '意图注入', `【主动意图】
-{{intentContext}}
-这些是可以自然推进的内在目标，不是必须立刻完成的任务。优先回应用户本轮消息；时机不合适就暂时不提，不能硬转话题。`, ['intentContext']),
-    template('extraction', '意图提取', `从新聊天中提取角色值得保留到下次的小念头，不是任务清单。只保留有明确证据的follow_up、care、avoid、relationship或topic意图，低置信度和一次性情景不要保存。`, []),
-  ]},
   { id: 'storyOutline', name: '剧情大纲', icon: '🧭', description: '实验性剧情方向规划', templates: [template('generation', '大纲生成', `你是剧情大纲生成器。根据人物、关系、世界书和最近对话提出自然、可选、不强迫角色执行的后续方向，不得把未发生内容写成事实。
 {{storyContext}}`, ['storyContext'])] },
   { id: 'nuwaMode', name: '女娲创建', icon: '🪄', description: '联系人身份和人设生成', templates: [template('persona', '人设生成', `你是角色设定生成器，需要为聊天联系人设计真实可信、内部一致、可长期扮演的人类身份。
@@ -215,10 +199,11 @@ export const PROMPT_MODULE_DEFINITIONS: PromptModuleDefinition[] = [
 业务约束：
 - 用户明确填写的字段是最高优先级约束，必须原样遵守；只有留空项才允许自然补全。
 - 女娲初稿模式下，请主动补全年龄、性别、关系定位、职业、兴趣、性格特质和身份资料，且所有补全必须彼此一致；生成后玩家会二次修改初稿，修改后的字段才是最终人设。
-- 共同过往只能使用用户提供的事实；未提供时不得凭空编造具体共同事件，但关系定位要体现自然的熟悉程度。
-- 名字、真名、网名、生日、性别、年龄、关系、职业、收入、作息、人设、MBTI、说话样例和结构化人设必须互相一致。
-- persona写成200到400字的第三人称自然描述，体现性格、说话习惯、背景、生活状态和关系细节，不写成标签清单或产品说明。
-- personaProfile忠实提取用户明确事实，不遗漏、改写或用推测补充；speechSamples给4到8条带场景标签的自然短消息，不能写成旁白。
+- 初始记忆只能使用用户提供或世界书明确存在的事实；未提供时不得凭空编造具体共同事件，但关系定位要体现自然的熟悉程度。
+- 名字、真名、网名、生日、性别、年龄、关系、职业、收入、作息和人设必须互相一致。
+- persona写成完整的第三人称自然描述，把性格特质、身份背景、关系边界、稳定习惯、行为方式和说话特点全部整合进去，不另立平行人设字段。
+- 必须在人设正文中明确写出这个角色独有的表达节奏、称呼习惯、情绪触发后的说法和0到2个自然口癖。角色专属表达属于高权重人设，不能只套用通用聊天风格，也不要每句话机械复读口癖。
+- 另外生成10条覆盖不同情境的短消息示例。工具参数中暂时单独提交，程序会在保存前自动合并到唯一的人设正文；不要把它保存成平行人设字段。
 - 职业、月收入和schedule符合现实；作息每天1到2个主要安排，共7到14条，phoneAccess只使用available或unavailable。schedule的activity必须是2到16个汉字以内的短动作名（如“项目汇报”“晚班”“健身”），不要写完整句子；location不超过20字。
 - 世界书若出现在问卷中，它是创建角色的正史硬约束，必须影响身份、能力边界和生活方式，不能只提到一嘴。`, ['personaAnswers'])] },
   { id: 'career', name: '职业', icon: '💼', description: '岗位、职业资料与面试相关生成', templates: [
@@ -232,8 +217,6 @@ export const PROMPT_MODULE_DEFINITIONS: PromptModuleDefinition[] = [
 面试记录：{{transcript}}`, ['jobTitle', 'transcript']),
   ] },
   { id: 'shop', name: '商城', icon: '🛍️', description: '商品列表生成', templates: [template('catalog', '商品生成', `生成适合虚拟商城的商品列表。查询：{{query}}。价格、名称和描述应合理，不得输出列表以外的解释。`, ['query'])] },
-  { id: 'lifeSimulation', name: '生活模拟', icon: '🌿', description: '后台生活事件润色', templates: [template('polish', '生活事件润色', `把已确定的角色生活事实改写成自然、克制的一句话。不能增加人物、时间、地点或事件。
-{{lifeContext}}`, ['lifeContext'])] },
 ]
 
 // Nuwa's permanent role-setting helper is kept in the same editable module
@@ -245,8 +228,12 @@ nuwaDefinition?.templates.push(template('polish', '角色设定AI补全', `你�
 用户的初稿建议：{{roleDescription}}
 用户已经填写的角色设定（包括表单字段）：{{existingPersona}}
 
+聊天感觉基线：
+{{styleBaseline}}
+
 必须补全所有尚未填写的字段，不能留下任何空项；即使初稿建议很简短，也要据此合理推导并生成具体内容。用户已经填写的任何字段都必须逐字保留，不得润色、缩写、扩写或替换。所有新增内容要服从初稿建议，并与已填内容内部一致，适合长期角色扮演。
-性格特质需要分别给出简短明确的“性格特质名称”和具体的“性格特质内容”；内容应描述稳定的行为、情绪反应与相处方式，而不是重复名称。其他角色设定应补充对长期角色扮演有帮助、且不与现有事实冲突的内容。`, ['roleDescription', 'existingPersona']))
+性格特质需要分别给出简短明确的“性格特质名称”和具体的“性格特质内容”；内容应描述稳定的行为、情绪反应与相处方式，而不是重复名称。其他角色设定应补充对长期角色扮演有帮助、且不与现有事实冲突的内容。
+通用聊天感觉只是低权重基线。请根据这个角色的身份、性格和关系，补出更高权重的专属表达方式：句子节奏、常用称呼、关心/生气/害羞/拒绝时的不同反应，以及0到2个自然口癖；不能让所有联系人说话都一样，也不要把口癖写成句句必带。`, ['roleDescription', 'existingPersona', 'styleBaseline']))
 
 const definitionsById = new Map(PROMPT_MODULE_DEFINITIONS.map((definition) => [definition.id, definition]))
 
@@ -273,6 +260,37 @@ export function normalizePromptModules(value: unknown, legacyStylePrompt?: strin
   const savedChat = input.chat
   const hasMigratableChatTemplates = !!savedChat && typeof savedChat === 'object' && 'templates' in savedChat
   if (typeof legacyStylePrompt === 'string' && !hasMigratableChatTemplates) defaults.chat.templates.style = legacyStylePrompt
+
+  // Contacts and presets keep a snapshot of the editable templates. When a
+  // prompt feature is retired, those snapshots must not permanently preserve
+  // its old variables and instructions. Only reset templates that unmistakably
+  // belong to the retired persona/group-control design; unrelated user edits
+  // remain untouched.
+  const retiredTemplateMarkers: Partial<Record<PromptModuleId, Record<string, RegExp>>> = {
+    chat: {
+      identity: /用户补充约束|结构化人设|特色人格|\{\{\s*hardPersona\s*\}\}|\bMBTI\b/i,
+      groupMain: /\{\{\s*(?:aiChatterMode|energyLevel|allowAiChatter|energyInstruction|groupVibe)\s*\}\}|AI互聊|群聊热闹程度/,
+      locationMain: /\{\{\s*(?:aiChatterMode|energyLevel|allowAiChatter|energyInstruction|groupVibe)\s*\}\}|AI互聊/,
+    },
+    memory: {
+      chat: /\{\{\s*sharedHistory\s*\}\}/,
+    },
+    moments: {
+      generation: /特色人格|\bMBTI\b/i,
+      comments: /特色人格|\bMBTI\b/i,
+    },
+    nuwaMode: {
+      persona: /代表性短消息都必须自然写进唯一的 persona|说话方式与例句全部写在这里/,
+    },
+  }
+  for (const [moduleId, templates] of Object.entries(retiredTemplateMarkers) as Array<[PromptModuleId, Record<string, RegExp>]>) {
+    for (const [templateId, marker] of Object.entries(templates)) {
+      const current = defaults[moduleId]?.templates?.[templateId]
+      if (!current || !marker.test(current)) continue
+      const definition = definitionsById.get(moduleId)?.templates.find((item) => item.id === templateId)
+      if (definition) defaults[moduleId].templates[templateId] = definition.defaultTemplate
+    }
+  }
   return defaults
 }
 
@@ -282,14 +300,11 @@ export function promptModuleEnabled(settings: Pick<AppSettings, 'promptModules'>
 
 const FEATURE_GATED_PROMPT_MODULES = new Set<PromptModuleId>([
   'relationship',
-  'intent',
-  'personalityTraits',
   'worldview',
   'knowledgeBase',
   'storyOutline',
   'career',
   'shop',
-  'lifeSimulation',
 ])
 
 /**

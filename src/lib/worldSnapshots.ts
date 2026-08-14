@@ -36,10 +36,9 @@ type StoryTableName = (typeof WORLD_STORY_TABLES)[number] | (typeof ECONOMY_TABL
 /** Fields reset by a blank branch while the rest of the contact record remains
  * part of that branch's independent world-local contact set. */
 export const CONTACT_STORY_FIELDS = [
-  'sharedHistory',
   'memoryFacts', 'memoryStyle', 'memoryUpdatedAt', 'memoryMessageCursor',
   'warmth', 'relationshipBase', 'relationshipDynamic', 'mood',
-  'lastMomentAt', 'pendingEvents', 'upcomingPlans', 'intentQueue',
+  'lastMomentAt', 'pendingEvents', 'upcomingPlans',
   'lastProactiveMessageAt', 'proactiveTopicHistory',
   'schedule', 'scheduleOverrides',
   'currentLocationId', 'locationUpdatedAt', 'locationSource',

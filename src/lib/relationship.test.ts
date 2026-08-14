@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { personalityTraitLine } from './prompt'
 import { relationshipLine } from './relationship'
 
 describe('established relationship prompt consistency', () => {
@@ -8,12 +7,6 @@ describe('established relationship prompt consistency', () => {
     expect(line).toContain('恋人关系')
     expect(line).toContain('既有关系')
     expect(line).not.toContain('算得上是朋友')
-  })
-
-  it('does not describe an established lover as still becoming acquainted', () => {
-    const line = personalityTraitLine('爹系', 45, '恋人')
-    expect(line).toContain('关系已确立')
-    expect(line).not.toContain('逐渐熟悉')
   })
 
   it('keeps the ordinary friendship warmth wording for friends', () => {

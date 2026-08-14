@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { localNuwaFormatIssues, parseNuwaReview, parseNuwaStructuredResult } from './nuwaPersona'
+import { localNuwaFormatIssues, NUWA_FORM_KEYS, parseNuwaReview, parseNuwaStructuredResult, preserveFilledNuwaFields, submitNuwaFormTool } from './nuwaPersona'
 
 describe('Nuwa persona protocol', () => {
   it('parses fenced JSON and legacy Chinese field aliases', () => {
@@ -19,5 +19,21 @@ describe('Nuwa persona protocol', () => {
   it('keeps only string review issues', () => {
     expect(parseNuwaReview('{"valid":false,"issues":["缺少生日",42]}'))
       .toEqual({ valid: false, issues: ['缺少生日'] })
+  })
+
+  it('keeps the native submit tool schema aligned with the fixed form', () => {
+    const schema = submitNuwaFormTool().function.parameters as { properties: Record<string, unknown>; required: string[]; additionalProperties: boolean }
+    expect(Object.keys(schema.properties)).toEqual([...NUWA_FORM_KEYS])
+    expect(schema.properties).not.toHaveProperty('personalityTrait')
+    expect(schema.properties).not.toHaveProperty('personalityTraitContent')
+    expect(schema.required).toEqual([...NUWA_FORM_KEYS])
+    expect(schema.additionalProperties).toBe(false)
+  })
+
+  it('restores user-entered fields instead of accepting a model paraphrase', () => {
+    const raw = JSON.stringify(Object.fromEntries(NUWA_FORM_KEYS.map((key) => [key, `${key}-model`])))
+    const current = { ...Object.fromEntries(NUWA_FORM_KEYS.map((key) => [key, ''])) } as unknown as import('./nuwaPersona').NuwaStructuredResult
+    current.otherSetting = '用户原始人设，必须保留。'
+    expect(parseNuwaStructuredResult(preserveFilledNuwaFields(raw, current))?.otherSetting).toBe(current.otherSetting)
   })
 })

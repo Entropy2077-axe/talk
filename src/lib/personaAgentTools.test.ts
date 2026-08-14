@@ -6,7 +6,7 @@ const completionMock = vi.hoisted(() => vi.fn())
 
 vi.mock('./deepseek', async (importOriginal) => {
   const original = await importOriginal<typeof import('./deepseek')>()
-  return { ...original, chatCompletion: completionMock }
+  return { ...original, chatCompletionProgress: completionMock }
 })
 
 import { generatePersonaWithTools, personaGenerationTools } from './personaAgentTools'
@@ -19,9 +19,9 @@ const draft = {
   name: '林澄', realName: '林澄', nickname: '阿澄', birthday: '2002-06-15', gender: '女', ageRange: '24岁',
   relationship: '朋友', occupation: '设计师', persona: '慢热但真诚，观察细致，有稳定的生活习惯，会用具体行动表达关心，也尊重彼此的边界。',
   visualIdentity: 'young woman, oval face, warm brown eyes, shoulder-length black hair, slim build',
-  personalityTrait: '无', mbti: 'INFP', speechSamples: ['[日常] 早。', '[关心] 记得吃饭。', '[情绪] 我想静一会儿。', '[亲近] 到家告诉我。'],
+  speechExamples: Array.from({ length: 10 }, (_, index) => `[场景${index + 1}] 示例消息${index + 1}`),
   personaProfile: { facts: ['设计师'], boundaries: ['尊重隐私'], habits: ['早起'], behaviorAnchors: ['先观察再回应'] },
-  pastExperiences: [], monthlySalary: 8000, avatarKeyword: 'young asian woman portrait', schedule: [],
+  initialMemories: [], monthlySalary: 8000, avatarKeyword: 'young asian woman portrait', schedule: [],
 }
 
 const settings = {
@@ -41,6 +41,9 @@ describe('persona generation native tools', () => {
     const submit = tools.at(-1)!
     const properties = submit.function.parameters.properties as Record<string, Record<string, unknown>>
     expect(properties.speechVoiceId.enum).toEqual(['voice-a'])
+    expect(properties.speechExamples.minItems).toBe(10)
+    expect(properties.speechExamples.maxItems).toBe(10)
+    expect(submit.function.parameters.required).toContain('speechExamples')
     expect((properties.schedule.items as Record<string, unknown>).type).toBe('object')
   })
 
@@ -56,6 +59,7 @@ describe('persona generation native tools', () => {
 
     expect(result.usedNativeTools).toBe(true)
     expect(result.draft?.name).toBe('林澄')
+    expect(result.draft?.speechExamples).toHaveLength(10)
     const secondMessages = completionMock.mock.calls[1][0].messages
     expect(secondMessages.at(-1)).toMatchObject({ role: 'tool', tool_call_id: 'query-1' })
   })

@@ -4,6 +4,7 @@ import {
   featureActive,
   getPromptTemplate,
   normalizePromptModules,
+  PROMPT_MODULE_DEFINITIONS,
   renderPromptTemplate,
   unknownPromptPlaceholders,
 } from './promptModules'
@@ -31,6 +32,44 @@ describe('original prompt templates', () => {
     expect(migrated.chat.templates.style).toBe('LEGACY_STYLE')
     expect(JSON.stringify(migrated)).not.toContain('WRONG_OVERLAY')
     expect(JSON.stringify(migrated)).not.toContain('WRONG_RELATIONSHIP_OVERLAY')
+  })
+
+  it('upgrades retired templates saved inside contact snapshots', () => {
+    const migrated = normalizePromptModules({
+      chat: {
+        enabled: true,
+        templates: {
+          identity: '身份、人设、用户补充约束与结构化人设锚点 {{hardPersona}}',
+          groupMain: '热闹程度：{{energyLevel}}；AI互聊={{aiChatterMode}}',
+          style: '保留用户自己编辑的风格',
+        },
+      },
+    })
+
+    expect(migrated.chat.templates.identity).toContain('{{persona}}')
+    expect(migrated.chat.templates.identity).not.toContain('结构化人设')
+    expect(migrated.chat.templates.groupMain).toContain('模拟真实群聊')
+    expect(migrated.chat.templates.groupMain).not.toContain('energyInstruction')
+    expect(migrated.chat.templates.style).toBe('保留用户自己编辑的风格')
+  })
+
+  it('repairs the retired shared-history placeholder before contact editing', () => {
+    const migrated = normalizePromptModules({
+      memory: {
+        enabled: true,
+        templates: { chat: '【记忆】\n{{memoryContext}}\n{{sharedHistory}}\n{{recentMemories}}' },
+      },
+    })
+    expect(migrated.memory.templates.chat).not.toContain('{{sharedHistory}}')
+    expect(unknownPromptPlaceholders('memory', 'chat', migrated.memory.templates.chat)).toEqual([])
+  })
+
+  it('ships no unknown placeholders in any current default template', () => {
+    for (const definition of PROMPT_MODULE_DEFINITIONS) {
+      for (const item of definition.templates) {
+        expect(unknownPromptPlaceholders(definition.id, item.id, item.defaultTemplate), `${definition.id}/${item.id}`).toEqual([])
+      }
+    }
   })
 
   it('returns the edited original template globally and omits a blocked module', () => {

@@ -10,7 +10,6 @@ import { createMediaAsset, startMediaAsset } from './imageAssets'
 import { isImageProviderReady } from './mediaProviders'
 import { recordSocialEvent } from './socialEvents'
 import { displayName } from './contact'
-import { customPersonalityTraitsLine, formatSpeechSamplesForScene, personalityTraitLine } from './prompt'
 import { retrieveWorldbookContext } from './worldbook'
 import { recentMemoriesText, socialMemoriesText } from './memory'
 import { recentSocialEventsText } from './socialEvents'
@@ -184,7 +183,7 @@ function buildMomentsPrompt(
               .filter((c) => c.willComment)
               .map(
                 (c, j) =>
-                  `  评论者${j + 1}: ${c.contact.name}\n  人设: ${c.contact.systemPrompt}\n  ${personalityTraitLine(c.contact.personalityTrait, c.contact.warmth ?? 0) || '性格特质: 无'}\n  说话样例: ${formatSpeechSamplesForScene(c.contact.speechSamples, 'moment', 1) || '无'}\n  与发布者的关系: ${c.relationLabel || '普通朋友'}；${c.relationContext}\n  与用户的共同过往（只作关系底色，不公开复述）: ${c.contact.sharedHistory || '无具体记录'}\n  最近可用素材: ${contexts.get(c.contact.id) || '无'}`,
+                  `  评论者${j + 1}: ${c.contact.name}\n  人设: ${c.contact.systemPrompt}\n  与发布者的关系: ${c.relationLabel || '普通朋友'}；${c.relationContext}\n  最近可用素材: ${contexts.get(c.contact.id) || '无'}`,
               )
               .join('\n')
           : '  （这条没有人评论）'
@@ -193,7 +192,7 @@ function buildMomentsPrompt(
       const photoLine = e.willHavePhoto
         ? `这条动态会配一张照片。填写 imageKeyword（具体英文画面描述）、imageKind（selfie/portrait/scene/object）和 includePoster（照片是否出现发布者本人）。只有本人确实入镜时 includePoster 才为 true。\n`
         : ''
-      return `人物${i + 1}: ${e.poster.name}\n人设: ${e.poster.systemPrompt}\n${personalityTraitLine(e.poster.personalityTrait, e.poster.warmth ?? 0) || '性格特质: 无'}\n说话样例: ${formatSpeechSamplesForScene(e.poster.speechSamples, 'moment', 2) || '无'}\n与用户的共同过往（只作关系底色，不公开复述）: ${e.poster.sharedHistory || '无具体记录'}\n当前心情: ${e.poster.mood?.text || '平静'}\n最近可用素材: ${contexts.get(e.poster.id) || '无'}\n${statusLine}${photoLine}这条朋友圈下会评论的人(按顺序):\n${commenterLines}`
+      return `人物${i + 1}: ${e.poster.name}\n人设: ${e.poster.systemPrompt}\n当前心情: ${e.poster.mood?.text || '平静'}\n最近可用素材: ${contexts.get(e.poster.id) || '无'}\n${statusLine}${photoLine}这条朋友圈下会评论的人(按顺序):\n${commenterLines}`
     })
     .join('\n\n')
 
@@ -320,7 +319,7 @@ export async function runMomentTestSandbox(contact: Contact, settings: AppSettin
     purpose: 'moments',
     automatic: false,
   })
-  const personaContext = [worldbookPrompt, `Poster ${contact.name}: ${contact.systemPrompt}\nTrait: ${contact.personalityTrait || 'none'}\nShared history anchor: ${contact.sharedHistory || 'none'}`].filter(Boolean).join('\n\n')
+  const personaContext = [worldbookPrompt, `Poster ${contact.name}: ${contact.systemPrompt}`].filter(Boolean).join('\n\n')
   const reviewedRaw = await reviewMomentPayload(settings, raw, '{"moments":[{"content":"...","imageKeyword":"...","comments":[]}]}', personaContext)
   return { raw, reviewedRaw, parsed: parseMomentsResponse(reviewedRaw, [0]) }
 }
@@ -391,7 +390,7 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
   console.info(`[moments-perf] 主模型完成=${Math.round(performance.now() - startedAt)}ms 条数=${entries.length}`)
 
   const expectedCommentCounts = entries.map((e) => e.commenters.filter((c) => c.willComment).length)
-  const personaContext = [momentsWorldbookPrompt, entries.map((entry) => `Poster ${entry.poster.name}: ${entry.poster.systemPrompt}\nTrait: ${entry.poster.personalityTrait || 'none'}\nShared history anchor (do not expose verbatim): ${entry.poster.sharedHistory || 'none'}\nCommenters: ${entry.commenters.filter((commenter) => commenter.willComment).map((commenter) => `${commenter.contact.name}: ${commenter.contact.systemPrompt}; history=${commenter.contact.sharedHistory || 'none'}`).join(' | ') || 'none'}`).join('\n\n')].filter(Boolean).join('\n\n')
+  const personaContext = [momentsWorldbookPrompt, entries.map((entry) => `Poster ${entry.poster.name}: ${entry.poster.systemPrompt}\nCommenters: ${entry.commenters.filter((commenter) => commenter.willComment).map((commenter) => `${commenter.contact.name}: ${commenter.contact.systemPrompt}`).join(' | ') || 'none'}`).join('\n\n')].filter(Boolean).join('\n\n')
   const reviewedRaw = await reviewMomentPayload(settings, raw, '{"moments":[{"content":"...","imageKeyword":"...","comments":["..."]}]}', personaContext)
   console.info(`[moments-perf] 自检完成=${Math.round(performance.now() - startedAt)}ms 条数=${entries.length}`)
   const parsed = parseMomentsResponse(reviewedRaw, expectedCommentCounts)
@@ -609,8 +608,7 @@ function buildUserMomentCommentPrompt(content: string, commenters: Contact[], wo
   const commenterLines = commenters
     .map((c, i) => {
       const scheduleLine = describeCurrentSchedule(c, now)
-      const samples = formatSpeechSamplesForScene(c.speechSamples, 'moment', 1)
-      return `评论者${i + 1}: ${c.name} 人设: ${c.systemPrompt}\n${personalityTraitLine(c.personalityTrait, c.warmth ?? 0) || '性格特质: 无'}${samples ? `\n说话样例: ${samples}` : ''}${scheduleLine ? ` ${scheduleLine}` : ''}\n和用户的关系: ${c.relationshipBase || '朋友'} ${c.relationshipDynamic || ''} 好感度:${c.warmth ?? 0} 当前心情:${c.mood?.text || '平静'}\n与用户的共同过往（只作关系底色，不公开复述）: ${c.sharedHistory || '无具体记录'}\n最近素材: ${contexts.get(c.id) || '无'}`
+      return `评论者${i + 1}: ${c.name} 人设: ${c.systemPrompt}${scheduleLine ? ` ${scheduleLine}` : ''}\n和用户的关系: ${c.relationshipBase || '朋友'} ${c.relationshipDynamic || ''} 好感度:${c.warmth ?? 0} 当前心情:${c.mood?.text || '平静'}\n最近素材: ${contexts.get(c.id) || '无'}`
     })
     .join('\n')
   const worldviewSection = worldviewText ? `${worldviewText}\n\n` : ''
@@ -683,7 +681,7 @@ export async function postUserMoment(content: string, settings: AppSettings): Pr
         jsonMode: true,
         purpose: 'moments',
       })
-      const personaContext = [commentWorldbookPrompt, commenterPlans.map(({ contact }) => `${contact.name}: ${contact.systemPrompt}\nTrait: ${contact.personalityTrait || 'none'}\nRelationship: ${contact.relationshipBase || 'friend'}\nShared history anchor (do not expose verbatim): ${contact.sharedHistory || 'none'}`).join('\n\n')].filter(Boolean).join('\n\n')
+      const personaContext = [commentWorldbookPrompt, commenterPlans.map(({ contact }) => `${contact.name}: ${contact.systemPrompt}\nRelationship: ${contact.relationshipBase || 'friend'}`).join('\n\n')].filter(Boolean).join('\n\n')
       const reviewedRaw = await reviewMomentPayload(settings, raw, '{"comments":["..."]}', personaContext)
       comments = parseCommentsResponse(reviewedRaw, commenterPlans.length) ?? []
     } catch {
@@ -751,8 +749,7 @@ function buildMomentReplyPrompt(
   const scheduleLine = describeCurrentSchedule(poster, new Date())
   const scheduleSection = scheduleLine ? `你${scheduleLine}(回复内容可以但不强制符合这个状态)\n` : ''
 
-  const samples = formatSpeechSamplesForScene(poster.speechSamples, 'moment', 2)
-  const replyContext = `${worldviewSection}人设：${poster.systemPrompt}\n${personalityTraitLine(poster.personalityTrait, poster.warmth ?? 0) || '性格特质: 无'}${customPersonalityTraitsLine(poster.customPersonalityTraits, poster.warmth ?? 0)}${samples ? `\n说话样例：\n${samples}` : ''}\n${scheduleSection}关系：${poster.relationshipBase || '朋友'} ${poster.relationshipDynamic || ''}；好感度=${poster.warmth ?? 0}；心情=${poster.mood?.text || '平静'}\n共同过往：${poster.sharedHistory || '无具体记录'}\n最近素材：${context || '无'}\n动态：${momentContent}\n评论串：\n${threadLines.join('\n')}\n${stickerCommentInstruction(stickerNames)}`
+  const replyContext = `${worldviewSection}人设：${poster.systemPrompt}\n${scheduleSection}关系：${poster.relationshipBase || '朋友'} ${poster.relationshipDynamic || ''}；好感度=${poster.warmth ?? 0}；心情=${poster.mood?.text || '平静'}\n最近素材：${context || '无'}\n动态：${momentContent}\n评论串：\n${threadLines.join('\n')}\n${stickerCommentInstruction(stickerNames)}`
   const editable = getPromptTemplate(settings, 'moments', 'reply', { posterName: poster.name, replyContext }) ?? ''
   return `【身份硬约束】你现在只能是${poster.name}。只用${poster.name}的人设、经历和说话习惯回应；不得代入评论区其他人，不得替别人说话，也不得输出姓名或作者标记。\n${editable}\n\n【输出前硬检查】这句话只能由${poster.name}说出。固定输出协议：只输出一句纯文字回复，不要JSON、Markdown或引号。`
 }
@@ -993,10 +990,5 @@ export async function cascadeDeleteContactSocialData(contactId: string): Promise
 
   await db.contactRelations.where('fromContactId').equals(contactId).delete()
   await db.contactRelations.where('toContactId').equals(contactId).delete()
-  const experiences = await db.contactExperiences.where('contactIds').equals(contactId).toArray()
-  for (const experience of experiences) {
-    const contactIds = experience.contactIds.filter((id) => id !== contactId)
-    if (contactIds.length === 0) await db.contactExperiences.delete(experience.id)
-    else await db.contactExperiences.update(experience.id, { contactIds })
-  }
+  await db.contactMemories.where('contactId').equals(contactId).delete()
 }

@@ -40,6 +40,24 @@ describe('AI task schedule', () => {
     expect(text).toContain('16-18点:给宠物买用品')
   })
 
+  it('shows one weekly routine cycle without repeating the second week', () => {
+    const value = contact()
+    const text = describeUpcomingScheduleText(value, new Date(2026, 7, 3, 9, 0))
+    expect(text).toContain('今天(2026-08-03)')
+    expect(text).not.toContain('周一(2026-08-10)')
+  })
+
+  it('still shows one-off tasks in the second week of the action horizon', () => {
+    const value = contact([{
+      ...special(), id: 'later', date: '2026-08-12',
+      startsAt: new Date(2026, 7, 12, 15).getTime(), endsAt: new Date(2026, 7, 12, 16).getTime(),
+      activity: '看展', summary: '提前约好的展览',
+    }])
+    const text = describeUpcomingScheduleText(value, new Date(2026, 7, 3, 9, 0))
+    expect(text).toContain('周三(2026-08-12)')
+    expect(text).toContain('[特殊任务]15:00-16:00 看展')
+  })
+
   it('expands overnight tasks into both affected calendar days', () => {
     const value = contact()
     value.schedule = [{ id: 'sleep', dayOfWeek: 1, startHour: 23, endHour: 7, phoneAccess: 'unavailable', location: '家里', activity: '睡觉' }]

@@ -182,9 +182,10 @@ function formatClock(timestamp: number) {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
 }
 
-/** Future-14-days digest of recurring and special tasks. The action tool also
- * accepts plans up to fourteen days ahead, so every model stage must see the
- * same horizon instead of guessing about dates omitted by a shorter digest. */
+/** Future digest of recurring and special tasks. A weekly routine only needs
+ * one seven-day cycle; repeating it for a second week wastes prompt space and
+ * looks like duplicated data. One-off special tasks remain visible for the
+ * full requested horizon (up to fourteen days). */
 export function describeUpcomingScheduleText(contact: ScheduleSource, now: Date, dayCount = 14): string {
   const schedule = contact.schedule ?? []
   const overrides = contact.scheduleOverrides ?? []
@@ -201,7 +202,7 @@ export function describeUpcomingScheduleText(contact: ScheduleSource, now: Date,
     const label = `${labelPrefix}(${dateKey})`
 
     const relevantOverrides = overrides.filter((task) => task.status !== 'cancelled' && task.date === dateKey)
-    const dayBlocks = schedule
+    const dayBlocks = (dayOffset < 7 ? schedule : [])
       .filter((b) => b.dayOfWeek === day)
       .sort((a, b) => a.startHour - b.startHour)
       .map((b) => {

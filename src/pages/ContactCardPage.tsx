@@ -5,7 +5,6 @@ import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { isAiTestId } from '../lib/aiTestIsolation'
 import { TopBar } from '../components/TopBar'
-import { UiIcon } from '../components/UiIcon'
 import { Avatar } from '../components/Avatar'
 import { AvatarPicker } from '../components/AvatarPicker'
 import { ActionSheet } from '../components/ActionSheet'
@@ -16,24 +15,26 @@ import { cascadeDeleteContactSocialData } from '../lib/moments'
 import { removeContactFromAllGroups } from '../lib/groupChat'
 import { describeCurrentSchedule, describeUpcomingScheduleText, isPhoneAvailable, scheduleOccurrencesForDate } from '../lib/schedule'
 import { normalizeMood } from '../lib/mood'
-import { describeCurrentTime } from '../lib/time'
-import { RELATIONSHIP_OPTIONS, formatSpeechSamplesForScene, buildRawChatPromptParts, buildJsonConversionPrompt } from '../lib/prompt'
+import { ageFromBirthday, describeCurrentTime } from '../lib/time'
+import { RELATIONSHIP_OPTIONS, buildRawChatPromptParts } from '../lib/prompt'
 import { useModuleEnabled, isModuleEnabled } from '../features'
-import { personalityIntimacyStage, warmthLabel, relationshipLine } from '../lib/relationship'
+import { warmthLabel, relationshipLine } from '../lib/relationship'
 import { buildUserProfileText } from '../lib/chatEngine'
 import { useSettingsStore } from '../store/useSettingsStore'
 import type { Contact, ContactMemoryScope, ContactRelationLabel, ScheduleBlock, ScheduleOverride } from '../types'
-import { CONTACT_RELATION_LABELS, PERSONALITY_TRAIT_OPTIONS } from '../types'
-import { activeIntentPrompt, activeIntents, clearIntentQueue } from '../lib/intent'
+import { CONTACT_RELATION_LABELS } from '../types'
 import { removePairedContactRelation, setPairedContactRelation, uniqueRelationPairs } from '../lib/contactRelations'
 import { chatCompletionText as chatCompletion } from '../lib/deepseek'
 import { buildOccupationPrompt, parseOccupation, employmentPatch, OCCUPATION_OPTIONS } from '../lib/career'
 import { formatCurrency } from '../lib/wallet'
 import { setWalletBalance } from '../lib/finance'
 import { promptModulesForContact } from '../lib/promptPresets'
+import { featureActive } from '../lib/promptModules'
 import { contactSpeechVoice, isSpeechProviderReady, speechProviderName, speechVoiceOptions } from '../lib/speechProviders'
 import { synthesizeSpeech } from '../lib/speechSynthesis'
-import { ArrowDownToLine, ArrowUpFromLine, ChevronLeft, ChevronRight, ClipboardList, Phone, PhoneOff } from 'lucide-react'
+import { isImageProviderReady, isStickerProviderReady } from '../lib/mediaProviders'
+import { privateTurnToolDefinition } from '../lib/chatAgentTools'
+import { ArrowUpFromLine, ChevronLeft, ChevronRight, ClipboardList, Phone, PhoneOff } from 'lucide-react'
 
 const CALENDAR_HOUR_HEIGHT = 22
 
@@ -168,13 +169,10 @@ export function ContactCardPage() {
   const [clearMemoryConfirm, setClearMemoryConfirm] = useState(false)
   const [pickingAvatar, setPickingAvatar] = useState(false)
   const [pickingRelationshipType, setPickingRelationshipType] = useState(false)
-  const [pickingPersonalityTrait, setPickingPersonalityTrait] = useState(false)
   const relEnabled = useModuleEnabled('relationship')
-  const personalityEnabled = useModuleEnabled('personalityTraits')
   const adminEnabled = useSettingsStore((s) => s.adminModeEnabled)
   const moodEnabled = true
   const careerEnabled = useModuleEnabled('career')
-  const lifeSimulationEnabled = useModuleEnabled('lifeSimulation')
   const [assigningCareer, setAssigningCareer] = useState(false)
   const [editingRelations, setEditingRelations] = useState(false)
   const [testingSpeechVoice, setTestingSpeechVoice] = useState(false)
@@ -183,6 +181,7 @@ export function ContactCardPage() {
 
   const contact = useLiveQuery(() => (contactId ? db.contacts.get(contactId) : undefined), [contactId])
   const currentLocation = useLiveQuery(() => contact?.currentLocationId ? db.locations.get(contact.currentLocationId) : undefined, [contact?.currentLocationId])
+  const allLocations = useLiveQuery(() => db.locations.toArray(), []) ?? []
   const allContacts = (useLiveQuery(() => db.contacts.toArray(), []) ?? []).filter((item) => !isAiTestId(item.id))
   const conversation = useLiveQuery(
     () => (contactId ? db.conversations.where('contactId').equals(contactId).first() : undefined),
@@ -191,9 +190,6 @@ export function ContactCardPage() {
 
   const contactWallet = useLiveQuery(() => contactId ? db.walletAccounts.get(contactId) : undefined, [contactId])
   const momentCount = useLiveQuery(() => contactId ? db.moments.where('contactId').equals(contactId).count() : 0, [contactId]) ?? 0
-  const lifeEvents = useLiveQuery(() => contactId ? db.lifeEvents.where('contactId').equals(contactId).reverse().sortBy('occurredAt') : [], [contactId]) ?? []
-  const experiences = useLiveQuery(() => contactId ? db.contactExperiences.where('contactIds').equals(contactId).toArray() : [], [contactId]) ?? []
-  const lifeState = useLiveQuery(() => contactId ? db.contactLifeStates.get(contactId) : undefined, [contactId])
   const socialTimeline = useLiveQuery(async () => {
     if (!contactId) return []
     return (await db.socialEvents.orderBy('createdAt').reverse().limit(80).toArray())
@@ -353,11 +349,6 @@ export function ContactCardPage() {
 
   const contactNow = Date.now()
   const activePlans = activeUpcomingPlans(contact.upcomingPlans ?? [], new Date(contactNow))
-  const visibleActiveIntents = activeIntents(contact, contactNow, 10)
-  const usedIntents = (contact.intentQueue ?? [])
-    .filter((intent) => intent.status === 'used')
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, 5)
   const hasMemory = contact.memoryFacts || contact.memoryStyle || activePlans.length > 0 || structuredMemories.length > 0 || relationLinks.length > 0
 
   // Admin-mode-only: shows exactly what would be sent as the system prompt
@@ -368,18 +359,19 @@ export function ContactCardPage() {
   // contact instead of going through the "read once then clear" flow.
   const now = new Date(contactNow)
   const pendingEvents = contact.pendingEvents ?? []
-  const previewActiveIntents = isModuleEnabled('intent') ? activeIntents(contact, now.getTime()) : []
-  // ---- admin-mode prompt preview (two-step pipeline) ----
+  // ---- admin-mode preview of the next native-tool request ----
+  const previewPromptModules = promptModulesForContact(contact, settings)
+  const previewPromptSettings = { ...settings, promptModules: previewPromptModules }
   const mainModelPromptParts = adminEnabled
     ? buildRawChatPromptParts({
         name: contact.name,
-        persona: contact.systemPrompt,
-        personaConstraints: contact.personaConstraints,
-        personaProfile: contact.personaProfile,
+        persona: [
+          contact.systemPrompt,
+          contact.birthday && ageFromBirthday(contact.birthday) !== null ? `【当前年龄硬事实】生日为${contact.birthday}，当前${ageFromBirthday(contact.birthday)}岁。` : '',
+          careerEnabled && contact.occupation ? `当前职业：${contact.occupation}，现实月薪：${contact.monthlySalary ?? 0}。` : '',
+        ].filter(Boolean).join('\n\n'),
         stylePrompt: settings.globalSystemPrompt,
-        promptModules: promptModulesForContact(contact, settings),
-        personalityTrait: personalityEnabled ? contact.personalityTrait : undefined,
-        personalityWarmth: relEnabled ? (contact.warmth ?? 0) : undefined,
+        promptModules: previewPromptModules,
         worldviewText: isModuleEnabled('worldview') ? '【运行时按当前对话检索世界书条目；此预览不固定命中结果】' : undefined,
         latestUserText: '【预览】这里会放入用户本轮最新消息',
         recentContext: '',
@@ -393,17 +385,23 @@ export function ContactCardPage() {
           `【相处习惯】${contact.memoryStyle || '（还没有形成习惯）'}`,
         ].join('\n\n'),
         situationContext:
-          `【当前情境】现在: ${describeCurrentTime(now)}。对方: ${buildUserProfileText(settings)}。${contact.mood?.text ? `你的心情: ${contact.mood.text}。` : ''}【日程】${describeCurrentSchedule(contact, now) ? `\n当前: ${describeCurrentSchedule(contact, now)}` : '\n当前: 暂无安排'}${describeUpcomingScheduleText(contact, now) ? `\n接下来:\n${describeUpcomingScheduleText(contact, now)}` : '\n接下来: 暂无安排'}${activeUpcomingPlansText(contact, now) ? `\n约定: ${activeUpcomingPlansText(contact, now)}` : ''}${pendingEvents.length > 0 ? `\n最近: ${pendingEvents.join('；')}` : ''}`,
-        activeIntentText: activeIntentPrompt(previewActiveIntents),
+          `【当前情境】现在: ${describeCurrentTime(now)}。对方: ${buildUserProfileText(settings)}。${contact.mood?.text ? `你的心情: ${contact.mood.text}。` : ''}【日程】${describeCurrentSchedule(contact, now) ? `\n当前: ${describeCurrentSchedule(contact, now)}` : '\n当前: 暂无安排'}${describeUpcomingScheduleText(contact, now) ? `\n接下来:\n${describeUpcomingScheduleText(contact, now)}` : '\n接下来: 暂无安排'}${activeUpcomingPlansText(contact, now) ? `\n约定: ${activeUpcomingPlansText(contact, now)}` : ''}${pendingEvents.length > 0 ? `\n最近: ${pendingEvents.join('；')}` : ''}\n\n【运行时动态内容】实际发送时还会加入本轮检索到的结构化记忆、AI关系、近期跨场景原文、地点合法列表、离线记忆补全、最近聊天历史、联系人推荐去重名单和重生成指令；这些内容依赖本轮消息，预览不会伪造固定结果。`,
         stickerNames: stickers.map((s) => s.name),
-        mbti: contact.mbti || undefined,
-        speechSamplesText: formatSpeechSamplesForScene(contact.speechSamples, 'private', 3) || undefined,
-        sharedHistory: contact.sharedHistory,
+        remoteStickerSearchEnabled: isStickerProviderReady(settings),
+        imageGenerationEnabled: isImageProviderReady(settings),
+        imageSearchEnabled: !!settings.pexelsApiKey,
       })
     : null
-  const conversionPrompt = adminEnabled
-    ? buildJsonConversionPrompt('【AI的原始回复文字会放在这里】', contact.jsonProtocolOverride)
-    : ''
+  const privateToolPreview = adminEnabled
+    ? privateTurnToolDefinition({
+        stickerNames: stickers.map((sticker) => sticker.name),
+        stickerSearchEnabled: isStickerProviderReady(settings),
+        imageEnabled: isImageProviderReady(settings) || !!settings.pexelsApiKey,
+        knowledgeEnabled: featureActive(previewPromptSettings, 'knowledgeBase'),
+        scheduleEnabled: isModuleEnabled('location'),
+        locationIds: allLocations.filter((location) => !allLocations.some((candidate) => candidate.parentId === location.id)).map((location) => location.id),
+      })
+    : null
 
   return (
     <div className="relative flex h-[var(--app-height)] flex-col overflow-hidden bg-[#f4f4f6]">
@@ -425,41 +423,11 @@ export function ContactCardPage() {
       <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
         <div className="mb-2 flex items-center justify-between"><h3 className="text-xs font-medium text-[var(--ui-text-3)]">关系与资料</h3><button type="button" onClick={() => { setRemarkDraft(contact.remark ?? ''); setEditingRemark(true) }} className="text-xs text-[var(--ui-special-ink)]">修改备注</button></div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-2 border-b border-[var(--ui-border)] pb-3 text-xs text-[var(--ui-text-3)]"><p>性别：{contact.gender || contact.creatorProfile?.gender || '未填写'}</p><p>真名：{contact.realName || contact.name}</p><p>网名：{contact.nickname || contact.name}</p><p>生日：{contact.birthday || '未填写'}</p></div>
-        <div className="mt-1"><button type="button" onClick={() => setPickingRelationshipType(true)} className="flex w-full items-center justify-between py-3 text-left active:opacity-70"><span className="text-[15px] text-[var(--ui-text)]">关系定位</span><span className="text-sm text-[var(--ui-text-3)]">{contact.relationshipBase || '未设置'}</span></button>{!immersiveMode && personalityEnabled && <button type="button" onClick={() => setPickingPersonalityTrait(true)} className="flex w-full items-center justify-between border-t border-[var(--ui-border)] py-3 text-left active:opacity-70"><span className="text-[15px] text-[var(--ui-text)]">性格特质</span><span className="text-right text-sm text-[var(--ui-text-3)]">{contact.personalityTrait || '无'}{contact.personalityTrait && contact.personalityTrait !== '无' && relEnabled ? ` · ${personalityIntimacyStage(contact.warmth ?? 0)}` : ''}</span></button>}{careerEnabled && <button type="button" onClick={immersiveMode ? undefined : assignCareer} disabled={assigningCareer} className="flex w-full items-center justify-between border-t border-[var(--ui-border)] py-3 text-left disabled:opacity-50"><span className="text-[15px] text-[var(--ui-text)]">职业</span><span className="text-sm text-[var(--ui-text-3)]">{immersiveMode ? contact.occupation || '暂时不了解' : assigningCareer ? '生成中…' : contact.occupation ? `${contact.occupation} · 月薪 ${formatCurrency(contact.monthlySalary ?? 0, settings)}` : '赋予职业'}</span></button>}{!immersiveMode && careerEnabled && <button type="button" onClick={adminEnabled ? async () => { const raw = prompt('设定该AI的钱包余额', String(contactWallet?.balance ?? 0)); if (raw !== null && Number.isFinite(Number(raw)) && Number(raw) >= 0) await setWalletBalance(contact.id, Number(raw)) } : undefined} className="flex w-full items-center justify-between border-t border-[var(--ui-border)] py-3 text-left"><span className="text-[15px] text-[var(--ui-text)]">钱包</span><span className="text-sm text-[var(--ui-text-3)]">{formatCurrency(contactWallet?.balance ?? 0, settings)}{adminEnabled ? ' · 点击设定' : ''}</span></button>}</div>
+        <div className="mt-1"><button type="button" onClick={() => setPickingRelationshipType(true)} className="flex w-full items-center justify-between py-3 text-left active:opacity-70"><span className="text-[15px] text-[var(--ui-text)]">关系定位</span><span className="text-sm text-[var(--ui-text-3)]">{contact.relationshipBase || '未设置'}</span></button>{careerEnabled && <button type="button" onClick={immersiveMode ? undefined : assignCareer} disabled={assigningCareer} className="flex w-full items-center justify-between border-t border-[var(--ui-border)] py-3 text-left disabled:opacity-50"><span className="text-[15px] text-[var(--ui-text)]">职业</span><span className="text-sm text-[var(--ui-text-3)]">{immersiveMode ? contact.occupation || '暂时不了解' : assigningCareer ? '生成中…' : contact.occupation ? `${contact.occupation} · 月薪 ${formatCurrency(contact.monthlySalary ?? 0, settings)}` : '赋予职业'}</span></button>}{!immersiveMode && careerEnabled && <button type="button" onClick={adminEnabled ? async () => { const raw = prompt('设定该AI的钱包余额', String(contactWallet?.balance ?? 0)); if (raw !== null && Number.isFinite(Number(raw)) && Number(raw) >= 0) await setWalletBalance(contact.id, Number(raw)) } : undefined} className="flex w-full items-center justify-between border-t border-[var(--ui-border)] py-3 text-left"><span className="text-[15px] text-[var(--ui-text)]">钱包</span><span className="text-sm text-[var(--ui-text-3)]">{formatCurrency(contactWallet?.balance ?? 0, settings)}{adminEnabled ? ' · 点击设定' : ''}</span></button>}</div>
       </section>
 
       <SchedulePlanner contact={contact} settings={settings} memories={structuredMemories} />
 
-      {lifeSimulationEnabled && (
-        <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-white px-4 py-4 shadow-[var(--ui-shadow)]">
-          <h3 className="mb-2 flex items-center gap-1.5 text-xs font-medium text-gray-400">
-            <UiIcon name="🌙" size={14} />
-            生活回顾
-          </h3>
-          {lifeState && <p className="mb-2 text-xs text-gray-500">此刻：{lifeState.location} · {lifeState.activity} · 精力 {lifeState.energy}</p>}
-          {lifeEvents.filter((event) => event.visibility !== 'private').length === 0 ? (
-            <p className="text-sm text-gray-400">最近没有适合分享的生活动态</p>
-          ) : (
-            <div className="space-y-2">
-              {lifeEvents.filter((event) => event.visibility !== 'private').slice(0, 10).map((event) => (
-                <div key={event.id} className="rounded-lg bg-gray-50 px-3 py-2">
-                  <p className="text-sm text-gray-700">{event.summary}</p>
-                  <p className="mt-0.5 text-[10px] text-gray-400">{new Date(event.occurredAt).toLocaleString()} · {event.type === 'summary' ? '阶段回顾' : '生活事件'}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {!immersiveMode && experiences.length > 0 && <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
-        <h3 className="mb-2 text-xs font-medium text-[var(--ui-text-3)]">你们的故事</h3>
-        <div className="space-y-2">{[...experiences].sort((a, b) => (b.endedAt ?? b.createdAt) - (a.endedAt ?? a.createdAt)).slice(0, 12).map((experience) => <div key={experience.id} className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface-2)] px-3 py-2">
-          <div className="flex items-center justify-between gap-2"><p className="text-sm font-medium text-[var(--ui-text)]">{experience.title}</p><span className="shrink-0 text-[10px] text-[var(--ui-text-3)]">{experience.kind === 'past' ? '过去' : experience.memoryTier === 'long' ? '长期记忆' : '短期记忆'}</span></div>
-          <p className="mt-1 text-xs leading-relaxed text-[var(--ui-text-2)]">{experience.summary}</p>
-          <p className="mt-1 text-[10px] text-[var(--ui-text-3)]">{experience.periodLabel || (experience.startedAt ? new Date(experience.startedAt).toLocaleString() : '')}{experience.location ? ` · ${experience.location}` : ''}</p>
-        </div>)}</div>
-      </section>}
 
       {!immersiveMode && <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-white px-4 py-4 shadow-[var(--ui-shadow)]">
         <h3 className="mb-2 text-xs font-medium text-gray-400">最近社交动态</h3>
@@ -545,56 +513,6 @@ export function ContactCardPage() {
         )}
       </section>
 
-      {adminEnabled && (
-        <section className="mt-3 bg-white px-4 py-4">
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-xs font-medium text-gray-400">AI 内部意图</h3>
-            {(contact.intentQueue ?? []).length > 0 && (
-              <button onClick={() => clearIntentQueue(contactId!)} className="text-xs text-gray-400 underline">
-                清空内部意图
-              </button>
-            )}
-          </div>
-
-          <div className="space-y-3 text-sm text-gray-600">
-            <div>
-              <p className="mb-1 text-xs text-gray-400">Active</p>
-              {visibleActiveIntents.length === 0 ? (
-                <p className="text-gray-400">暂无</p>
-              ) : (
-                <ul className="space-y-1">
-                  {visibleActiveIntents.map((intent) => (
-                    <li key={intent.id} className="rounded-lg bg-gray-50 px-2.5 py-2">
-                      <p>{intent.text}</p>
-                      <p className="mt-0.5 text-[11px] text-gray-400">
-                        {intent.kind} / {intent.confidence} / {new Date(intent.createdAt).toLocaleString()}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            <div>
-              <p className="mb-1 text-xs text-gray-400">Used 最近 5 条</p>
-              {usedIntents.length === 0 ? (
-                <p className="text-gray-400">暂无</p>
-              ) : (
-                <ul className="space-y-1">
-                  {usedIntents.map((intent) => (
-                    <li key={intent.id} className="rounded-lg bg-gray-50 px-2.5 py-2">
-                      <p>{intent.text}</p>
-                      <p className="mt-0.5 text-[11px] text-gray-400">
-                        {intent.kind} / {intent.confidence} / {new Date(intent.createdAt).toLocaleString()}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-        </section>
-      )}
 
       {adminEnabled && (
         <LatestAiTurnJson contactId={contactId!} />
@@ -602,14 +520,14 @@ export function ContactCardPage() {
 
       {adminEnabled && (
         <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-white px-4 py-4 shadow-[var(--ui-shadow)]">
-          <div className="mb-3"><h3 className="text-xs font-medium text-gray-400">提示词预览（管理员模式）</h3><p className="mt-1 text-[10px] text-gray-400">来源：{contact.promptPresetSourceName || '升级前提示词'}{contact.promptSnapshotUpdatedAt ? ` · ${new Date(contact.promptSnapshotUpdatedAt).toLocaleString()}` : ''}</p></div>
+          <div className="mb-3"><h3 className="text-xs font-medium text-gray-400">下一轮私聊请求预览（管理员模式）</h3><p className="mt-1 text-[10px] text-gray-400">包含系统提示词和同次请求携带的原生工具协议。运行时记忆、聊天历史与检索结果会随本轮消息变化。来源：{contact.promptPresetSourceName || '升级前提示词'}{contact.promptSnapshotUpdatedAt ? ` · ${new Date(contact.promptSnapshotUpdatedAt).toLocaleString()}` : ''}</p></div>
 
           <div className="space-y-4">
-            {/* Step 1: main model */}
+            {/* System prompt sent with the native tool schema below. */}
             <div className="rounded-lg border-2 border-gray-800">
               <div className="border-b border-gray-200 bg-gray-100 px-3 py-1.5">
                 <span className="flex items-center gap-1.5 text-xs font-bold text-gray-800"><ArrowUpFromLine size={14} />{`发给主模型（${settings.model}）`}</span>
-                <span className="ml-2 text-[10px] text-gray-400">生成自然语言回复 + 括号想法</span>
+                <span className="ml-2 text-[10px] text-gray-400">系统提示词；回复通过下方原生工具提交</span>
               </div>
               <div className="p-3">
                 <div className="space-y-3">
@@ -636,18 +554,16 @@ export function ContactCardPage() {
               </div>
             </div>
 
-            {/* Step 2: utility model */}
             <div className="rounded-lg border-2 border-gray-800">
               <div className="border-b border-gray-200 bg-gray-100 px-3 py-1.5">
-                <span className="flex items-center gap-1.5 text-xs font-bold text-gray-800"><ArrowDownToLine size={14} />{`发给多功能模型（${settings.utilityModel}）`}</span>
-                <span className="ml-2 text-[10px] text-gray-400">原始文字 → JSON（提取mood/thought/表情包）</span>
+                <span className="flex items-center gap-1.5 text-xs font-bold text-gray-800">原生工具协议（同一次模型请求）</span>
+                <span className="ml-2 text-[10px] text-gray-400">模型必须通过 submit_turn 提交实际消息与行动</span>
               </div>
-              <div className="p-3">
-                <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-gray-700">
-                  {conversionPrompt}
-                </pre>
-              </div>
+              <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap break-words p-3 font-mono text-[11px] leading-relaxed text-gray-700">
+                {JSON.stringify(privateToolPreview, null, 2)}
+              </pre>
             </div>
+
           </div>
         </section>
       )}
@@ -690,16 +606,6 @@ export function ContactCardPage() {
             label,
             onSelect: () => { void db.contacts.update(contactId!, { relationshipBase: label }) },
           })), { label: '自定义…', onSelect: () => { const value = window.prompt('输入自定义关系定位', contact.relationshipBase || '')?.trim(); if (value) void db.contacts.update(contactId!, { relationshipBase: value }) } }]}
-        />
-      )}
-
-      {pickingPersonalityTrait && (
-        <ActionSheet
-          onClose={() => setPickingPersonalityTrait(false)}
-          options={[...PERSONALITY_TRAIT_OPTIONS.map((opt) => ({
-            label: opt.value,
-            onSelect: () => { void db.contacts.update(contactId!, { personalityTrait: opt.value }) },
-          })), { label: '自定义…', onSelect: () => { const value = window.prompt('输入自定义性格特质', contact.personalityTrait || '')?.trim(); if (value) void db.contacts.update(contactId!, { personalityTrait: value }) } }]}
         />
       )}
 

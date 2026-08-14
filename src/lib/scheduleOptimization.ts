@@ -16,7 +16,7 @@ export function buildScheduleOptimizationPrompt(contact: Contact, memories: Cont
     '“优化”不是照抄现有日程：把现有日程当作职业、作息和承诺的参考，必须主动重排不合理的集中安排。除非人物设定明确限定只在少数日期活动，否则总计 7 到 14 项，每天最多 3 项；7 项以上至少分布在 4 天，4 到 6 项至少分布在 3 天，3 项至少分布在 2 天。输出前逐项检查是否仍全部或大部分堆在同一天；若是，必须重新分散安排。有明确工作/学习规律时要保留其时间性质，但可将日常生活、休息和个人安排补到其他合理日期。',
     `当前时间：${now.toLocaleString('zh-CN')}`,
     `人物原始设定：${contact.systemPrompt || '无'}`,
-    `人物结构资料：${JSON.stringify(contact.personaProfile ?? {})}`,
+    `统一人设：${contact.systemPrompt}`,
     `职业与背景：${[contact.occupation, contact.realName, contact.birthday].filter(Boolean).join('；') || '无'}`,
     `现有每周日程：${JSON.stringify((contact.schedule ?? []).map((task) => ({ ...task, weekday: weekdayNames[task.dayOfWeek] })) )}`,
     `可选具体地点（只可使用这些 locationId）：${JSON.stringify(locations.filter((location) => !locations.some((candidate) => candidate.parentId === location.id)).map((location) => ({ locationId: location.id, name: location.name })) )}`,

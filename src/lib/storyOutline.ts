@@ -70,7 +70,6 @@ export async function generateGroupStoryOutline(opts: {
   speakers: Contact[]
   premiseText: string
   history: Message[]
-  allowAiChatter: boolean
   energyLevel: GroupEnergyLevel
   signal?: AbortSignal
 }): Promise<string> {
@@ -84,7 +83,6 @@ export async function generateGroupStoryOutline(opts: {
 ${speakerText}
 
 【群聊设置】
-AI互聊: ${opts.allowAiChatter ? '开启' : '关闭'}
 热闹程度: ${opts.energyLevel}`,
     historyText: groupHistoryText(opts.history, opts.members, opts.settings.userNickname),
     signal: opts.signal,

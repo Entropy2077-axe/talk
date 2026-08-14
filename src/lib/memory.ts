@@ -2,12 +2,11 @@ import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { parseJsonLoose } from './aiProtocol'
 import { chatCompletionText as chatCompletion } from './deepseek'
-import { clampWarmthDelta, applyWarmthDelta, maxWarmthForTrait, minWarmthForTrait, warmthStage, shouldUpdateBase, containsBreakupLanguage, WARMTH_BREAKUP_PENALTY, traitWarmthModifier, customTraitWarmthModifier } from './relationship'
+import { clampWarmthDelta, applyWarmthDelta, warmthStage, shouldUpdateBase, containsBreakupLanguage, WARMTH_BREAKUP_PENALTY } from './relationship'
 import { displayName } from './contact'
 import { describeCurrentTime, toDateKey } from './time'
-import { parseIntentsField, type ParsedIntent } from './intent'
 import { applyInterpersonalMemorySignals, uniqueRelationPairs } from './contactRelations'
-import type { AppSettings, Contact, ContactMemory, ContactMemoryScope, ContactRelationLabel, IntentItem, MemoryCategory, MemoryKind, Message, PlanItem } from '../types'
+import type { AppSettings, Contact, ContactMemory, ContactMemoryScope, ContactRelationLabel, MemoryCategory, MemoryKind, Message, PlanItem } from '../types'
 import { featureActive, getPromptTemplate, promptModuleEnabled } from './promptModules'
 
 /** How many *new* messages accumulate before we bother refreshing memory. Keeps the extra API call rare. */
@@ -56,10 +55,7 @@ export function buildMemoryUpdatePrompt(opts: {
   const relationshipPrompt = featureActive(opts.settings, 'relationship')
     ? getPromptTemplate(opts.settings, 'relationship', 'memoryScoring')
     : null
-  const intentPrompt = featureActive(opts.settings, 'intent')
-    ? getPromptTemplate(opts.settings, 'intent', 'extraction')
-    : null
-  const activeBlocks = [memoryPrompt, relationshipPrompt ? `${relationshipPrompt}\n当前好感度：${opts.warmth}/100（${stage.label}）` : '', intentPrompt].filter(Boolean)
+  const activeBlocks = [memoryPrompt, relationshipPrompt ? `${relationshipPrompt}\n当前好感度：${opts.warmth}/100（${stage.label}）` : ''].filter(Boolean)
   if (activeBlocks.length === 0) return ''
   const outputShape: Record<string, unknown> = {}
   if (memoryPrompt) Object.assign(outputShape, {
@@ -68,7 +64,6 @@ export function buildMemoryUpdatePrompt(opts: {
     memoryItems: [{ category: '基础信息', kind: 'user_fact', content: '...', tags: [], importance: 0.7, emotionalWeight: 0.3, confidence: 0.9 }],
   })
   if (relationshipPrompt) Object.assign(outputShape, { warmthDelta: 0, relationshipAssessment: '...', relationshipConfidence: 70 })
-  if (intentPrompt) Object.assign(outputShape, { intents: [{ text: '...', kind: 'care', confidence: 85 }] })
   return `${activeBlocks.join('\n\n')}
 
 以下是固定输出协议，只输出JSON：
@@ -190,7 +185,6 @@ interface MemoryUpdateResult {
   warmthDelta: number
   relationshipAssessment: string
   relationshipConfidence: number
-  intents: ParsedIntent[]
   memoryItems: ParsedMemoryItem[]
 }
 
@@ -199,7 +193,6 @@ export interface MemoryUpdateDebug {
   factsUpdated: boolean
   styleUpdated: boolean
   addedPlans: PlanItem[]
-  addedIntents: IntentItem[]
   warmthDelta: number
   relationshipAssessment: string
   relationshipConfidence: number
@@ -226,7 +219,6 @@ function parseMemoryResponse(raw: string): MemoryUpdateResult | null {
       relationshipConfidence: Number.isFinite(relationshipConfidence)
         ? Math.max(0, Math.min(100, Math.round(relationshipConfidence)))
         : 0,
-      intents: parseIntentsField(parsed.intents),
       memoryItems: parseMemoryItemsField(parsed.memoryItems),
     }
   }
@@ -420,30 +412,6 @@ function mergePlanItems(existing: PlanItem[], added: PlanItem[], now: number): P
   return [...activeUpcomingPlans(existing, new Date(now)), ...added].slice(-MAX_UPCOMING_PLANS)
 }
 
-function mergeIntentItems(existing: IntentItem[], added: IntentItem[], now: number): IntentItem[] {
-  const activeExisting = existing.filter((intent) => !intent.expiresAt || intent.expiresAt > now)
-  return [...activeExisting, ...added].slice(-20)
-}
-
-function newIntentItems(existing: IntentItem[], newOnes: ParsedIntent[], now: number): IntentItem[] {
-  const seen = new Set(existing.map((intent) => intent.text.trim()))
-  const added: IntentItem[] = []
-  for (const intent of newOnes) {
-    if (seen.has(intent.text)) continue
-    seen.add(intent.text)
-    added.push({
-      id: uuid(),
-      text: intent.text,
-      kind: intent.kind,
-      createdAt: now,
-      expiresAt: intent.expiresAt,
-      status: 'active',
-      confidence: intent.confidence,
-    })
-  }
-  return added
-}
-
 /**
  * Fire-and-forget: if enough new messages have piled up, summarize them into
  * compact facts/style memory, score warmth, and optionally re-assess the
@@ -464,8 +432,7 @@ export async function maybeUpdateMemory(
     if (newMessages.length < MEMORY_UPDATE_INTERVAL) return null
     const memoryPromptEnabled = promptModuleEnabled(settings, 'memory')
     const relationshipPromptEnabled = featureActive(settings, 'relationship')
-    const intentPromptEnabled = featureActive(settings, 'intent')
-    if (!memoryPromptEnabled && !relationshipPromptEnabled && !intentPromptEnabled) return null
+    if (!memoryPromptEnabled && !relationshipPromptEnabled) return null
 
     const raw = await chatCompletion({
       apiKey: settings.apiKey,
@@ -497,14 +464,10 @@ export async function maybeUpdateMemory(
     // Relationship scoring is only active when the 好感度 module is enabled.
     // Memory (facts/style/plans) always updates regardless.
     const relEnabled = relationshipPromptEnabled
-    const personalityEnabled = featureActive(settings, 'personalityTraits')
-    const intentEnabled = intentPromptEnabled
 
     const oldWarmth = contact.warmth ?? 0
     const rawDelta = relEnabled ? updated.warmthDelta : 0
-    let warmthDelta = personalityEnabled
-      ? (contact.customPersonalityTraits?.length ? customTraitWarmthModifier(contact.customPersonalityTraits, rawDelta, oldWarmth) : traitWarmthModifier(contact.personalityTrait, rawDelta, oldWarmth))
-      : rawDelta
+    let warmthDelta = rawDelta
 
     const relationshipHighConfidence = updated.relationshipConfidence >= RELATIONSHIP_CONFIDENCE_THRESHOLD
     const dynamic = relationshipHighConfidence
@@ -515,7 +478,7 @@ export async function maybeUpdateMemory(
     }
 
     const newWarmth = relEnabled
-      ? applyWarmthDelta(oldWarmth, warmthDelta, personalityEnabled ? maxWarmthForTrait(contact.personalityTrait) : 100, personalityEnabled ? minWarmthForTrait(contact.personalityTrait) : -100)
+      ? applyWarmthDelta(oldWarmth, warmthDelta, 100, -100)
       : oldWarmth
     let base = contact.relationshipBase
     let relationshipBaseChanged = false
@@ -530,7 +493,6 @@ export async function maybeUpdateMemory(
     const factsUpdated = memoryPromptEnabled && updated.factConfidence >= MEMORY_CONFIDENCE_THRESHOLD && updated.facts !== contact.memoryFacts
     const styleUpdated = memoryPromptEnabled && updated.styleConfidence >= MEMORY_CONFIDENCE_THRESHOLD && updated.style !== contact.memoryStyle
     const addedPlans = memoryPromptEnabled ? newPlanItems(updated.plans, now) : []
-    const addedIntents = intentEnabled ? newIntentItems(contact.intentQueue ?? [], updated.intents, now) : []
 
     // Write structured memory items to the contactMemories table (deduped).
     const memStats = memoryPromptEnabled
@@ -561,9 +523,6 @@ export async function maybeUpdateMemory(
         memoryUpdatedAt: now,
         upcomingPlans: mergePlanItems(contact.upcomingPlans ?? [], allAddedPlans, now),
       } : {}),
-      ...(intentEnabled
-        ? { intentQueue: mergeIntentItems(contact.intentQueue ?? [], addedIntents, now) }
-        : {}),
       ...(relEnabled
         ? { warmth: newWarmth, relationshipDynamic: dynamic, relationshipBase: base }
         : {}),
@@ -573,7 +532,6 @@ export async function maybeUpdateMemory(
       factsUpdated,
       styleUpdated,
       addedPlans,
-      addedIntents,
       warmthDelta,
       relationshipAssessment: dynamic,
       relationshipConfidence: updated.relationshipConfidence,

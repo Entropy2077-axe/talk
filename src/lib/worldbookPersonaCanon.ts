@@ -2,7 +2,7 @@ import type { AppSettings } from '../types'
 import { parseJsonLoose } from './aiProtocol'
 import { chatCompletionText } from './deepseek'
 
-export interface CanonicalPastExperience {
+export interface CanonicalInitialMemory {
   title: string
   period: string
   summary: string
@@ -15,7 +15,7 @@ export interface WorldbookPersonaCanon {
   sharedHistory: string
   facts: string[]
   boundaries: string[]
-  pastExperiences: CanonicalPastExperience[]
+  initialMemories: CanonicalInitialMemory[]
 }
 
 export async function extractWorldbookPersonaCanon(opts: {
@@ -26,12 +26,12 @@ export async function extractWorldbookPersonaCanon(opts: {
   /** Cancels the extraction together with its parent contact-generation job. */
   signal?: AbortSignal
 }): Promise<WorldbookPersonaCanon> {
-  if (!opts.worldbookText.trim()) return { relationship: '', sharedHistory: '', facts: [], boundaries: [], pastExperiences: [] }
+  if (!opts.worldbookText.trim()) return { relationship: '', sharedHistory: '', facts: [], boundaries: [], initialMemories: [] }
   const raw = await chatCompletionText({
     apiKey: opts.settings.apiKey,
     baseUrl: opts.settings.baseUrl,
     model: opts.settings.utilityModel || opts.settings.model,
-    messages: [{ role: 'system', content: `你是世界书正史提取器。只提取原文明确存在或能直接推出的事实，不补写剧情。重点提取目标角色与用户、已有角色之间已经发生的关系和经历。已有联系人姓名只能从给定名单中选择。只输出 JSON：{"relationship":"与用户的既有关系","sharedHistory":"与用户共同过往摘要","facts":["身份事实"],"boundaries":["不可违背的边界"],"pastExperiences":[{"title":"标题","period":"时期","summary":"已发生的具体事件及影响","relatedContactNames":["已有联系人姓名"],"importance":85}]}` }, { role: 'user', content: `目标角色线索：${opts.requestedCharacter || '从世界书中识别主要目标角色'}\n已有联系人：${opts.existingContactNames.join('、') || '无'}\n世界书：\n${opts.worldbookText.slice(0, 10000)}` }],
+    messages: [{ role: 'system', content: `你是世界书正史提取器。只提取原文明确存在或能直接推出的事实，不补写剧情。重点提取目标角色与用户、已有角色之间已经发生的关系和记忆。已有联系人姓名只能从给定名单中选择。只输出 JSON：{"relationship":"与用户的既有关系","sharedHistory":"与用户共同记忆摘要","facts":["身份事实"],"boundaries":["不可违背的边界"],"initialMemories":[{"title":"标题","period":"时期","summary":"已发生的具体事件及影响","relatedContactNames":["已有联系人姓名"],"importance":85}]}` }, { role: 'user', content: `目标角色线索：${opts.requestedCharacter || '从世界书中识别主要目标角色'}\n已有联系人：${opts.existingContactNames.join('、') || '无'}\n世界书：\n${opts.worldbookText.slice(0, 10000)}` }],
     jsonMode: true,
     thinking: 'disabled',
     purpose: 'worldbook',
@@ -43,13 +43,13 @@ export async function extractWorldbookPersonaCanon(opts: {
   if (!parsed) throw new Error('世界书正史提取失败，请检查模型输出后重试')
   const list = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean) : []
   const allowedNames = new Set(opts.existingContactNames.map((name) => name.toLocaleLowerCase()))
-  const experiences = Array.isArray(parsed.pastExperiences) ? parsed.pastExperiences : []
+  const memories = Array.isArray(parsed.initialMemories) ? parsed.initialMemories : []
   return {
     relationship: typeof parsed.relationship === 'string' ? parsed.relationship.trim().slice(0, 80) : '',
     sharedHistory: typeof parsed.sharedHistory === 'string' ? parsed.sharedHistory.trim().slice(0, 1200) : '',
     facts: list(parsed.facts).slice(0, 12),
     boundaries: list(parsed.boundaries).slice(0, 12),
-    pastExperiences: experiences.filter((value): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value) && typeof (value as Record<string, unknown>).summary === 'string').slice(0, 12).map((value) => ({
+    initialMemories: memories.filter((value): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value) && typeof (value as Record<string, unknown>).summary === 'string').slice(0, 12).map((value) => ({
       title: typeof value.title === 'string' ? value.title.trim().slice(0, 80) : '世界书中的过去',
       period: typeof value.period === 'string' ? value.period.trim().slice(0, 80) : '',
       summary: String(value.summary).trim().slice(0, 800),

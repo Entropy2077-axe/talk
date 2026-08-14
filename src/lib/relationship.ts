@@ -297,9 +297,8 @@ import { featureActive, getPromptTemplate } from './promptModules'
 
 /**
  * Called once per contact when 好感度 is enabled and warmth hasn't been
- * evaluated yet. If the contact has a personality trait with a known
- * initial warmth, use that; otherwise call the utility model to assess
- * warmth from chat history. Stores the result on the contact.
+ * evaluated yet. Uses chat history and the configured base relationship;
+ * persona labels no longer alter the numeric relationship model.
  */
 export async function evaluateInitialWarmth(
   contact: Contact,
@@ -307,14 +306,7 @@ export async function evaluateInitialWarmth(
   settings: AppSettings,
 ): Promise<number> {
   if (!featureActive(settings, 'relationship')) return contact.warmth ?? 0
-  // Personality trait with initial warmth takes priority over API evaluation.
-  if (featureActive(settings, 'personalityTraits') && contact.personalityTrait && contact.personalityTrait !== '无') {
-    const initial = initialWarmthForBase(contact.relationshipBase || '朋友', contact.personalityTrait)
-    await db.contacts.update(contact.id, { warmth: initial })
-    return initial
-  }
-
-  // Otherwise, evaluate from chat history using the utility model.
+  // Evaluate from chat history using the utility model.
   try {
     const history = await db.messages
       .where('conversationId')

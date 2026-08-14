@@ -1,4 +1,5 @@
 import { parseJsonLoose } from './aiProtocol'
+import type { ChatToolDefinition } from './deepseek'
 
 export interface NuwaStructuredResult {
   realName: string
@@ -10,23 +11,42 @@ export interface NuwaStructuredResult {
   relationship: string
   occupation: string
   hobbies: string
-  personalityTrait: string
-  personalityTraitContent: string
   otherSetting: string
 }
 
-export const NUWA_FORM_KEYS = ['realName', 'nickname', 'birthday', 'tendencies', 'age', 'gender', 'relationship', 'occupation', 'hobbies', 'personalityTrait', 'personalityTraitContent', 'otherSetting'] as const
-export const NUWA_FORM_JSON_SCHEMA = '{"realName":"","nickname":"","birthday":"","tendencies":"","age":"","gender":"","relationship":"","occupation":"","hobbies":"","personalityTrait":"","personalityTraitContent":"","otherSetting":""}'
+export const NUWA_FORM_KEYS = ['realName', 'nickname', 'birthday', 'tendencies', 'age', 'gender', 'relationship', 'occupation', 'hobbies', 'otherSetting'] as const
+export const NUWA_FORM_JSON_SCHEMA = '{"realName":"","nickname":"","birthday":"","tendencies":"","age":"","gender":"","relationship":"","occupation":"","hobbies":"","otherSetting":""}'
 export const NUWA_FIELD_LABELS: Record<(typeof NUWA_FORM_KEYS)[number], string> = {
-  realName: '真名', nickname: '网名/昵称', birthday: '出生日期', tendencies: '性格倾向', age: '年龄', gender: '性别', relationship: '关系定位', occupation: '职业', hobbies: '兴趣爱好', personalityTrait: '性格特质名称', personalityTraitContent: '性格特质内容', otherSetting: '其他角色设定',
+  realName: '真名', nickname: '网名/昵称', birthday: '出生日期', tendencies: '性格倾向', age: '年龄', gender: '性别', relationship: '关系定位', occupation: '职业', hobbies: '兴趣爱好', otherSetting: '人设',
+}
+
+/** Native-function counterpart of the fixed Nuwa form protocol. */
+export function submitNuwaFormTool(): ChatToolDefinition {
+  const properties = Object.fromEntries(NUWA_FORM_KEYS.map((key) => [key, {
+    type: 'string',
+    description: NUWA_FIELD_LABELS[key],
+  }]))
+  return {
+    type: 'function',
+    function: {
+      name: 'submit_nuwa_form',
+      description: '提交精细创建的人设补全结果。必须完整填写固定表单；只能补全空字段，绝不能改写用户已有字段。',
+      parameters: {
+        type: 'object',
+        properties,
+        required: [...NUWA_FORM_KEYS],
+        additionalProperties: false,
+      },
+    },
+  }
 }
 
 export function nuwaFormOutputProtocol(): string {
   return `【固定输出协议】这是不可编辑的界面数据协议，优先级高于前文的输出形式要求。
-必须只返回一个合法 JSON 对象，禁止输出普通段落、Markdown、代码块、标题或解释。
+支持原生工具调用时，必须调用 submit_nuwa_form，并将以下全部字段作为工具参数提交；接口不支持工具调用时，才只返回一个合法 JSON 对象。禁止输出普通段落、Markdown、代码块、标题或解释。
 JSON 的键必须完整且只能使用以下结构：
 ${NUWA_FORM_JSON_SCHEMA}
-必须把原本为空的每一个字段都补成具体、非空的内容，不允许继续返回空字符串；已填写字段必须逐字保留。personalityTrait 是特质名称，personalityTraitContent 是该特质的具体行为与性格表现；otherSetting 返回完整正文。
+必须把原本为空的每一个字段都补成具体、非空的内容，不允许继续返回空字符串；已填写字段必须逐字保留。所有性格、边界、习惯、行为和说话方式都写入 otherSetting 这一份完整人设正文，不得创建并行的人格字段。
 hobbies 使用顿号分隔。即使初稿建议很简短，也要根据已有信息合理补齐全部字段，并保证彼此一致。`
 }
 
@@ -56,10 +76,20 @@ export function parseNuwaStructuredResult(raw: string): NuwaStructuredResult | n
     relationship: text('relationship', '关系定位'),
     occupation: text('occupation', '职业'),
     hobbies: text('hobbies', '兴趣爱好'),
-    personalityTrait: text('personalityTrait', '性格特质'),
-    personalityTraitContent: text('personalityTraitContent', '性格特质内容', '特质内容'),
     otherSetting: text('otherSetting', 'personaSetting', '其他角色设定', '其他设定'),
   }
+}
+
+/** The model may paraphrase a field despite the instruction not to.  The UI
+ * owns user-entered values, so restore them before review or application;
+ * completion is allowed to contribute only to genuinely empty fields. */
+export function preserveFilledNuwaFields(raw: string, current: NuwaStructuredResult): string {
+  const value = parseJsonRecord(raw)
+  if (!value) return raw
+  for (const key of NUWA_FORM_KEYS) {
+    if (current[key]) value[key] = current[key]
+  }
+  return JSON.stringify(value)
 }
 
 export function localNuwaFormatIssues(raw: string): string[] {
@@ -85,5 +115,5 @@ export function parseNuwaReview(raw: string): { valid: boolean; issues: string[]
 }
 
 export function hasNuwaFormFields(result: NuwaStructuredResult): boolean {
-  return [result.realName, result.nickname, result.birthday, result.tendencies, result.age, result.gender, result.relationship, result.occupation, result.hobbies, result.personalityTrait, result.personalityTraitContent].some(Boolean)
+  return [result.realName, result.nickname, result.birthday, result.tendencies, result.age, result.gender, result.relationship, result.occupation, result.hobbies].some(Boolean)
 }

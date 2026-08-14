@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useNavigate, useParams } from 'react-router-dom'
 import { db } from '../db/db'
@@ -14,7 +14,7 @@ import {
 } from '../lib/contactGenerationTasks'
 
 const FIELD_LABELS: Record<string, string> = {
-  name: '姓名', realName: '真名', nickname: '昵称', gender: '性别', ageRange: '年龄', relationship: '关系定位', occupation: '职业', birthday: '生日', hobbies: '兴趣爱好', persona: '完整人设', mbti: 'MBTI', personaProfile: '性格与行为', pastExperiences: '过去经历', speechSamples: '说话方式', schedule: '日程安排', avatarKeyword: '头像关键词', monthlySalary: '收入资料',
+  name: '姓名', realName: '真名', nickname: '昵称', gender: '性别', ageRange: '年龄', relationship: '关系定位', occupation: '职业', birthday: '生日', hobbies: '兴趣爱好', persona: '完整人设', speechExamples: '说话示例（将合并进人设）', schedule: '日程安排', avatarKeyword: '头像关键词', monthlySalary: '收入资料',
 }
 
 export function ContactGenerationTaskPage() {
@@ -23,6 +23,18 @@ export function ContactGenerationTaskPage() {
   const task = useLiveQuery(async () => (await db.contactGenerationTasks.get(taskId)) ?? null, [taskId])
   const [draft, setDraft] = useState<PersonaGenerationResult | null>(null)
   const [copyStatus, setCopyStatus] = useState('')
+  const personaFieldRef = useRef<HTMLTextAreaElement>(null)
+
+  function fitPersonaField() {
+    const field = personaFieldRef.current
+    if (!field) return
+    field.style.height = '0px'
+    field.style.height = `${field.scrollHeight}px`
+  }
+
+  useLayoutEffect(() => {
+    fitPersonaField()
+  }, [draft?.persona])
 
   useEffect(() => {
     if (task?.status === 'awaiting_review' && task.personaDraft) setDraft(structuredClone(task.personaDraft))
@@ -76,6 +88,19 @@ export function ContactGenerationTaskPage() {
           {active && <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-gray-100"><div className="h-full w-1/3 animate-pulse rounded-full bg-[var(--ui-special)]" /></div>}
         </section>
 
+        {!immersive && active && (task.generationActivity?.length ?? 0) > 0 && (
+          <section className="mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] p-4 shadow-[var(--ui-shadow)]">
+            <h3 className="text-sm font-medium text-gray-900">生成过程</h3>
+            <div className="mt-3 space-y-2">
+              {task.generationActivity!.slice(-6).map((item, index, rows) => (
+                <p key={`${item}-${index}`} className={`text-xs ${index === rows.length - 1 ? 'text-[var(--ui-special-ink)]' : 'text-gray-400'}`}>
+                  {index === rows.length - 1 ? '●' : '✓'} {item}
+                </p>
+              ))}
+            </div>
+          </section>
+        )}
+
         {!immersive && fields.length > 0 && task.status !== 'awaiting_review' && (
           <section className="mt-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] p-4 shadow-[var(--ui-shadow)]">
             <h3 className="text-sm font-medium text-gray-900">已经生成的内容</h3>
@@ -96,15 +121,12 @@ export function ContactGenerationTaskPage() {
             <div className="mb-3"><h3 className="text-base font-medium text-gray-900">AI人设初稿</h3><p className="mt-1 text-xs text-gray-400">初稿已完成。你可以二次修改，确认后联系人正式上线。</p></div>
             <div className="grid grid-cols-2 gap-2">
               <label className="text-xs text-gray-500">姓名<input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" /></label>
-              <label className="text-xs text-gray-500">MBTI<input value={draft.mbti} onChange={(event) => setDraft({ ...draft, mbti: event.target.value })} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" /></label>
             </div>
             <div className="mt-3 rounded-lg border border-gray-200 px-3 py-3">
               <div className="flex items-center justify-between"><label className="text-xs text-gray-500">初始好感度</label><input aria-label="女娲好感度数值" type="number" min="-100" max="100" value={draft.initialWarmth ?? 0} onChange={(event) => setDraft({ ...draft, initialWarmth: Math.max(-100, Math.min(100, Number(event.target.value) || 0)) })} className="w-20 rounded-lg border border-gray-200 px-2 py-1.5 text-center text-sm" /></div>
               <input aria-label="女娲好感度" type="range" min="-100" max="100" value={draft.initialWarmth ?? 0} onChange={(event) => setDraft({ ...draft, initialWarmth: Number(event.target.value) })} className="mt-2 w-full accent-[var(--ui-special)]" />
             </div>
-            <label className="mt-3 block text-xs text-gray-500">完整人设<textarea value={draft.persona} onChange={(event) => setDraft({ ...draft, persona: event.target.value })} rows={9} className="mt-1 w-full resize-y rounded-lg border border-gray-200 px-3 py-2 text-sm leading-relaxed" /></label>
-            <label className="mt-3 block text-xs text-gray-500">过去经历（时期｜标题｜内容）<textarea value={(draft.pastExperiences ?? []).map((item) => [item.period, item.title, item.summary].join('｜')).join('\n')} onChange={(event) => setDraft({ ...draft, pastExperiences: event.target.value.split('\n').map((line) => line.trim()).filter(Boolean).slice(0, 10).map((line) => { const [period = '', title = '过去的经历', ...summary] = line.split('｜'); return { period, title, summary: summary.join('｜') || title, relatedContactNames: [], importance: 75 } }) })} rows={6} className="mt-1 w-full resize-y rounded-lg border border-gray-200 px-3 py-2 text-sm leading-relaxed" /></label>
-            <label className="mt-3 block text-xs text-gray-500">说话样例（每行一条）<textarea value={(draft.speechSamples ?? []).join('\n')} onChange={(event) => setDraft({ ...draft, speechSamples: event.target.value.split('\n').map((line) => line.trim()).filter(Boolean).slice(0, 8) })} rows={5} className="mt-1 w-full resize-y rounded-lg border border-gray-200 px-3 py-2 text-sm leading-relaxed" /></label>
+            <label className="mt-3 block text-xs text-gray-500">完整人设<textarea ref={personaFieldRef} value={draft.persona} onInput={fitPersonaField} onChange={(event) => setDraft({ ...draft, persona: event.target.value })} rows={1} className="mt-1 w-full resize-none overflow-hidden rounded-lg border border-gray-200 px-3 py-2 text-sm leading-relaxed" /></label>
             <button onClick={() => void confirmDraft()} disabled={!draft.name.trim() || !draft.persona.trim()} className="mt-4 w-full rounded-lg bg-gray-900 py-2.5 text-sm text-white disabled:opacity-40">确认修改并创建联系人</button>
           </section>
         )}

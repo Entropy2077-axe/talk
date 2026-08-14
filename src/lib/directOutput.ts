@@ -42,7 +42,7 @@ export function buildDirectGroupOutputInstruction(speakers: Contact[]): string {
   const speakerLines = speakers.map((speaker, index) => `${index + 1}=${speaker.name}`).join('；')
   return `【实验：一次调用直出】
 忽略上文的纯文本行格式要求。本轮只输出一个合法 JSON 对象，不要 Markdown、代码围栏或额外说明。
-固定结构：{"messages":[{"speakerIndex":1,"speakerName":"姓名","type":"text","content":"消息","thought":"真实想法","mood":"心情"}],"turnSummary":"一句话总结","groupVibe":"20到60字的最新群氛围","knowledgeQueries":[],"planCandidates":[],"review":{"valid":true,"reason":"已检查人物、事实与时间因果"}}
+固定结构：{"messages":[{"speakerIndex":1,"speakerName":"姓名","type":"text","content":"消息","thought":"真实想法","mood":"心情"}],"turnSummary":"一句话总结","knowledgeQueries":[],"planCandidates":[],"review":{"valid":true,"reason":"已检查人物、事实与时间因果"}}
 每条消息的 speakerIndex 必须来自本轮发言人：${speakerLines}。thought 和 mood 必填。消息可用 text、sticker、image 类型。image 不填写 caption；某位成员发送 image 时，同一轮必须另有该成员的一条 text 消息。
 若至少两位成员在本轮明确同意同一个共同计划，可直接填写 planCandidates：[{"title":"标题","summary":"计划","participantIndexes":[1,2],"location":"地点或待定"}]；否则保持空数组。
 先在同一次生成中完成事实、人设、时间因果与发言人自审并修正，再填写 review。knowledgeQueries 必须保持空数组，因为本轮不会再发起第二次模型请求。`

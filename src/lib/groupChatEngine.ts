@@ -32,6 +32,13 @@ import { createGroupPlan, planCardMessage } from './groupPlans'
 import { useChatUiStore } from '../store/useChatUiStore'
 import { retrieveWorldbookContext } from './worldbook'
 import { featureActive, promptModuleEnabled } from './promptModules'
+
+function groupMessageBounds(level: import('../types').GroupEnergyLevel, speakerCount: number): { min: number; max: number } {
+  const speakers = Math.max(1, speakerCount)
+  if (level === 'cold') return { min: 1, max: Math.min(3, speakers + 1) }
+  if (level === 'lively') return { min: Math.min(6, Math.max(3, speakers + 1)), max: Math.min(12, Math.max(6, speakers * 3)) }
+  return { min: Math.min(3, Math.max(2, speakers)), max: Math.min(7, Math.max(4, speakers * 2)) }
+}
 import { realisticReplyDelayMs } from './replyTiming'
 import { createMediaAsset, startMediaAsset } from './imageAssets'
 import { generateGroupAgentTurn } from './chatAgentTools'
@@ -106,7 +113,6 @@ function parseGroupTurnDebugPayload(
   bubbles: GroupAiBubble[],
   knowledgeQueries: string[],
   turnSummary: string,
-  groupVibe: string,
   storyOutline?: string,
 ): unknown {
   const parsed = parseJsonLoose(finalRaw)
@@ -114,7 +120,7 @@ function parseGroupTurnDebugPayload(
     return { ...(parsed as Record<string, unknown>), mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, storyOutline, promptTrace: { sections: [{ label: '群聊主提示词', content: mainPrompt }] } }
   }
   if (parsed !== null) return parsed
-  return { mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, knowledgeQueries, turnSummary, groupVibe, storyOutline, promptTrace: { sections: [{ label: '群聊主提示词', content: mainPrompt }] } }
+  return { mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, knowledgeQueries, turnSummary, storyOutline, promptTrace: { sections: [{ label: '群聊主提示词', content: mainPrompt }] } }
 }
 
 /** Cancels a group generation and its queued bubbles. */
@@ -137,7 +143,6 @@ async function updateGroupMemoryAndVibe(opts: {
   aiTurnId: string
   settings: AppSettings
   turnSummary: string
-  groupVibe: string
   directOutput?: boolean
 }): Promise<void> {
   const { group, aiTurnId, settings } = opts
@@ -150,7 +155,6 @@ async function updateGroupMemoryAndVibe(opts: {
     : (group.memory ?? '')
   const patch: Partial<Group> = {
     memory: appendedMemory,
-    vibe: opts.groupVibe.trim() || group.vibe || '',
     memoryTurnCount: nextTurnCount,
   }
 
@@ -418,7 +422,7 @@ async function runGroupAiTurn(
       // it here avoids paying twice for the same messages.
       excludeConversationId: conversationId,
     }) : ''
-    const worldbookText = featureActive(settings, 'worldview') ? await retrieveWorldbookContext([group.name, group.vibe, targetContext, history.slice(-10).map((m) => m.content).join(' '), members.map((m) => `${m.name} ${m.systemPrompt}`).join(' ')].filter(Boolean).join('\n'), { worldviewId: settings.activeWorldId || settings.defaultWorldviewId }) : ''
+    const worldbookText = featureActive(settings, 'worldview') ? await retrieveWorldbookContext([group.name, targetContext, history.slice(-10).map((m) => m.content).join(' '), members.map((m) => `${m.name} ${m.systemPrompt}`).join(' ')].filter(Boolean).join('\n'), { worldviewId: settings.activeWorldId || settings.defaultWorldviewId }) : ''
 
     const speakerMemoriesMap = promptModuleEnabled(settings, 'memory') ? await loadSpeakerMemories(speakers) : new Map<string, string>()
     const aiRelationshipText = featureActive(settings, 'relationship') ? await aiRelationshipPrompt(members) : ''
@@ -445,9 +449,6 @@ async function runGroupAiTurn(
       imageGenerationEnabled,
       imageSearchEnabled: !!settings.pexelsApiKey,
       groupMemoryText: group.memory,
-      groupVibeText: group.vibe,
-      allowAiChatter: group.allowAiChatter ?? true,
-      energyLevel: group.energyLevel ?? 'normal',
       currentTimeText: describeCurrentTime(new Date()),
       userProfileText: buildUserProfileText(settings),
       targetedContextText: targetContext,
@@ -491,7 +492,7 @@ async function runGroupAiTurn(
       ].filter(Boolean).join('\n\n') },
       ...recentHistory.map((m): ChatMessage => formatGroupHistoryMessage(m, contactById, messageById, settings.userNickname)),
       ...(regenerationUserMessage ? [{ role: 'user' as const, content: regenerationUserMessage }] : []),
-      { role: 'system', content: '【最终生成提醒】现在只生成自然群聊正文，不输出JSON、分析、标题或Markdown。' },
+      { role: 'system', content: '【最终生成提醒】准备自然群聊内容，并按后续要求通过本轮原生函数提交；不要在用户可见正文中输出JSON、分析、标题、Markdown、工具名或协议。' },
     ])
     let rawText: string
     let agentParsed: ReturnType<typeof parseGroupAiResponse>
@@ -501,12 +502,12 @@ async function runGroupAiTurn(
     } else {
       const generated = await generateGroupAgentTurn({
         apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, utilityModel: settings.utilityModel,
-        messages: [...chatMessages, { role: 'system', content: `本轮必须通过提供的函数发送群聊消息或执行行动。send_image 只发送纯图片，发图的同一位联系人必须同时调用 send_text 自然说话；create_schedule 也不能单独作为回复。表情包可以单独发送。每条消息都必须填写该发言人的真实想法和简短中文文字心情；心情禁止使用 emoji。严格选择正确的 speakerIndex。${locationToolContext}` }],
+        messages: [...chatMessages, { role: 'system', content: `本轮必须通过提供的函数发送群聊消息或执行行动。消息总量由工具执行层硬性校验，不得少于或超过指定范围。成员始终可以自然互相接话，但不要机械轮流。send_image 只发送纯图片，发图的同一位联系人必须同时调用 send_text 自然说话；create_schedule 也不能单独作为回复。表情包可以单独发送。每条消息都必须填写该发言人的真实想法和简短中文文字心情；心情禁止使用 emoji。严格选择正确的 speakerIndex。${locationToolContext}` }],
         signal: controller.signal, purpose: 'chat', trace: { turnId: streamId, stage: 'original_generation', conversationId },
         stickerNames: stickers.map((sticker) => sticker.name), stickerSearchEnabled: remoteStickerSearchEnabled,
         imageEnabled: imageGenerationEnabled || !!settings.pexelsApiKey, knowledgeEnabled: featureActive(settings, 'knowledgeBase'),
         scheduleEnabled: isModuleEnabled('location'), locationIds: leafLocations.map((candidate) => candidate.id),
-        speakerNames: speakers.map((speaker) => displayName(speaker)), memberNames: members.map((member) => displayName(member)),
+        speakerNames: speakers.map((speaker) => displayName(speaker)), memberNames: members.map((member) => displayName(member)), messageBounds: groupMessageBounds(group.energyLevel ?? 'normal', speakers.length),
       })
       rawText = generated.raw
       agentParsed = generated.parsed
@@ -521,7 +522,7 @@ async function runGroupAiTurn(
     console.log('[group] 审核模型已完成群聊原文审核和JSON翻译，未调用第三个翻译模型')
 
     let finalRaw = jsonRaw
-    let { bubbles, knowledgeQueries, turnSummary, groupVibe, planCandidates } = parsedTurn
+    let { bubbles, knowledgeQueries, turnSummary, planCandidates } = parsedTurn
     bubbles = ensureGroupImagesHaveText(bubbles)
     const initiallyRequestedKnowledge = [...knowledgeQueries]
     const runLogicReview = (stage: 'first_quality' | 'second_quality') => reviewTurnLogic({
@@ -529,8 +530,7 @@ async function runGroupAiTurn(
       latestUserText: latestUserMessage?.content ?? '',
       draftText: rawText,
       personaFacts: [
-        ...speakers.map((speaker) => `${displayName(speaker)}：${speaker.systemPrompt.slice(0, 700)}${speaker.personaConstraints ? `；硬约束=${speaker.personaConstraints.slice(0, 350)}` : ''}${featureActive(settings, 'personalityTraits') && speaker.personalityTrait ? `；人格特质=${speaker.personalityTrait}` : ''}${promptModuleEnabled(settings, 'memory') && speaker.sharedHistory ? `；共同过往锚点=${speaker.sharedHistory.slice(0, 500)}` : ''}`),
-        `群聊设置：热闹程度=${group.energyLevel ?? 'normal'}；AI互聊=${group.allowAiChatter === false ? '关闭' : '开启'}`,
+        ...speakers.map((speaker) => `${displayName(speaker)}：${speaker.systemPrompt.slice(0, 1000)}`),
         targetContext ? `本轮定向上下文=${targetContext.slice(0, 600)}` : '',
         featureActive(settings, 'worldview') && worldbookText ? `命中世界书=${worldbookText.slice(0, 800)}` : '',
       ].filter(Boolean).join('\n'),
@@ -564,14 +564,14 @@ async function runGroupAiTurn(
           signal: controller.signal, purpose: 'chat', trace: { turnId: streamId, stage: 'second_chat', conversationId },
           stickerNames: stickers.map((sticker) => sticker.name), stickerSearchEnabled: remoteStickerSearchEnabled,
           imageEnabled: imageGenerationEnabled || !!settings.pexelsApiKey, knowledgeEnabled: false,
-          scheduleEnabled: isModuleEnabled('location'), locationIds: leafLocations.map((candidate) => candidate.id), speakerNames: speakers.map((speaker) => displayName(speaker)), memberNames: members.map((member) => displayName(member)),
+          scheduleEnabled: isModuleEnabled('location'), locationIds: leafLocations.map((candidate) => candidate.id), speakerNames: speakers.map((speaker) => displayName(speaker)), memberNames: members.map((member) => displayName(member)), messageBounds: groupMessageBounds(group.energyLevel ?? 'normal', speakers.length),
         })
         rawText = regenerated.raw
         const enrichedConverted = regenerated.parsed
         if (enrichedConverted.bubbles.length === 0) throw new Error('知识补全后的审核模型没有产出有效群聊JSON')
         jsonRaw = rawText
         finalRaw = jsonRaw
-        ;({ bubbles, knowledgeQueries, turnSummary, groupVibe, planCandidates } = enrichedConverted)
+        ;({ bubbles, knowledgeQueries, turnSummary, planCandidates } = enrichedConverted)
         bubbles = ensureGroupImagesHaveText(bubbles)
       }
     }
@@ -586,7 +586,7 @@ async function runGroupAiTurn(
       id: aiTurnId,
       conversationId,
       raw: finalRaw,
-      parsed: parseGroupTurnDebugPayload(systemPrompt, rawText, draftFeedback, jsonRaw, finalRaw, bubbles, knowledgeQueries, turnSummary, groupVibe, storyOutline),
+      parsed: parseGroupTurnDebugPayload(systemPrompt, rawText, draftFeedback, jsonRaw, finalRaw, bubbles, knowledgeQueries, turnSummary, storyOutline),
       knowledgeQueries,
       createdAt: Date.now(),
     })
@@ -603,7 +603,7 @@ async function runGroupAiTurn(
       if (plan) createdPlans.push(plan)
     }
     for (const plan of createdPlans) await db.messages.add(planCardMessage(plan))
-    void updateGroupMemoryAndVibe({ group, aiTurnId, settings, turnSummary, groupVibe, directOutput })
+    void updateGroupMemoryAndVibe({ group, aiTurnId, settings, turnSummary, directOutput })
     console.info(`[group-perf] 模型与自检完成=${Math.round(performance.now() - turnStartedAt)}ms 群=${group.name}`)
     revealGroupBubbles(conversationId, group, members, speakers, bubbles, streamId, settings, stickers, aiTurnId, turnSummary, turnStartedAt, directOutput)
   } catch (err) {

@@ -108,7 +108,7 @@ export function privateChatTools(opts: Pick<AgentToolOptions, 'stickerNames' | '
   return tools
 }
 
-function privateTurnTool(opts: Pick<AgentToolOptions, 'stickerNames' | 'stickerSearchEnabled' | 'imageEnabled' | 'knowledgeEnabled' | 'scheduleEnabled' | 'locationIds'>): ChatToolDefinition {
+export function privateTurnToolDefinition(opts: Pick<AgentToolOptions, 'stickerNames' | 'stickerSearchEnabled' | 'imageEnabled' | 'knowledgeEnabled' | 'scheduleEnabled' | 'locationIds'>): ChatToolDefinition {
   const eventTypes = [
     'text',
     ...(opts.stickerNames.length || opts.stickerSearchEnabled ? ['sticker'] : []),
@@ -373,7 +373,7 @@ async function completeGroupActionText(
 }
 
 export async function generatePrivateAgentTurn(opts: AgentToolOptions): Promise<{ parsed: ParsedAiTurn; raw: string; native: boolean }> {
-  const tool = privateTurnTool(opts)
+  const tool = privateTurnToolDefinition(opts)
   const messages = [...opts.messages]
   for (let round = 0; round < 3; round++) {
     const response = await chatCompletion({
@@ -424,7 +424,7 @@ export function groupChatTools(speakerNames: string[], memberNames: string[], ba
   })
 }
 
-export function parseGroupToolCalls(calls: ChatToolCall[], speakerCount: number, memberCount = speakerCount): { bubbles: GroupAiBubble[]; knowledgeQueries: string[]; turnSummary: string; groupVibe: string; planCandidates: [] } {
+export function parseGroupToolCalls(calls: ChatToolCall[], speakerCount: number, memberCount = speakerCount): { bubbles: GroupAiBubble[]; knowledgeQueries: string[]; turnSummary: string; planCandidates: [] } {
   const bubbles: GroupAiBubble[] = []
   const knowledgeQueries: string[] = []
   for (const call of calls) {
@@ -448,14 +448,14 @@ export function parseGroupToolCalls(calls: ChatToolCall[], speakerCount: number,
       if (schedule?.type === 'scheduleChange') bubbles.push({ ...common, ...schedule })
     }
   }
-  return { bubbles, knowledgeQueries, turnSummary: bubbles.map((bubble) => bubble.type === 'text' ? bubble.content : bubble.type).join(' ').slice(0, 160), groupVibe: bubbles.at(-1)?.mood || '平静', planCandidates: [] }
+  return { bubbles, knowledgeQueries, turnSummary: bubbles.map((bubble) => bubble.type === 'text' ? bubble.content : bubble.type).join(' ').slice(0, 160), planCandidates: [] }
 }
 
-export async function generateGroupAgentTurn(opts: AgentToolOptions & { speakerNames: string[]; memberNames: string[] }): Promise<{ parsed: ReturnType<typeof parseGroupToolCalls>; raw: string; native: boolean }> {
+export async function generateGroupAgentTurn(opts: AgentToolOptions & { speakerNames: string[]; memberNames: string[]; messageBounds: { min: number; max: number } }): Promise<{ parsed: ReturnType<typeof parseGroupToolCalls>; raw: string; native: boolean }> {
   const base = privateChatTools(opts)
   const tools = groupChatTools(opts.speakerNames, opts.memberNames, base)
   const messages = [...opts.messages]
-  const accepted: ChatToolCall[] = []
+  let accepted: ChatToolCall[] = []
   for (let round = 0; round < 3; round++) {
     const response = await chatCompletion({ ...opts, messages, tools, toolChoice: 'required', thinking: 'disabled', temperature: 0.8, maxTokens: 3000 })
     if (response.status !== 'ok') throw new Error('模型没有返回有效的群聊行动')
@@ -464,19 +464,40 @@ export async function generateGroupAgentTurn(opts: AgentToolOptions & { speakerN
       const fallback = await fallbackCalls(opts, response.content, tools)
       const calls = await completeGroupActionText(opts, tools, fallback, response.content)
       const parsed = parseGroupToolCalls(calls, opts.speakerNames.length, opts.memberNames.length)
-      return { parsed, raw: JSON.stringify({ messages: parsed.bubbles, turnSummary: parsed.turnSummary, groupVibe: parsed.groupVibe, knowledgeQueries: parsed.knowledgeQueries, planCandidates: [] }), native: false }
+      if (parsed.bubbles.length < opts.messageBounds.min || parsed.bubbles.length > opts.messageBounds.max) {
+        throw new Error(`群聊消息量不符合${opts.messageBounds.min}-${opts.messageBounds.max}条的硬约束`)
+      }
+      return { parsed, raw: JSON.stringify({ messages: parsed.bubbles, turnSummary: parsed.turnSummary, knowledgeQueries: parsed.knowledgeQueries, planCandidates: [] }), native: false }
     }
     const invalid = nativeCalls.filter((call) => {
       const parsed = parseGroupToolCalls([call], opts.speakerNames.length, opts.memberNames.length)
       return parsed.bubbles.length === 0 && parsed.knowledgeQueries.length === 0
     })
     accepted.push(...nativeCalls.filter((call) => !invalid.includes(call)))
-    if (!invalid.length) break
+    if (!invalid.length) {
+      const staged = parseGroupToolCalls(accepted, opts.speakerNames.length, opts.memberNames.length)
+      if (staged.bubbles.length > opts.messageBounds.max) {
+        let bubbleCount = 0
+        accepted = accepted.filter((call) => {
+          const createsBubble = parseGroupToolCalls([call], opts.speakerNames.length, opts.memberNames.length).bubbles.length > 0
+          if (!createsBubble) return true
+          bubbleCount += 1
+          return bubbleCount <= opts.messageBounds.max
+        })
+        break
+      }
+      if (staged.bubbles.length >= opts.messageBounds.min) break
+      messages.push({ role: 'assistant', content: response.content, tool_calls: nativeCalls })
+      messages.push(...nativeCalls.map((call): ChatMessage => ({ role: 'tool', tool_call_id: call.id, content: JSON.stringify({ success: true, staged: true, message: '已暂存，不要重复。' }) })))
+      messages.push({ role: 'system', content: `整轮必须有${opts.messageBounds.min}到${opts.messageBounds.max}条实际消息，目前只有${staged.bubbles.length}条。继续调用消息工具补足，保持自然，不要重复已暂存内容。` })
+      continue
+    }
     messages.push({ role: 'assistant', content: response.content, tool_calls: nativeCalls })
     for (const call of nativeCalls) messages.push({ role: 'tool', tool_call_id: call.id, content: invalid.includes(call) ? JSON.stringify({ success: false, code: 'INVALID_ARGUMENTS', message: 'speakerIndex、参数、thought 或中文文字 mood 无效；只重试失败调用。' }) : JSON.stringify({ success: true, staged: true, message: '已暂存，不要重复。' }) })
   }
   const completed = await completeGroupActionText(opts, tools, accepted, '')
   const parsed = parseGroupToolCalls(completed, opts.speakerNames.length, opts.memberNames.length)
   if (!parsed.bubbles.length && !parsed.knowledgeQueries.length) throw new Error('模型连续返回了无效的群聊工具参数')
-  return { parsed, raw: JSON.stringify({ messages: parsed.bubbles, turnSummary: parsed.turnSummary, groupVibe: parsed.groupVibe, knowledgeQueries: parsed.knowledgeQueries, planCandidates: [] }), native: true }
+  if (parsed.bubbles.length < opts.messageBounds.min || parsed.bubbles.length > opts.messageBounds.max) throw new Error(`群聊消息量不符合${opts.messageBounds.min}-${opts.messageBounds.max}条的硬约束`)
+  return { parsed, raw: JSON.stringify({ messages: parsed.bubbles, turnSummary: parsed.turnSummary, knowledgeQueries: parsed.knowledgeQueries, planCandidates: [] }), native: true }
 }

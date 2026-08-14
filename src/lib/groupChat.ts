@@ -2,9 +2,8 @@ import { db } from '../db/db'
 import { isModuleEnabled } from '../features'
 import { parseJsonLoose, parseKnowledgeQueriesField, parseScheduleMarker } from './aiProtocol'
 import { activeUpcomingPlansText } from './memory'
-import { customPersonalityTraitsLine, formatPersonaProfile, formatSpeechSamplesForScene, personalityTraitLine } from './prompt'
 import { describeCurrentSchedule } from './schedule'
-import type { Contact, GroupAiBubble, GroupAiResponse, GroupEnergyLevel, GroupSpeakerLimit, PromptModuleSettings } from '../types'
+import type { Contact, GroupAiBubble, GroupAiResponse, GroupSpeakerLimit, PromptModuleSettings } from '../types'
 import { dynamicRelationScore } from './contactRelations'
 import { normalizeMood } from './mood'
 import { createDefaultPromptModules, featureActive, getPromptTemplate, promptModuleEnabled } from './promptModules'
@@ -105,9 +104,6 @@ function buildGroupPrompt(opts: {
   imageGenerationEnabled?: boolean
   imageSearchEnabled?: boolean
   groupMemoryText?: string
-  groupVibeText?: string
-  allowAiChatter?: boolean
-  energyLevel?: GroupEnergyLevel
   currentTimeText: string
   userProfileText: string
   targetedContextText?: string
@@ -127,7 +123,6 @@ function buildGroupPrompt(opts: {
   if (!promptModuleEnabled(promptSettings, 'chat')) return ''
   const relationshipPromptOn = featureActive(promptSettings, 'relationship')
   const memoryPromptOn = promptModuleEnabled(promptSettings, 'memory')
-  const personalityPromptOn = featureActive(promptSettings, 'personalityTraits')
   const rosterText = opts.allMembers.map((m) => `- ${m.name}`).join('\n')
   const speakerNames = opts.speakers.map((s) => s.name).join('、')
   const speakerBlocks = opts.speakers
@@ -135,21 +130,16 @@ function buildGroupPrompt(opts: {
       const base = c.relationshipBase || '朋友'
       const plansText = memoryPromptOn ? activeUpcomingPlansText(c, new Date()) : ''
       const scheduleText = describeCurrentSchedule(c, new Date())
-      const samplesText = personalityPromptOn ? formatSpeechSamplesForScene(c.speechSamples, 'group', 2) : ''
-      const sharedHistoryText = memoryPromptOn && c.sharedHistory?.trim()
-        ? `- 与用户的共同过往（只能使用这些事实）: ${c.sharedHistory.trim().slice(0, 1200)}。首轮自然露出一个熟悉度信号。\n`
-        : memoryPromptOn ? '- 与用户的共同过往: 暂无具体记录，但不能用陌生人开场。\n' : ''
       const recentMemoText = memoryPromptOn ? opts.speakerMemoriesMap?.get(c.id) : undefined
       return `【发言人${i + 1}: ${c.name}】
 逻辑:
 - 你是${c.name}，${scene ? `正在现实地点“${opts.groupName}”参与线下现场对话` : `现在在微信群“${opts.groupName}”里`}。
 ${relationshipPromptOn ? `- 你和用户的关系: ${base}${c.relationshipDynamic ? `（${c.relationshipDynamic}）` : ''}。\n` : ''}
+- 人设必须严格遵守: ${c.systemPrompt || '自由发挥成一个普通朋友'}。${featureActive(promptSettings, 'career') && c.occupation ? `职业：${c.occupation}，月薪${c.monthlySalary ?? 0}。` : ''}
 - 当前状态: ${scheduleText || '没有特别安排'}。
-${memoryPromptOn ? `- 对用户的了解: ${c.memoryFacts || '暂无具体聊天记忆'}。\n- 相处习惯: ${c.memoryStyle || '暂无'}。\n${sharedHistoryText}${plansText ? `- 和用户的约定: ${plansText}。\n` : ''}${recentMemoText ? `- 最近记忆碎片:\n${recentMemoText}\n` : ''}` : ''}
+${memoryPromptOn ? `- 对用户的了解: ${c.memoryFacts || '暂无具体聊天记忆'}。\n- 相处习惯: ${c.memoryStyle || '暂无'}。\n${plansText ? `- 和用户的约定: ${plansText}。\n` : ''}${recentMemoText ? `- 最近记忆碎片:\n${recentMemoText}\n` : ''}` : ''}
 感觉:
-- 人设必须严格遵守: ${c.systemPrompt || '自由发挥成一个普通朋友'}。${featureActive(promptSettings, 'career') && c.occupation ? `职业：${c.occupation}，月薪${c.monthlySalary ?? 0}。` : ''}${c.personaConstraints ? `\n- 用户补充说明（不可违背）: ${c.personaConstraints}` : ''}${c.personaProfile ? `\n- 人设硬约束:\n${formatPersonaProfile(c.personaProfile)}` : ''}
-${personalityPromptOn ? `${c.mbti ? `- MBTI: ${c.mbti}。` : ''}${personalityTraitLine(c.personalityTrait, c.warmth ?? 0)}${customPersonalityTraitsLine(c.customPersonalityTraits, c.warmth ?? 0)}` : ''}
-${samplesText ? `- 说话样例:\n${samplesText}` : ''}`
+- 用人设中的专属表达方式自然说话；不要机械复读示例或口癖，也不要为了群聊顺滑变成统一口吻。`
     })
     .join('\n\n')
 
@@ -166,28 +156,25 @@ ${samplesText ? `- 说话样例:\n${samplesText}` : ''}`
   const stylePrompt = getPromptTemplate(promptSettings, 'chat', 'style') ?? ''
   const knowledge = featureActive(promptSettings, 'knowledgeBase') && opts.knowledgeDigestText ? `\n【可参考资讯】\n${opts.knowledgeDigestText}` : ''
   const groupMemory = memoryPromptOn && opts.groupMemoryText?.trim() ? `\n【群聊记忆】\n${opts.groupMemoryText.trim()}` : ''
-  const groupVibe = opts.groupVibeText?.trim() ? `\n【群聊氛围】\n${opts.groupVibeText.trim()}` : ''
   const locationContext = opts.locationContextText?.trim() ? `\n【地点场景】\n${opts.locationContextText.trim()}` : ''
   const editableGroupPrompt = getPromptTemplate(promptSettings, 'chat', scene ? 'locationMain' : 'groupMain', {
     groupName: opts.groupName,
     roster: rosterText,
     speakers: speakerNames,
-    aiChatterMode: opts.allowAiChatter === false ? '关闭，只围绕用户及用户相关话题' : '开启，存在自然接点时允许成员互相接话',
-    energyLevel: opts.energyLevel ?? 'normal',
     stylePrompt,
     worldbookPrompt: worldview,
     currentTime: opts.currentTimeText,
     userProfile: opts.userProfileText,
     // Current turn evidence precedes compressed memory/background.  Each
     // source is injected once to avoid four copies of the same persona fact.
-    additionalContext: [locationContext, targetedContext, recentEvents, aiRelationships, groupMemory, groupVibe, knowledge].filter(Boolean).join('\n'),
+    additionalContext: [locationContext, targetedContext, recentEvents, aiRelationships, groupMemory, knowledge].filter(Boolean).join('\n'),
     speakerProfiles: speakerBlocks,
     stickerCapabilities: opts.remoteStickerSearchEnabled ? `支持远程搜索；本地可用项：${stickersText}` : stickersText,
     imageCapabilities: opts.imageGenerationEnabled ? '支持按完整英文提示词生图' : opts.imageSearchEnabled ? '支持按英文关键词搜索真实图片' : '未启用',
   }) ?? ''
   const finalPrompt = `${editableGroupPrompt}
 
-【发送前最终检查】只输出群成员自然聊天正文；每条消息的心情必须用简短中文文字，不要使用 emoji；不要输出检查过程、解释或JSON。`
+【发送前最终检查】通过本轮指定的原生工具提交；用户可见正文只写群成员自然聊天内容，每条消息的心情必须用简短中文文字，不要使用 emoji；不要输出检查过程、解释或协议。`
 
   return finalPrompt
 }
@@ -293,10 +280,9 @@ ${rawText}
 - 如果草稿缺少格式或字段，不要猜测修复，不要凭语义创造新消息；按原文可机械提取的内容转换，无法转换的行不要伪造内容。
 - turnSummary 用一句话概括这一轮群聊发生了什么。
 - planCandidates 只在本轮出现至少两位成员明确同意的共同计划时填写；participantIndexes 使用发言人索引，不能凭空创建计划。
-- groupVibe 必填，用20到60字概括本轮之后最新的群聊氛围，会直接替换旧群聊氛围。
 
 只输出JSON，格式:
-{"messages":[{"speakerIndex":1,"speakerName":"...","type":"image","query":"...","scene":"...","kind":"group","participantIndexes":[1,2],"includeUser":false,"caption":"...","thought":"...","mood":"..."}],"turnSummary":"...","groupVibe":"...","knowledgeQueries":[],"planCandidates":[]}`
+{"messages":[{"speakerIndex":1,"speakerName":"...","type":"image","query":"...","scene":"...","kind":"group","participantIndexes":[1,2],"includeUser":false,"caption":"...","thought":"...","mood":"..."}],"turnSummary":"...","knowledgeQueries":[],"planCandidates":[]}`
 }
 
 function parseSpeakerIndex(v: unknown): number | null {
@@ -315,7 +301,6 @@ export interface ParsedGroupTurn {
   bubbles: GroupAiBubble[]
   knowledgeQueries: string[]
   turnSummary: string
-  groupVibe: string
   planCandidates: Array<{ title: string; summary: string; participantIndexes: number[]; location?: string }>
 }
 
@@ -343,7 +328,6 @@ export function parseGroupRawDraft(
     bubbles: [],
     knowledgeQueries: [],
     turnSummary: '',
-    groupVibe: '',
     planCandidates: [],
   }
   if (!raw.trim() || speakers.length === 0) return empty
@@ -424,7 +408,6 @@ export function parseGroupRawDraft(
     bubbles,
     knowledgeQueries,
     turnSummary,
-    groupVibe: '',
     planCandidates: [],
   }
 }
@@ -433,7 +416,6 @@ export function serializeGroupTurn(parsed: ParsedGroupTurn): string {
   return JSON.stringify({
     messages: parsed.bubbles,
     turnSummary: parsed.turnSummary,
-    groupVibe: parsed.groupVibe,
     knowledgeQueries: parsed.knowledgeQueries,
     planCandidates: parsed.planCandidates,
   })
@@ -441,7 +423,7 @@ export function serializeGroupTurn(parsed: ParsedGroupTurn): string {
 
 export function parseGroupAiResponse(raw: string, speakerCount: number): ParsedGroupTurn {
   const trimmed = raw.trim()
-  if (!trimmed) return { bubbles: [], knowledgeQueries: [], turnSummary: '', groupVibe: '', planCandidates: [] }
+  if (!trimmed) return { bubbles: [], knowledgeQueries: [], turnSummary: '', planCandidates: [] }
 
   const jsonResult = tryParseGroupJson(trimmed, speakerCount)
   if (jsonResult && jsonResult.bubbles.length > 0) return jsonResult
@@ -451,7 +433,7 @@ export function parseGroupAiResponse(raw: string, speakerCount: number): ParsedG
     .map((line) => line.trim())
     .filter(Boolean)
     .map((content, i) => ({ speakerIndex: (i % speakerCount) + 1, type: 'text' as const, content }))
-  return { bubbles: fallbackBubbles, knowledgeQueries: [], turnSummary: fallbackBubbles.map((b) => b.content).join(' ').slice(0, 160), groupVibe: '群聊氛围暂未更新。', planCandidates: [] }
+  return { bubbles: fallbackBubbles, knowledgeQueries: [], turnSummary: fallbackBubbles.map((b) => b.content).join(' ').slice(0, 160), planCandidates: [] }
 }
 
 /** Keeps model order, but when trimming a crowded photo always preserves its sender. */
@@ -493,7 +475,6 @@ function tryParseGroupJson(trimmedRaw: string, speakerCount: number): ParsedGrou
     bubbles,
     knowledgeQueries: parseKnowledgeQueriesField(parsed.knowledgeQueries),
     turnSummary: typeof parsed.turnSummary === 'string' ? parsed.turnSummary.trim() : '',
-    groupVibe: typeof parsed.groupVibe === 'string' ? parsed.groupVibe.trim() : '',
     planCandidates: Array.isArray(parsed.planCandidates) ? parsed.planCandidates.flatMap((item: unknown) => {
       if (!item || typeof item !== 'object') return []
       const value = item as { title?: unknown; summary?: unknown; participantIndexes?: unknown; location?: unknown }

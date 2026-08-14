@@ -487,8 +487,8 @@ export async function enterLocation(locationId: string) {
     await db.groups.put({
       id: LOCATION_GROUP_ID, name: '地点群聊', avatar: '📍', avatarColor: '#7c3aed',
       memberContactIds: worldMembers.map((contact) => contact.id), worldviewId,
-      memory: existingGroup?.memory, vibe: existingGroup?.vibe,
-      speakerLimit: existingGroup?.speakerLimit ?? 3, allowAiChatter: existingGroup?.allowAiChatter ?? true,
+      memory: existingGroup?.memory,
+      speakerLimit: existingGroup?.speakerLimit ?? 3,
       energyLevel: existingGroup?.energyLevel ?? 'normal', memoryTurnCount: existingGroup?.memoryTurnCount,
       memoryMessageCursor: existingGroup?.memoryMessageCursor, momentSharing: existingGroup?.momentSharing ?? 'private',
       createdAt: existingGroup?.createdAt ?? now, kind: 'location', locationId: location.id,

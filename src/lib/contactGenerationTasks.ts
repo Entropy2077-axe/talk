@@ -12,7 +12,7 @@ import type {
   ContactRelationLink,
 } from '../types'
 import { useSettingsStore } from '../store/useSettingsStore'
-import { buildPersonaGenerationPrompt, diagnosePersonaGeneration, type PersonaGenerationResult } from './prompt'
+import { buildPersonaGenerationPrompt, composeCanonicalPersona, diagnosePersonaGeneration, type PersonaGenerationResult } from './prompt'
 import { speechVoiceGenerationContext } from './speechProviders'
 import { chatCompletionText } from './deepseek'
 import { completedTopLevelJsonFields } from './incrementalJson'
@@ -289,7 +289,7 @@ async function preparePersona(task: ContactGenerationTask, settings: AppSettings
     } catch (error) {
       const explicitlyBound = input.selectedWorldbookEntryIds.length > 0 || !!input.importedWorldbook?.entries.length
       if (explicitlyBound) throw codedError('WORLDBOOK_CANON_FAILED', error instanceof Error ? error.message : String(error), true)
-      canon = { relationship: '', sharedHistory: '', facts: [], boundaries: [], pastExperiences: [] }
+      canon = { relationship: '', sharedHistory: '', facts: [], boundaries: [], initialMemories: [] }
     }
     task.canon = canon
     await db.contactGenerationTasks.update(task.id, { canon, updatedAt: Date.now() })
@@ -298,7 +298,7 @@ async function preparePersona(task: ContactGenerationTask, settings: AppSettings
   const relationship = input.relationship || canon.relationship
   const sharedHistory = input.sharedHistory || canon.sharedHistory
   const personaExtra = [input.roleDescription, input.personaSetting, await interpersonalSetting(input)].filter(Boolean).join('\n\n')
-  const canonText = canon.pastExperiences.length || canon.facts.length || canon.relationship
+  const canonText = canon.initialMemories.length || canon.facts.length || canon.relationship
     ? `【已结构化提取的世界书正史——输出必须逐项覆盖】\n${JSON.stringify(canon)}`
     : ''
   const avatarCategory = pickAvatarCategory(input.personalityTags)
@@ -317,7 +317,8 @@ async function preparePersona(task: ContactGenerationTask, settings: AppSettings
   }, avatarCategory, task.promptModulesSnapshot ?? settings.promptModules, [worldbookText, canonText].filter(Boolean).join('\n\n'), voiceContext)
   if (!prompt.trim()) throw codedError('PROMPT_DISABLED', '女娲创建提示词模块已屏蔽', false)
 
-  await setStage(task, 'generating', { rawOutput: '', partialFields: {}, validationRepairAttempted: false })
+  await setStage(task, 'generating', { rawOutput: '', partialFields: {}, generationActivity: ['正在启动人物生成'], validationRepairAttempted: false })
+  let lastProgressWrite = 0
   const generated = await generatePersonaWithTools({
     settings,
     systemPrompt: prompt,
@@ -325,6 +326,25 @@ async function preparePersona(task: ContactGenerationTask, settings: AppSettings
     worldviewId: input.worldviewId,
     voiceContext,
     signal,
+    onProgress: async (progress) => {
+      const activity = [...(task.generationActivity ?? [])]
+      const milestoneChanged = !!progress.message && activity.at(-1) !== progress.message
+      if (milestoneChanged) activity.push(progress.message)
+      task.generationActivity = activity.slice(-8)
+      if (progress.raw !== undefined) {
+        task.rawOutput = progress.raw
+        task.partialFields = completedTopLevelJsonFields(progress.raw)
+      }
+      const now = Date.now()
+      if (!milestoneChanged && now - lastProgressWrite < 90) return
+      lastProgressWrite = now
+      await db.contactGenerationTasks.update(task.id, {
+        generationActivity: task.generationActivity,
+        rawOutput: task.rawOutput,
+        partialFields: task.partialFields,
+        updatedAt: now,
+      })
+    },
   })
   let raw = generated.raw
   task.rawOutput = raw
@@ -343,13 +363,12 @@ async function preparePersona(task: ContactGenerationTask, settings: AppSettings
       model: settings.utilityModel || settings.model,
       provider: settings.aiProvider,
       messages: [
-        { role: 'system', content: `你是人物资料 JSON 修复器。保留候选内容的已有事实，修复截断、引号、逗号、字段类型和缺失的必要字段。只能输出一个合法 JSON 对象。至少必须包含 name、persona、visualIdentity、gender、ageRange、relationship、occupation、realName、nickname、birthday、mbti、speechSamples、personaProfile、pastExperiences、monthlySalary、schedule、avatarKeyword${voiceContext ? '、speechVoiceId、speechStyleInstruction；speechVoiceId只能使用：' + voiceContext.options.map((option) => option.id).join('、') : ''}。不要解释。` },
+        { role: 'system', content: `你是人物资料 JSON 修复器。保留候选内容的已有事实，修复截断、引号、逗号、字段类型和缺失的必要字段。只能输出一个合法 JSON 对象。至少必须包含 name、persona、speechExamples、visualIdentity、gender、ageRange、relationship、occupation、realName、nickname、birthday、initialMemories、monthlySalary、schedule、avatarKeyword${voiceContext ? '、speechVoiceId、speechStyleInstruction；speechVoiceId只能使用：' + voiceContext.options.map((option) => option.id).join('、') : ''}。speechExamples 必须正好10条互不重复的“[场景] 实际消息”；persona 是唯一人设正文，程序会把示例合并进去。不要解释。` },
         { role: 'user', content: `待修复候选：\n${raw.slice(0, 16000)}` },
       ],
       jsonMode: true,
       thinking: 'disabled',
       temperature: 0,
-      maxTokens: 2600,
       purpose: 'persona',
       signal,
       trace: { turnId: task.id, stage: 'other' },
@@ -381,33 +400,28 @@ async function preparePersona(task: ContactGenerationTask, settings: AppSettings
       validation: validationDiagnostics,
     })
   }
-  if (canon.pastExperiences.length) {
-    const existing = parsed.pastExperiences ?? []
+  if (canon.initialMemories.length) {
+    const existing = parsed.initialMemories ?? []
     const seen = new Set(existing.map((item) => `${item.period}|${item.summary}`))
     parsed = {
       ...parsed,
       relationship: relationship || parsed.relationship || canon.relationship,
-      pastExperiences: [...canon.pastExperiences.filter((item) => !seen.has(`${item.period}|${item.summary}`)), ...existing].slice(0, 12),
-      personaProfile: {
-        facts: Array.from(new Set([...(canon.facts ?? []), ...(parsed.personaProfile?.facts ?? [])])),
-        boundaries: Array.from(new Set([...(canon.boundaries ?? []), ...(parsed.personaProfile?.boundaries ?? [])])),
-        habits: parsed.personaProfile?.habits ?? [],
-        behaviorAnchors: parsed.personaProfile?.behaviorAnchors ?? [],
-      },
+      initialMemories: [...canon.initialMemories.filter((item) => !seen.has(`${item.period}|${item.summary}`)), ...existing].slice(0, 12),
+      persona: composeCanonicalPersona({
+        persona: parsed.persona,
+        profile: { facts: canon.facts ?? [], boundaries: canon.boundaries ?? [], habits: [], behaviorAnchors: [] },
+      }),
     }
   }
-  // `personaSetting` is already retained in `personaConstraints` and injected
-  // as the highest-priority user-authored constraint at chat time. Prepending
-  // it to `persona` as well made the identity block appear twice. Worse, the
-  // copied source and the model's completed draft could disagree on an age or
-  // name, leaving the chat model with contradictory facts.
-  //
-  // Keep `persona` as the single, clean generated narrative; the original
-  // input remains available as a separate hard constraint below.
-  if (task.method === 'precision') parsed.initialWarmth ??= initialWarmthForBase(relationship || parsed.relationship || '朋友', input.personalityTrait || parsed.personalityTrait)
+  if (task.method === 'precision') parsed.initialWarmth ??= initialWarmthForBase(relationship || parsed.relationship || '朋友', input.personalityTrait)
   const generatedVoiceId = parsed.speechVoiceId
   if (voiceContext && !voiceContext.options.some((option) => option.id === generatedVoiceId)) {
     parsed = { ...parsed, speechVoiceId: undefined, speechStyleInstruction: undefined }
+  }
+  parsed = {
+    ...parsed,
+    persona: composeCanonicalPersona({ persona: parsed.persona, speechSamples: parsed.speechExamples }),
+    speechExamples: undefined,
   }
   task.personaDraft = parsed
   await db.contactGenerationTasks.update(task.id, { personaDraft: parsed, updatedAt: Date.now() })
@@ -459,7 +473,8 @@ async function commitTask(task: ContactGenerationTask) {
   const conversationId = uuid()
   const now = Date.now()
   const relationship = input.relationship || parsed.relationship || '朋友'
-  const automaticWarmth = initialWarmthForBase(relationship, input.personalityTrait || parsed.personalityTrait)
+  const initialSharedMemory = input.sharedHistory || (task.canon as WorldbookPersonaCanon | undefined)?.sharedHistory || ''
+  const automaticWarmth = initialWarmthForBase(relationship, input.personalityTrait)
   const warmth = input.initialWarmthMode === 'custom'
     ? Math.max(-100, Math.min(100, Math.round(input.initialWarmth ?? automaticWarmth)))
     : task.method === 'precision' ? parsed.initialWarmth ?? automaticWarmth : automaticWarmth
@@ -473,7 +488,7 @@ async function commitTask(task: ContactGenerationTask) {
     : undefined
 
   try {
-  await db.transaction('rw', [db.contacts, db.conversations, db.messages, db.contactRelations, db.contactMemories, db.contactExperiences, db.personaCreationRecords, db.contactGenerationTasks], async () => {
+  await db.transaction('rw', [db.contacts, db.conversations, db.messages, db.contactRelations, db.contactMemories, db.personaCreationRecords, db.contactGenerationTasks], async () => {
     const contact: Contact = {
       id: contactId,
       name: parsed.name,
@@ -487,13 +502,12 @@ async function commitTask(task: ContactGenerationTask) {
       visualSeed: visualIdentitySeed(parsed.visualIdentity || parsed.name),
       avatarPhotographer: task.avatarPhotographer,
       avatarPhotographerUrl: task.avatarPhotographerUrl,
-      systemPrompt: parsed.persona,
-      personaConstraints: [input.roleDescription, input.personaSetting].filter(Boolean).join('\n\n') || undefined,
-      sharedHistory: input.sharedHistory || undefined,
+      systemPrompt: composeCanonicalPersona({
+        persona: parsed.persona,
+        traitName: input.personalityTrait,
+        traitContent: input.personalityTraitContent,
+      }),
       creatorProfile: { personalityTendencies: input.personalityTags, age: input.ageRange || parsed.ageRange || '', gender: input.gender || parsed.gender || '', relationship, occupation: input.occupation || parsed.occupation || '', hobbies: input.hobbies, notes: input.roleDescription, sharedHistory: input.sharedHistory },
-      customPersonalityTraits: task.method === 'precision' ? input.customPersonalityTraits : undefined,
-      personaProfile: parsed.personaProfile,
-      speechSamples: parsed.speechSamples,
       speechVoices: generatedSpeechVoices,
       createdAt: now,
       memoryFacts: '', memoryStyle: '', memoryUpdatedAt: 0, memoryMessageCursor: 0,
@@ -512,11 +526,9 @@ async function commitTask(task: ContactGenerationTask) {
           establishedBy: 'generation' as const,
         }
       })(),
-      personalityTrait: input.personalityTrait || parsed.personalityTrait || '无',
       schedule: parsed.schedule,
       initialSchedule: parsed.schedule,
       scheduleOverrides: [],
-      mbti: parsed.mbti || undefined,
       worldbookEntryIds: boundWorldbookEntryIds,
       experienceCursorAt: now,
       worldviewId: input.worldviewId || useSettingsStore.getState().activeWorldId || useSettingsStore.getState().defaultWorldviewId,
@@ -548,26 +560,28 @@ async function commitTask(task: ContactGenerationTask) {
       await db.conversations.update(conversationId, { updatedAt: now + 1 })
     }
     await addInitialRelations(contact, input.relations, contacts, now)
-    const past = parsed.pastExperiences ?? []
-    if (past.length) {
-      await db.contactExperiences.bulkAdd(past.map((experience) => ({
-        id: uuid(), contactIds: [contactId, ...Array.from(new Set([
+    const initialMemories: ContactMemory[] = []
+    for (const experience of parsed.initialMemories ?? []) {
+      const participantIds = [contactId, ...Array.from(new Set([
           ...(((experience as typeof experience & { relatedContactIds?: string[] }).relatedContactIds) ?? []).filter((id) => existingContactIds.has(id)),
           ...experience.relatedContactNames.map((name) => byName.get(name.trim().toLocaleLowerCase())).filter((id): id is string => !!id),
-        ]))],
-        kind: 'past' as const, memoryTier: 'long' as const, title: experience.title || '过去的经历', summary: experience.summary, periodLabel: experience.period || undefined, importance: experience.importance,
-        sources: Array.from(new Set([input.sharedHistory ? 'user' : undefined, boundWorldbookEntryIds.length ? 'worldbook' : undefined, input.relations.length ? 'relationship' : undefined, 'persona'].filter((source): source is 'user' | 'worldbook' | 'relationship' | 'persona' => !!source))),
-        sourceRefIds: boundWorldbookEntryIds.length ? boundWorldbookEntryIds : undefined, createdAt: now,
-      })))
-    } else if (input.sharedHistory) {
-      await db.contactExperiences.add({ id: uuid(), contactIds: [contactId], kind: 'past', memoryTier: 'long', title: '与用户的过去', summary: input.sharedHistory, importance: 85, sources: ['user'], createdAt: now })
+        ]))]
+      for (const ownerId of participantIds) initialMemories.push({
+        id: uuid(), contactId: ownerId, scope: participantIds.length > 1 ? 'interpersonal' : 'private',
+        relatedContactIds: participantIds.filter((id) => id !== ownerId), category: '重要事件', kind: 'relationship_event',
+        content: [experience.period, experience.title, experience.summary].filter(Boolean).join('｜'), tags: ['创建记忆'],
+        importance: Math.max(0, Math.min(1, experience.importance / 100)), emotionalWeight: 0.5, confidence: 1,
+        sourceMessageIds: [], createdAt: now, updatedAt: now, usageCount: 0,
+      })
     }
+    if (initialSharedMemory) initialMemories.push({ id: uuid(), contactId, scope: 'private', category: '关系动态', kind: 'relationship_event', content: initialSharedMemory, tags: ['初始记忆'], importance: 0.85, emotionalWeight: 0.7, confidence: 1, sourceMessageIds: [], createdAt: now, updatedAt: now, usageCount: 0 })
+    if (initialMemories.length) await db.contactMemories.bulkAdd(initialMemories)
     await db.personaCreationRecords.add({
       id: uuid(), sourceContactId: contactId, name: parsed.name, realName: parsed.realName, nickname: parsed.nickname, birthday: parsed.birthday,
       gender: input.gender || parsed.gender, ageRange: input.ageRange || parsed.ageRange, relationship, occupation: input.occupation || parsed.occupation,
-      personalityTrait: input.personalityTrait || parsed.personalityTrait, initialWarmth: input.relationshipEnabled ? warmth : undefined, hobbies: input.hobbies,
-      personaSetting: input.personaSetting || parsed.persona, roleDescription: input.roleDescription || undefined, persona: parsed.persona, visualIdentity: parsed.visualIdentity, personaProfile: parsed.personaProfile,
-      speechSamples: parsed.speechSamples, mbti: parsed.mbti, schedule: parsed.schedule, avatarKeyword: parsed.avatarKeyword, monthlySalary: parsed.monthlySalary,
+      initialWarmth: input.relationshipEnabled ? warmth : undefined, hobbies: input.hobbies,
+      personaSetting: input.personaSetting || parsed.persona, roleDescription: input.roleDescription || undefined, persona: parsed.persona, visualIdentity: parsed.visualIdentity,
+      schedule: parsed.schedule, avatarKeyword: parsed.avatarKeyword, monthlySalary: parsed.monthlySalary,
       sharedHistory: input.sharedHistory || undefined, createdAt: now,
     })
     await db.contactGenerationTasks.delete(task.id)

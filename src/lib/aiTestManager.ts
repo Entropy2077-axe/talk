@@ -48,7 +48,7 @@ function targetPrompt(contact: Contact, settings: AppSettings): string {
     contact.occupation ? `被测试联系人职业：${contact.occupation}` : '',
     `双方关系：${contact.relationshipBase || '朋友'}`,
     `联系人设定：${shortText(contact.systemPrompt, 1400)}`,
-    `共同经历：${shortText(contact.sharedHistory || contact.memoryFacts || '暂无', 700)}`,
+    `记忆摘要：${shortText(contact.memoryFacts || '暂无', 700)}`,
   ].filter(Boolean).join('\n')
 }
 
@@ -93,7 +93,7 @@ export async function createAiTestSuite(options: {
     locationTarget = `\n设备当前时间：${new Date().toLocaleString()}\n联系人当前地点ID：${options.contact!.currentLocationId || '未知'}\n联系人默认日程与特殊日程：${JSON.stringify({ schedule: options.contact!.schedule ?? [], scheduleOverrides: options.contact!.scheduleOverrides ?? [] })}\n合法具体地点：${leaves.map((location) => `${location.id}=${location.name}`).join('；')}`
   }
   const target = options.kind === 'group'
-    ? `群聊：${options.group!.name}\n成员：${options.groupMembers!.map((item) => `${item.name}（${item.occupation || '未设置职业'}）`).join('、')}\n群氛围：${options.group!.vibe || '未设置'}`
+    ? `群聊：${options.group!.name}\n成员：${options.groupMembers!.map((item) => `${item.name}（${item.occupation || '未设置职业'}）`).join('、')}`
     : `${targetPrompt(options.contact!, options.settings)}${locationTarget}`
   const raw = await chatCompletionText({
     apiKey: options.settings.apiKey,

@@ -102,20 +102,20 @@ describe('group chat persona prompt anchors', () => {
       stickerNames: [],
       currentTimeText: '周六上午',
       userProfileText: '昵称：我',
-      enabledModules: ['career', 'relationship', 'personalityTraits'],
+      enabledModules: ['career', 'relationship'],
+      speakerMemoriesMap: new Map([['lover', '大学社团认识，曾陪用户熬夜备考。']]),
     }
     const rawPrompt = buildGroupRawChatPrompt(common)
     expect(rawPrompt).toContain('大学社团认识')
-    expect(rawPrompt).toContain('首轮')
     expect(rawPrompt).toContain('恋人')
-    expect(rawPrompt).toContain('雌小鬼')
+    expect(rawPrompt).toContain('嘴硬但很在乎用户')
+    expect(rawPrompt).not.toContain('雌小鬼')
   })
 
   it('omits blocked group injection modules and their dynamic payloads', () => {
     const promptModules = createDefaultPromptModules()
     promptModules.memory.enabled = false
     promptModules.relationship.enabled = false
-    promptModules.personalityTraits.enabled = false
     promptModules.worldview.enabled = false
     const contact = {
       id: 'blocked', name: '测试角色', systemPrompt: '核心人设', relationshipBase: '恋人', relationshipDynamic: 'RELATION_PAYLOAD',
@@ -124,7 +124,7 @@ describe('group chat persona prompt anchors', () => {
     const prompt = buildGroupRawChatPrompt({
       stylePrompt: '短句', groupName: '测试群', allMembers: [contact], speakers: [contact], stickerNames: [],
       currentTimeText: '现在', userProfileText: '用户', worldviewText: 'WORLDBOOK_PAYLOAD', promptModules,
-      enabledModules: ['career', 'relationship', 'personalityTraits', 'worldview'],
+      enabledModules: ['career', 'relationship', 'worldview'],
     })
 
     expect(prompt).toContain('核心人设')

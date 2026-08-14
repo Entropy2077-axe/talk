@@ -23,6 +23,7 @@ import type {
   WalletAccount, WalletTransaction, Loan, JobListing, InterviewSession,
   LocationNode, WorldMapRecord, LocationModuleState, AcousticEdge, InternalTask, MediaAsset, WorldContactState,
 } from '../types'
+import { compactLegacyPersonaText, removeRepeatedPersonaBiography } from '../lib/personaMigration'
 
 export class TalkDB extends Dexie {
   contacts!: Table<Contact, string>
@@ -470,6 +471,106 @@ export class TalkDB extends Dexie {
         delete locationState.slgCurrentLocationId
         await tx.table('locationModuleState').put(locationState)
       }
+    })
+    // Collapse legacy persona fragments and experience/life-event data into
+    // the two canonical runtime sources: contacts.systemPrompt and
+    // contactMemories. Retired tables stay empty for backup compatibility.
+    this.version(42).upgrade(async (tx) => {
+      const contacts = await tx.table('contacts').toArray() as Array<Record<string, any>>
+      for (const contact of contacts) {
+        const profile = contact.personaProfile as Record<string, unknown> | undefined
+        const profileLines = [
+          Array.isArray(profile?.facts) && profile.facts.length ? `身份与背景：${profile.facts.join('；')}` : '',
+          Array.isArray(profile?.boundaries) && profile.boundaries.length ? `关系边界：${profile.boundaries.join('；')}` : '',
+          Array.isArray(profile?.habits) && profile.habits.length ? `稳定习惯：${profile.habits.join('；')}` : '',
+          Array.isArray(profile?.behaviorAnchors) && profile.behaviorAnchors.length ? `行为方式：${profile.behaviorAnchors.join('；')}` : '',
+        ].filter(Boolean)
+        const customTraits = Array.isArray(contact.customPersonalityTraits)
+          ? contact.customPersonalityTraits.map((trait: Record<string, any>) => `${trait.name || ''}：${trait.meaning || ''}`).filter((line: string) => line !== '：')
+          : []
+        const trait = contact.personalityTrait && contact.personalityTrait !== '无' ? String(contact.personalityTrait) : ''
+        const samples = Array.isArray(contact.speechSamples) && contact.speechSamples.length ? `说话方式参考：\n${contact.speechSamples.map((sample: string) => `- ${sample}`).join('\n')}` : ''
+        const parts = [String(contact.systemPrompt || '').trim(), contact.personaConstraints ? `补充设定：${String(contact.personaConstraints).trim()}` : '', profileLines.length ? `人物事实与行为：\n${profileLines.join('\n')}` : '', trait || customTraits.length ? `性格表现：\n${[trait, ...customTraits].filter(Boolean).join('\n')}` : '', samples].filter(Boolean)
+        contact.systemPrompt = Array.from(new Set(parts)).join('\n\n')
+        delete contact.personaConstraints
+        delete contact.personaProfile
+        delete contact.personalityTrait
+        delete contact.customPersonalityTraits
+        delete contact.speechSamples
+        delete contact.mbti
+        delete contact.intentQueue
+        await tx.table('contacts').put(contact)
+      }
+      const memories = tx.table('contactMemories')
+      const experiences = await tx.table('contactExperiences').toArray() as Array<Record<string, any>>
+      for (const experience of experiences) for (const contactId of experience.contactIds ?? []) await memories.add({
+        id: crypto.randomUUID(), contactId, scope: (experience.contactIds?.length ?? 0) > 1 ? 'interpersonal' : 'private',
+        relatedContactIds: (experience.contactIds ?? []).filter((id: string) => id !== contactId), category: '重要事件', kind: 'relationship_event',
+        content: [experience.periodLabel, experience.title, experience.summary, experience.details].filter(Boolean).join('｜'), tags: ['迁移记忆'],
+        importance: Math.max(0, Math.min(1, Number(experience.importance || 70) / 100)), emotionalWeight: 0.5, confidence: 1,
+        sourceMessageIds: [], createdAt: Number(experience.endedAt || experience.createdAt || Date.now()), updatedAt: Date.now(), usageCount: 0,
+      })
+      const lifeEvents = await tx.table('lifeEvents').toArray() as Array<Record<string, any>>
+      for (const event of lifeEvents.filter((row) => Number(row.importance || 0) >= 3)) await memories.add({
+        id: crypto.randomUUID(), contactId: event.contactId, scope: (event.participantContactIds?.length ?? 0) ? 'interpersonal' : 'private', relatedContactIds: event.participantContactIds ?? [],
+        category: '四季日常', kind: (event.participantContactIds?.length ?? 0) ? 'relationship_event' : 'general', content: String(event.summary || ''), tags: ['迁移生活事件'],
+        importance: 0.6, emotionalWeight: 0.4, confidence: 0.8, sourceMessageIds: [], createdAt: Number(event.occurredAt || Date.now()), updatedAt: Date.now(), usageCount: 0,
+      })
+      await tx.table('contactExperiences').clear()
+      await tx.table('lifeEvents').clear()
+      await tx.table('simulationState').clear()
+    })
+    // `sharedHistory` used to be a third, parallel source of past facts. Move
+    // it into unified memory and retire the contact field so new prompts have
+    // only persona + memory as canonical sources.
+    this.version(43).upgrade(async (tx) => {
+      const contacts = await tx.table('contacts').toArray() as Array<Record<string, any>>
+      const memories = tx.table('contactMemories')
+      for (const contact of contacts) {
+        const content = typeof contact.sharedHistory === 'string' ? contact.sharedHistory.trim() : ''
+        if (content) {
+          const existing = await memories.where('contactId').equals(contact.id).toArray() as Array<Record<string, any>>
+          if (!existing.some((memory) => String(memory.content || '').trim() === content)) await memories.add({
+            id: crypto.randomUUID(), contactId: contact.id, scope: 'private', relatedContactIds: [],
+            category: '关系记忆', kind: 'relationship_event', content, tags: ['迁移记忆'],
+            importance: 0.85, emotionalWeight: 0.7, confidence: 1, sourceMessageIds: [],
+            createdAt: Number(contact.createdAt || Date.now()), updatedAt: Date.now(), usageCount: 0,
+          })
+        }
+        delete contact.sharedHistory
+        await tx.table('contacts').put(contact)
+      }
+    })
+    // v42 mechanically concatenated every retired persona field, even when
+    // the generated narrative already contained the same details. Compact
+    // only that recognizable legacy shape into the single canonical persona.
+    this.version(44).upgrade(async (tx) => {
+      const contacts = await tx.table('contacts').toArray() as Array<Record<string, any>>
+      for (const contact of contacts) {
+        const compacted = compactLegacyPersonaText(contact.systemPrompt)
+        if (compacted !== contact.systemPrompt) {
+          contact.systemPrompt = compacted
+          await tx.table('contacts').put(contact)
+        }
+      }
+    })
+    // Some v44 rows had already lost the old section headings while still
+    // containing a complete second biography. Remove only the recognizable
+    // repeated-name biography shape; do not rewrite ordinary custom personas.
+    this.version(45).upgrade(async (tx) => {
+      const contacts = await tx.table('contacts').toArray() as Array<Record<string, any>>
+      for (const contact of contacts) {
+        const cleaned = removeRepeatedPersonaBiography(contact.systemPrompt, contact.name)
+        if (cleaned !== contact.systemPrompt) {
+          contact.systemPrompt = cleaned
+          await tx.table('contacts').put(contact)
+        }
+      }
+    })
+    // The separate life-simulation state is retired. Offline events now use
+    // schedules/locations directly and write only meaningful facts to memory.
+    this.version(46).upgrade(async (tx) => {
+      await tx.table('contactLifeStates').clear()
     })
   }
 }

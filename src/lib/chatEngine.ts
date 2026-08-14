@@ -8,11 +8,10 @@ import {
   serializePrivateTurn,
   typingDelayMs,
 } from './aiProtocol'
-import { formatSpeechSamplesForScene, buildRawChatPrompt, customPersonalityTraitsLine } from './prompt'
+import { buildRawChatPrompt } from './prompt'
 import { retrieveWorldbookTrace } from './worldbook'
 import { isModuleEnabled } from '../features'
 import { CONTEXT_WINDOW_SIZE, activeUpcomingPlansText, maybeUpdateMemory, recentMemoriesText, socialMemoriesText } from './memory'
-import { activeIntentPrompt, activeIntents, markIntentsUsed } from './intent'
 import { describeCurrentTime, ageFromBirthday } from './time'
 import { describeCurrentSchedule, describeUpcomingScheduleText, pruneExpiredOverrides } from './schedule'
 import { resolveKnowledgeQueries } from './knowledgeBase'
@@ -31,7 +30,7 @@ import { createTurnController, revealSequentially } from './conversationRuntime'
 import { isImageProviderReady, isStickerProviderReady } from './mediaProviders'
 import { featureActive, promptModuleEnabled } from './promptModules'
 import { realisticReplyDelayMs } from './replyTiming'
-import { buildExperiencePromptSlice, ensureOfflineExperiences } from './experiences'
+import { ensureOfflineExperiences } from './experiences'
 import { canUsePlayerHome, ensureLocationsInitialized, reassignUnknownContactLocation, syncContactLocationsAt } from './locations'
 import { evaluateDirectSpecialTask, runActionCommittee, type ActionCommitteeDebug } from './actionCommittee'
 import type { CreateSpecialTaskResult } from './agentTasks'
@@ -192,7 +191,7 @@ function parseAiTurnDebugPayload(opts: {
   mood?: string
   thought?: string
   qualityCheck: { enabled: boolean; repaired: boolean; reason?: string; detectedInvalid?: boolean }
-  injectedIntents: ReturnType<typeof activeIntents>
+  injectedIntents: Array<{ id: string }>
   promptTrace?: import('../types').PromptTrace
   actionCommittee?: ActionCommitteeDebug & { toolResult?: CreateSpecialTaskResult }
 }): unknown {
@@ -367,7 +366,7 @@ async function runAiTurn(
     const directOutput = isModuleEnabled('directOutput')
     const history = await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt')
     let absenceContext = ''
-    if (!directOutput && offlineFrom && now - offlineFrom >= 60 * 60 * 1000 && isModuleEnabled('lifeSimulation')) {
+    if (!directOutput && offlineFrom && now - offlineFrom >= 60 * 60 * 1000) {
       try {
         const completed = await ensureOfflineExperiences({ contact, settings, from: offlineFrom, to: now })
         absenceContext = completed.absenceContext
@@ -398,8 +397,7 @@ async function runAiTurn(
     if (pendingEvents.length > 0) await db.contacts.update(contact.id, { pendingEvents: [] })
     const socialEventsText = await recentSocialEventsText([contact.id], 4)
     const recentEventsText = [pendingEvents.join('；'), socialEventsText].filter(Boolean).join('\n')
-    const injectedIntents = featureActive(contactPromptSettings, 'intent') ? activeIntents(contact, now) : []
-    const injectedIntentText = activeIntentPrompt(injectedIntents)
+    const injectedIntents: Array<{ id: string }> = []
 
     // ---- Step 1: build context sections (no JSON protocol) ----
     const nowDate = new Date(now)
@@ -425,7 +423,7 @@ async function runAiTurn(
       locationActionContext = `【地点与特殊任务】你当前位于：${currentLocation?.name ?? '未知地点'}（${contact.currentLocationId ?? '未知'}）。你可以按照自己的人设和意愿接受、拒绝，也可以主动提出行动。角色明确决定现在立刻前往某地并开始活动时，在 submit_turn.events 中加入 type=activity_now；未来安排只有日期、整点开始和结束时间、地点都明确且角色已经作出具体承诺时才加入 type=schedule。两种动作都不能代替自然聊天，整轮 events 必须至少包含一条 type=text。仅讨论可能性、拒绝、附带未满足条件或信息不全时不要执行动作。特殊任务一旦与某条默认任务重叠，那条默认任务会整项取消。以下列表是当前唯一可确认并执行的具体地点：${locationCatalog}。玩家提到列表外地点，或名称无法可靠对应列表时，不能假装去过、看过、知道它存在，也不能直接答应；请保持角色口吻自然询问位置或让对方进一步说明，不要提“系统”“目录”或地点ID。`
     }
     const memoryPromptOn = promptModuleEnabled(contactPromptSettings, 'memory')
-    const [recentMemories, financeContext, socialMemories, sharedOriginalContext, lifeEventText, experienceText, worldbookTrace, existingContacts] = await Promise.all([
+    const [recentMemories, financeContext, socialMemories, sharedOriginalContext, worldbookTrace, existingContacts] = await Promise.all([
       memoryPromptOn ? recentMemoriesText(contact.id) : Promise.resolve(''),
       featureActive(contactPromptSettings, 'career')
         ? Promise.all([
@@ -440,10 +438,6 @@ async function runAiTurn(
         maxChars: 8_000,
         excludeConversationId: conversationId,
       }) : Promise.resolve(''),
-      isModuleEnabled('lifeSimulation')
-        ? db.lifeEvents.where('contactId').equals(contact.id).reverse().sortBy('occurredAt').then(events => events.slice(0, 4).map((event) => event.summary).join('；'))
-        : Promise.resolve(''),
-      isModuleEnabled('lifeSimulation') ? buildExperiencePromptSlice(contact.id, now) : Promise.resolve(''),
       featureActive(contactPromptSettings, 'worldview') ? retrieveWorldbookTrace([
         _triggeringUserText, proactiveContext, contact.name, contact.systemPrompt, contact.memoryFacts,
         history.slice(-8).map((m) => m.content).join(' '),
@@ -472,14 +466,10 @@ async function runAiTurn(
     const situationText = `【当前情境】现在: ${describeCurrentTime(nowDate)}。对方: ${buildUserProfileText(settings)}。${activeMood ? `你的心情: ${activeMood}。` : ''}【日程】${describeCurrentSchedule(contact, nowDate) ? `\n当前: ${describeCurrentSchedule(contact, nowDate)}` : '\n当前: 暂无安排'}${scheduleText ? `\n接下来:\n${scheduleText}` : '\n接下来: 暂无安排'}${memoryPromptOn && activeUpcomingPlansText(contact, nowDate) ? `\n约定: ${activeUpcomingPlansText(contact, nowDate)}` : ''}${recentEventsText ? `\n最近: ${recentEventsText}` : ''}`
     const contextSections = buildRawChatPrompt({
       name: contact.name,
-      persona: `${contact.systemPrompt}${runtimeAgeFact}${featureActive(contactPromptSettings, 'personalityTraits') ? customPersonalityTraitsLine(contact.customPersonalityTraits, contact.warmth ?? 0) : ''}${featureActive(contactPromptSettings, 'career') && contact.occupation ? `\n当前职业：${contact.occupation}，现实月薪：${contact.monthlySalary ?? 0}。工作会真实影响你的作息和日常话题。` : ''}${financeContext}`,
-      personaConstraints: contact.personaConstraints,
-      personaProfile: contact.personaProfile,
+      persona: `${contact.systemPrompt}${runtimeAgeFact}${featureActive(contactPromptSettings, 'career') && contact.occupation ? `\n当前职业：${contact.occupation}，现实月薪：${contact.monthlySalary ?? 0}。工作会真实影响你的作息和日常话题。` : ''}${financeContext}`,
       stylePrompt: settings.globalSystemPrompt,
       promptModules: contactPromptModules,
       relationshipBase: featureActive(contactPromptSettings, 'relationship') ? (contact.relationshipBase || '朋友') : '朋友',
-      personalityTrait: featureActive(contactPromptSettings, 'personalityTraits') ? contact.personalityTrait : undefined,
-      personalityWarmth: featureActive(contactPromptSettings, 'relationship') ? (contact.warmth ?? 0) : undefined,
       worldviewText: worldbookText || undefined,
       latestUserText: _triggeringUserText,
       recentContext: '',
@@ -487,20 +477,14 @@ async function runAiTurn(
       memoryContext: [userMemoryText, habitText].join('\n\n'),
       situationContext: [
         situationText,
-        experienceText,
         absenceContext,
-        lifeEventText ? `【近期生活】${lifeEventText}` : '',
         proactiveContext,
       ].filter(Boolean).join('\n\n'),
-      activeIntentText: injectedIntentText,
       stickerNames: stickers.map((s) => s.name),
       remoteStickerSearchEnabled: isStickerProviderReady(settings),
       imageGenerationEnabled: isImageProviderReady(settings),
       imageSearchEnabled: !!settings.pexelsApiKey,
-      mbti: contact.mbti || undefined,
       recentMemoriesText: recentMemories || undefined,
-      speechSamplesText: featureActive(contactPromptSettings, 'personalityTraits') ? (formatSpeechSamplesForScene(contact.speechSamples, 'private', 3) || undefined) : undefined,
-      sharedHistory: memoryPromptOn ? contact.sharedHistory : undefined,
     })
     if (!contextSections.trim()) throw new Error('对话核心提示词模块已屏蔽')
 
@@ -524,7 +508,7 @@ async function runAiTurn(
         return { role: m.role, content: m.content }
       }),
       ...(regenerationUserMessage ? [{ role: 'user' as const, content: regenerationUserMessage }] : []),
-      { role: 'system', content: '【最终生成提醒】现在只生成自然聊天正文，不输出JSON、分析、标题或Markdown。' },
+      { role: 'system', content: '【最终生成提醒】准备自然聊天内容，并按后续要求通过 submit_turn 原生函数提交；不要在用户可见正文中输出JSON、分析、标题、Markdown、工具名或协议。' },
     ])
     console.info(`[chat-perf] context-ready=${Math.round(performance.now() - turnStartedAt)}ms contact=${displayName(contact)}`)
 
@@ -588,9 +572,6 @@ async function runAiTurn(
         `本次审查重点=${focus}`,
         promptModuleEnabled(contactPromptSettings, 'chat') ? `角色=${displayName(contact)}` : '',
         promptModuleEnabled(contactPromptSettings, 'chat') ? `人设=${contact.systemPrompt.slice(0, 1400)}` : '',
-        promptModuleEnabled(contactPromptSettings, 'chat') && contact.personaConstraints ? `硬约束=${contact.personaConstraints.slice(0, 700)}` : '',
-        featureActive(contactPromptSettings, 'personalityTraits') && contact.personalityTrait ? `人格特质=${contact.personalityTrait}` : '',
-        promptModuleEnabled(contactPromptSettings, 'memory') && contact.sharedHistory ? `与用户共同过往（关系硬锚点）=${contact.sharedHistory.slice(0, 900)}` : '',
         featureActive(contactPromptSettings, 'worldview') && worldbookText ? `本轮命中世界书=${worldbookText.slice(0, 1000)}` : '',
         sharedOriginalContext ? `相关跨场景事实=${sharedOriginalContext.slice(-1000)}` : '',
         contactAge === null ? '' : `当前年龄硬事实=${contactAge}岁（生日${contact.birthday}）`,
@@ -753,7 +734,7 @@ async function runAiTurn(
         qualityCheck: qualityCheckDebug,
         injectedIntents,
         actionCommittee,
-        promptTrace: { sections: [{ label: '世界书', content: worldbookText }, { label: '结构化记忆', content: recentMemories }, { label: '特质规则', content: contact.customPersonalityTraits?.map((trait) => `${trait.name}: ${trait.meaning}`).join('\n') || contact.personalityTrait || '' }, { label: '关系与心情', content: relationshipText }, { label: '日程与当前情境', content: situationText }, { label: '主动话题', content: proactiveContext }].filter((section) => section.content), worldbookMatches: worldbookTrace.matches.map((match) => ({ id: match.entry.id, title: match.entry.title, score: match.score, chars: match.entry.content.length })), memorySummary: recentMemories, traitSummary: contact.customPersonalityTraits?.map((trait) => trait.name).join('、') || contact.personalityTrait, proactiveSource: proactiveContext || undefined },
+        promptTrace: { sections: [{ label: '世界书', content: worldbookText }, { label: '结构化记忆', content: recentMemories }, { label: '关系与心情', content: relationshipText }, { label: '日程与当前情境', content: situationText }, { label: '主动话题', content: proactiveContext }].filter((section) => section.content), worldbookMatches: worldbookTrace.matches.map((match) => ({ id: match.entry.id, title: match.entry.title, score: match.score, chars: match.entry.content.length })), memorySummary: recentMemories, proactiveSource: proactiveContext || undefined },
       }),
       knowledgeQueries,
       createdAt: now,
@@ -770,7 +751,6 @@ async function runAiTurn(
       turnMood,
       turnThought,
       finalRaw,
-      injectedIntents.map((intent) => intent.id),
       now,
       directOutput,
       internalTask,
@@ -799,7 +779,6 @@ function revealBubbles(
   turnMood?: string,
   turnThought?: string,
   finalRaw?: string,
-  injectedIntentIds: string[] = [],
   turnNow = Date.now(),
   directOutput = false,
   internalTask?: InternalTask,
@@ -998,9 +977,6 @@ function revealBubbles(
           await db.conversations.update(conversationId, { updatedAt: taskCreatedAt })
         }
         useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined })
-        if (injectedIntentIds.length > 0) {
-          await markIntentsUsed(contact.id, injectedIntentIds)
-        }
         const memoryUpdate = directOutput ? null : await maybeUpdateMemory(contact.id, conversationId, settings)
         if (memoryUpdate) {
           const turn = await db.aiTurns.get(aiTurnId)

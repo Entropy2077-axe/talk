@@ -109,12 +109,12 @@ export const useSettingsStore = create<SettingsState>()(
       moodExpiryMs: 30 * 60 * 1000,
       chatResponseTimeoutMs: 60 * 1000,
       adminModeEnabled: false,
-      enabledModules: ['shop', 'warehouse', 'saveLoad', 'knowledgeBase', 'relationship', 'personalityTraits', 'intent', 'storyOutline', 'career', 'location'],
+      enabledModules: ['shop', 'warehouse', 'saveLoad', 'knowledgeBase', 'relationship', 'storyOutline', 'career', 'location'],
       setSettings: (patch) => set(patch),
     }),
     {
       name: 'talk-settings',
-      version: 26,
+      version: 28,
       migrate: (persisted, version) => {
         const next = persisted as Partial<SettingsState>
         if (next.experienceMode !== 'immersive' && next.experienceMode !== 'free') next.experienceMode = 'free'
@@ -193,6 +193,7 @@ export const useSettingsStore = create<SettingsState>()(
         if (Array.isArray(next.enabledModules)) next.enabledModules = next.enabledModules.filter((id) => id !== 'mood')
         if (Array.isArray(next.enabledModules)) next.enabledModules = next.enabledModules.filter((id) => !['selfIteration', 'aiReplyAssist', 'promptModuleEditor'].includes(id))
         if (Array.isArray(next.enabledModules)) next.enabledModules = next.enabledModules.filter((id) => id !== 'slg')
+        if (Array.isArray(next.enabledModules)) next.enabledModules = next.enabledModules.filter((id) => !['personalityTraits', 'intent', 'lifeSimulation'].includes(id))
         if (version < 16 && Array.isArray(next.enabledModules) && !next.enabledModules.includes('location')) next.enabledModules = [...next.enabledModules, 'location']
         next.uiTheme = normalizeUiTheme(next.uiTheme)
         next.promptModules = normalizePromptModules(next.promptModules, next.globalSystemPrompt)

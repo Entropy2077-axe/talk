@@ -20,8 +20,8 @@ vi.mock('./personaAgentTools', () => ({
         name: `队列角色${streamRuntime.calls}`, realName: '林澄', nickname: '阿澄', birthday: '2002-06-15',
         gender: '女', ageRange: '24岁', relationship: '朋友', occupation: '设计师',
         persona: '慢热但真诚的朋友，平时说话克制却很会观察细节，和用户相处时总会用行动表达关心。', personalityTrait: '猫系', mbti: 'INFP',
-        speechSamples: ['你好'], personaProfile: { facts: [], boundaries: [], habits: [], behaviorAnchors: [] },
-        pastExperiences: [], monthlySalary: 8000, schedule: [], avatarKeyword: 'portrait',
+        speechExamples: Array.from({ length: 10 }, (_, index) => `[场景${index + 1}] 示例消息${index + 1}`),
+        initialMemories: [], monthlySalary: 8000, schedule: [], avatarKeyword: 'portrait',
       })
       return { draft: JSON.parse(output), raw: output, usedNativeTools: true }
     } finally {
@@ -76,5 +76,8 @@ describe('contact generation task presentation', () => {
     })
     expect(streamRuntime.calls).toBe(2)
     expect(streamRuntime.maxActive).toBe(1)
+    const drafts = await db.contactGenerationTasks.where('status').equals('awaiting_review').toArray()
+    expect(drafts[0]?.personaDraft?.persona).toContain('说话方式参考')
+    expect(drafts[0]?.personaDraft?.speechExamples).toBeUndefined()
   })
 })

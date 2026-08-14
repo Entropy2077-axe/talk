@@ -190,7 +190,7 @@ describe('native chat agent tools', () => {
       })
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await generateGroupAgentTurn({ ...agentOptions, speakerNames: ['小林', '阿青'], memberNames: ['小林', '阿青'] })
+    const result = await generateGroupAgentTurn({ ...agentOptions, speakerNames: ['小林', '阿青'], memberNames: ['小林', '阿青'], messageBounds: { min: 1, max: 4 } })
 
     expect(result.parsed.bubbles.map((bubble) => [bubble.speakerIndex, bubble.type])).toEqual([[2, 'text'], [2, 'scheduleChange']])
     expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -202,7 +202,7 @@ describe('native chat agent tools', () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(completion([image])).mockResolvedValueOnce(completion([reply]))
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await generateGroupAgentTurn({ ...agentOptions, speakerNames: ['小林', '阿青'], memberNames: ['小林', '阿青'] })
+    const result = await generateGroupAgentTurn({ ...agentOptions, speakerNames: ['小林', '阿青'], memberNames: ['小林', '阿青'], messageBounds: { min: 1, max: 4 } })
 
     expect(result.parsed.bubbles.map((bubble) => [bubble.speakerIndex, bubble.type])).toEqual([[2, 'text'], [2, 'image']])
     expect(fetchMock).toHaveBeenCalledTimes(2)

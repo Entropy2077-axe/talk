@@ -9,27 +9,39 @@ describe('relationship and persona adherence prompts', () => {
       .toBe('她表面嘴硬，实际很在意用户。')
   })
 
-  it('puts relationship, shared history, trait, and speech examples in the first-turn contract', () => {
+  it('puts the canonical persona, relationship, and shared history in the first-turn contract', () => {
     const prompt = buildRawChatPrompt({
       name: '小满',
       persona: '嘴硬但很在乎用户，喜欢用轻微挑衅掩饰关心。',
       stylePrompt: '自然聊天，短句。',
       relationshipBase: '恋人',
-      personalityTrait: '雌小鬼',
-      personalityWarmth: 80,
       recentContext: '刚开始聊天。',
       latestUserText: '早安',
       stickerNames: [],
-      speechSamplesText: '- [亲近互动] 早啊，笨蛋，昨晚又熬夜了？',
-      sharedHistory: '你们在大学社团认识，她曾陪用户熬夜准备考试。',
+      recentMemoriesText: '你们在大学社团认识，她曾陪用户熬夜准备考试。',
     })
 
-    expect(prompt).toContain('与用户的共同过往')
+    expect(prompt).toContain('最近的记忆碎片')
     expect(prompt).toContain('第一句')
     expect(prompt).toContain('恋人')
-    expect(prompt).toContain('雌小鬼')
-    expect(prompt).toContain('说话样例')
+    expect(prompt).toContain('嘴硬但很在乎用户')
     expect(prompt).toContain('只能使用给出的细节')
+  })
+
+  it('does not duplicate a current-situation heading supplied by runtime context', () => {
+    const prompt = buildRawChatPrompt({
+      name: '小满',
+      persona: '自然聊天。',
+      stylePrompt: '短句。',
+      recentContext: '',
+      situationContext: '【当前情境】现在是周六晚上。',
+      stickerNames: [],
+    })
+
+    expect(prompt.match(/【当前情境】/g)).toHaveLength(1)
+    expect(prompt).toContain('现在是周六晚上。')
+    expect(prompt).toContain('通过本轮指定的原生工具提交')
+    expect(prompt).not.toContain('只输出自然聊天正文')
   })
 
   it('asks Nuwa draft generation to fill omitted identity fields consistently', () => {
@@ -50,7 +62,9 @@ describe('relationship and persona adherence prompts', () => {
     expect(prompt).toContain('birthday、ageRange和persona中写出的年龄必须')
     expect(prompt).toContain('我们小时候就认识')
     expect(prompt).toContain('relationship')
-    expect(prompt).toContain('speechSamples')
+    expect(prompt).toContain('唯一且完整的人设正文')
+    expect(prompt).not.toContain('speechSamples')
+    expect(prompt).not.toContain('personaProfile')
   })
 
   it('keeps media tool instructions out of the main natural-text prompt', () => {
@@ -92,7 +106,7 @@ describe('relationship and persona adherence prompts', () => {
       recentContext: '',
       relationshipContext: 'RELATIONSHIP_DYNAMIC_PAYLOAD',
       memoryContext: 'MEMORY_PRIVATE_PAYLOAD',
-      sharedHistory: 'MEMORY_SHARED_PAYLOAD',
+      recentMemoriesText: 'MEMORY_SHARED_PAYLOAD',
       stickerNames: [],
     })
 
@@ -127,7 +141,6 @@ describe('relationship and persona adherence prompts', () => {
       getPromptTemplate({ promptModules }, 'worldview', 'privateRuntime', { worldbookEntries: marker }),
       getPromptTemplate({ promptModules }, 'worldview', 'groupRuntime', { worldbookEntries: marker }),
       getPromptTemplate({ promptModules }, 'worldview', 'momentsRuntime', { worldbookEntries: marker }),
-      getPromptTemplate({ promptModules }, 'worldview', 'lifeRuntime', { worldbookEntries: marker }),
     ]
     for (const surface of surfaces) {
       expect(surface).toContain(marker)
