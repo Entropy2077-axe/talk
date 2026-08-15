@@ -26,5 +26,6 @@ describe('AI provider URL normalization', () => {
     expect(resolveChatCompletionsUrl('https://generativelanguage.googleapis.com', 'gemini'))
       .toBe('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions')
     expect(resolveModelsUrl('https://api.anthropic.com/v1', 'anthropic')).toBeNull()
+    expect(resolveModelsUrl('https://api.example.com/v1/chat/completions', 'custom')).toBe('https://api.example.com/v1/models')
   })
 })

@@ -152,6 +152,7 @@ function settingsWithContactVoice(settings: Pick<AppSettings, 'speechProvider' |
 }
 
 export async function synthesizeSpeech(text: string, settings: Pick<AppSettings, 'speechProvider' | 'speechProviders'>, voice?: ContactSpeechVoice): Promise<SynthesizedSpeech> {
+  if (Array.isArray((settings as Partial<AppSettings>).enabledModules) && !(settings as Partial<AppSettings>).enabledModules!.includes('speech')) throw new Error('语音功能已关闭')
   const normalized = text.trim()
   if (!normalized) throw new Error('这条消息没有可朗读的文字')
   const resolved = settingsWithContactVoice(settings, voice)

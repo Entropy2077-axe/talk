@@ -37,7 +37,7 @@ export interface PersonaAgentResult {
 const text = (value: unknown, max: number) => typeof value === 'string' ? value.trim().slice(0, max) : ''
 
 const PERSONA_SCHEDULE_LOCATION_IDS = [
-  'home-living', 'home-kitchen', 'riverside-apartment-room', 'youth-apartment-room', 'student-dorm-room', 'old-residences-lane', 'villa-district-lane',
+  'home-living', 'home-kitchen', 'riverside-apartment-101', 'riverside-apartment-201', 'riverside-apartment-302', 'youth-apartment-101', 'youth-apartment-202', 'youth-apartment-301', 'student-dorm-101', 'student-dorm-201', 'student-dorm-302', 'old-residences-101', 'old-residences-202', 'old-residences-302', 'villa-district-101', 'villa-district-201', 'villa-district-302',
   'school-classroom', 'school-canteen', 'school-playground', 'office-floor', 'office-lobby', 'mall-atrium', 'mall-cafe', 'mall-shop',
   'hospital-lobby', 'hospital-clinic', 'park-lawn', 'park-riverside', 'beach-boardwalk', 'mountain-lookout', 'farm-field',
 ] as const

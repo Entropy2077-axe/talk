@@ -22,15 +22,30 @@ const LOCATION_SEEDS: LocationSeed[] = [
   seed('home-kitchen', 'home', '厨房', 'kitchen', '连着客厅的开放式厨房。', 12, 'private'),
   seed('riverside-apartment', 'city', '临江公寓', 'apartment', '靠近江岸的城市公寓。', 14),
   seed('riverside-apartment-lobby', 'riverside-apartment', '公寓大堂', 'lobby', '住户和访客经过的一层大堂。', 15),
-  seed('riverside-apartment-room', 'riverside-apartment', '住户楼层', 'apartment-floor', '分布着不同住户房间的楼层。', 16, 'restricted'),
+  seed('riverside-apartment-room', 'riverside-apartment', '临江公寓住宅楼', 'apartment-building', '一栋每层仅一户的住宅楼；具体住处必须精确到门牌号。', 16, 'restricted'),
+  seed('riverside-apartment-101', 'riverside-apartment-room', '101室', 'apartment-room', '临江公寓一层的独立住户房间。', 161, 'restricted'),
+  seed('riverside-apartment-201', 'riverside-apartment-room', '201室', 'apartment-room', '临江公寓二层的独立住户房间。', 162, 'restricted'),
+  seed('riverside-apartment-302', 'riverside-apartment-room', '302室', 'apartment-room', '临江公寓三层的独立住户房间。', 163, 'restricted'),
   seed('youth-apartment', 'city', '青年公寓', 'apartment', '许多年轻上班族居住的公寓。', 17),
-  seed('youth-apartment-room', 'youth-apartment', '住户楼层', 'apartment-floor', '相对紧凑而便利的居住空间。', 18, 'restricted'),
+  seed('youth-apartment-room', 'youth-apartment', '青年公寓住宅楼', 'apartment-building', '一栋每层仅一户的紧凑型住宅楼；具体住处必须精确到门牌号。', 18, 'restricted'),
+  seed('youth-apartment-101', 'youth-apartment-room', '101室', 'apartment-room', '青年公寓一层的独立住户房间。', 181, 'restricted'),
+  seed('youth-apartment-202', 'youth-apartment-room', '202室', 'apartment-room', '青年公寓二层的独立住户房间。', 182, 'restricted'),
+  seed('youth-apartment-301', 'youth-apartment-room', '301室', 'apartment-room', '青年公寓三层的独立住户房间。', 183, 'restricted'),
   seed('student-dorm', 'city', '学生宿舍', 'dormitory', '供学生住宿的宿舍楼。', 19, 'restricted'),
-  seed('student-dorm-room', 'student-dorm', '宿舍楼层', 'dorm-floor', '学生们日常生活的宿舍区域。', 20, 'restricted'),
+  seed('student-dorm-room', 'student-dorm', '学生宿舍楼', 'dorm-building', '一栋每层仅一间宿舍的学生宿舍楼；具体住处必须精确到房号。', 20, 'restricted'),
+  seed('student-dorm-101', 'student-dorm-room', '101室', 'dorm-room', '学生宿舍一层的独立房间。', 201, 'restricted'),
+  seed('student-dorm-201', 'student-dorm-room', '201室', 'dorm-room', '学生宿舍二层的独立房间。', 202, 'restricted'),
+  seed('student-dorm-302', 'student-dorm-room', '302室', 'dorm-room', '学生宿舍三层的独立房间。', 203, 'restricted'),
   seed('old-residences', 'city', '老城区住宅', 'apartment', '街巷密集、生活气息浓厚的旧住宅区。', 21),
-  seed('old-residences-lane', 'old-residences', '居民巷', 'residential-lane', '连接旧住宅楼的安静巷道。', 22),
+  seed('old-residences-lane', 'old-residences', '旧城住宅楼', 'residential-building', '旧城区一栋每层仅一户的住宅楼；具体住处必须精确到门牌号。', 22),
+  seed('old-residences-101', 'old-residences-lane', '101室', 'apartment-room', '旧城住宅楼一层的独立住户房间。', 221, 'restricted'),
+  seed('old-residences-202', 'old-residences-lane', '202室', 'apartment-room', '旧城住宅楼二层的独立住户房间。', 222, 'restricted'),
+  seed('old-residences-302', 'old-residences-lane', '302室', 'apartment-room', '旧城住宅楼三层的独立住户房间。', 223, 'restricted'),
   seed('villa-district', 'city', '郊外别墅区', 'villa', '位于丘陵边缘的低密度住宅区。', 23, 'restricted'),
-  seed('villa-district-lane', 'villa-district', '林荫住宅道', 'villa-lane', '通向各栋住宅的林荫道路。', 24, 'restricted'),
+  seed('villa-district-lane', 'villa-district', '别墅住宅区', 'villa-cluster', '通向各栋独立住宅的安静道路；具体住处必须精确到房号。', 24, 'restricted'),
+  seed('villa-district-101', 'villa-district-lane', '101号', 'villa-room', '别墅区第一栋独立住宅。', 241, 'restricted'),
+  seed('villa-district-201', 'villa-district-lane', '201号', 'villa-room', '别墅区第二栋独立住宅。', 242, 'restricted'),
+  seed('villa-district-302', 'villa-district-lane', '302号', 'villa-room', '别墅区第三栋独立住宅。', 243, 'restricted'),
   seed('school', 'city', '临江学校', 'school', '有教室、食堂和操场的校园。', 20, 'restricted'),
   seed('school-classroom', 'school', '教室', 'classroom', '上课与自习的教室。', 21, 'restricted'),
   seed('school-canteen', 'school', '食堂', 'canteen', '学生们集中用餐的地方。', 22),
@@ -73,6 +88,48 @@ const LOCATION_SEEDS: LocationSeed[] = [
   seed('industrial-park', 'city', '临江工业园', 'factory', '位于下游郊区的产业园区。', 88, 'restricted'),
   seed('industrial-park-gate', 'industrial-park', '园区入口', 'factory-gate', '人员车辆进出工业园的入口。', 89, 'restricted'),
 ]
+
+const RESIDENCE_LAYOUT_VERSION = 2
+const LEGACY_RESIDENCE_ROOMS: Record<string, string[]> = {
+  'riverside-apartment-room': ['riverside-apartment-101', 'riverside-apartment-201', 'riverside-apartment-302'],
+  'youth-apartment-room': ['youth-apartment-101', 'youth-apartment-202', 'youth-apartment-301'],
+  'student-dorm-room': ['student-dorm-101', 'student-dorm-201', 'student-dorm-302'],
+  'old-residences-lane': ['old-residences-101', 'old-residences-202', 'old-residences-302'],
+  'villa-district-lane': ['villa-district-101', 'villa-district-201', 'villa-district-302'],
+}
+const seedNameById = new Map(LOCATION_SEEDS.map((item) => [item.id, item.name]))
+
+function stableResidenceRoom(contactId: string, legacyLocationId: string) {
+  const candidates = LEGACY_RESIDENCE_ROOMS[legacyLocationId]
+  return candidates?.[stableHash(`${contactId}:${legacyLocationId}:room` ) % candidates.length]
+}
+
+function migrateResidenceRoom(contact: Contact): Partial<Contact> | null {
+  const replace = (locationId?: string) => locationId ? stableResidenceRoom(contact.id, locationId) ?? locationId : locationId
+  const currentLocationId = replace(contact.currentLocationId)
+  const residenceLocationId = replace(contact.residence?.locationId)
+  const rewriteSchedule = <T extends { locationId?: string; location: string }>(items?: T[]) => items?.map((item) => {
+    const locationId = replace(item.locationId)
+    return locationId === item.locationId ? item : { ...item, locationId, location: seedNameById.get(locationId!) ?? item.location }
+  })
+  const schedule = rewriteSchedule(contact.schedule)
+  const initialSchedule = rewriteSchedule(contact.initialSchedule)
+  const scheduleOverrides = rewriteSchedule(contact.scheduleOverrides)
+  const changed = currentLocationId !== contact.currentLocationId
+    || residenceLocationId !== contact.residence?.locationId
+    || schedule?.some((item, index) => item !== contact.schedule?.[index])
+    || initialSchedule?.some((item, index) => item !== contact.initialSchedule?.[index])
+    || scheduleOverrides?.some((item, index) => item !== contact.scheduleOverrides?.[index])
+  if (!changed) return null
+  return {
+    currentLocationId,
+    residence: contact.residence && residenceLocationId ? { ...contact.residence, locationId: residenceLocationId } : contact.residence,
+    schedule,
+    initialSchedule,
+    scheduleOverrides,
+    locationUpdatedAt: Date.now(),
+  }
+}
 
 const ROOT_SPECS: Array<{ id: string; allowedTerrains: TerrainType[]; buildingCategory: string }> = [
   { id: 'home', allowedTerrains: ['urban', 'rural'], buildingCategory: 'residence' },
@@ -161,6 +218,27 @@ export function ensureLocationsInitialized() {
       })
     } else if (missingLocations.length) {
       await db.locations.bulkPut(missingLocations.map((item) => ({ ...item, createdAt: now, updatedAt: now })))
+    }
+
+    // The old default map used one shared "residential floor" per building.
+    // Upgrade every existing reference once so contacts no longer appear to
+    // live in the same room merely because they share a building.
+    if ((state?.residenceLayoutVersion ?? 0) < RESIDENCE_LAYOUT_VERSION) {
+      await db.transaction('rw', db.contacts, db.locationModuleState, async () => {
+        const contacts = await db.contacts.toArray()
+        const updates = contacts.flatMap((contact) => {
+          const changes = migrateResidenceRoom(contact)
+          return changes ? [{ key: contact.id, changes }] : []
+        })
+        if (updates.length) await db.contacts.bulkUpdate(updates)
+        await db.locationModuleState.put({
+          id: 'active',
+          currentLocationId: state?.currentLocationId,
+          deletedLocationIds: state?.deletedLocationIds,
+          residenceLayoutVersion: RESIDENCE_LAYOUT_VERSION,
+          updatedAt: now,
+        })
+      })
     }
 
     const nickname = useSettingsStore.getState().userNickname.trim()
@@ -283,7 +361,13 @@ const KEYWORD_LOCATIONS: Array<[RegExp, string[]]> = [
   [/农场|农田/, ['farm-field']],
 ]
 
-const NPC_HOME_LOCATIONS = ['riverside-apartment-room', 'youth-apartment-room', 'student-dorm-room', 'old-residences-lane', 'villa-district-lane']
+const NPC_HOME_LOCATIONS = [
+  'riverside-apartment-101', 'riverside-apartment-201', 'riverside-apartment-302',
+  'youth-apartment-101', 'youth-apartment-202', 'youth-apartment-301',
+  'student-dorm-101', 'student-dorm-201', 'student-dorm-302',
+  'old-residences-101', 'old-residences-202', 'old-residences-302',
+  'villa-district-101', 'villa-district-201', 'villa-district-302',
+]
 const PLAYER_HOME_LOCATION_IDS = new Set(['home-living', 'home-kitchen'])
 
 /** A contact can genuinely live with the player. Keep their explicitly

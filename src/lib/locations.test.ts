@@ -41,7 +41,7 @@ describe('location runtime', () => {
     expect(home?.name).toBe('小河的家')
     const leafIds = new Set(locations.filter((item) => !locations.some((candidate) => candidate.parentId === item.id)).map((item) => item.id))
     const resolved = resolveContactLocationAt(contact('ordinary-npc'), new Date(2026, 6, 28, 22), leafIds)
-    expect(resolved.locationId).toBe('riverside-apartment-room')
+    expect(resolved.locationId).toBe('riverside-apartment-101')
   })
 
   it('resolves the same contact and real-time slot to a stable location', async () => {
@@ -68,7 +68,7 @@ describe('location runtime', () => {
       schedule: [{ id: 'sleep', dayOfWeek: 1, startHour: 23, endHour: 7, phoneAccess: 'unavailable', location: '家里', locationId: 'home-living', activity: '睡觉' }],
     }), new Date(2026, 6, 28, 1), ids)
     expect(result).toMatchObject({ source: 'schedule', taskId: 'sleep', taskKind: 'default', activity: '睡觉' })
-    expect(result.locationId).toBeOneOf(['riverside-apartment-room', 'youth-apartment-room', 'student-dorm-room', 'old-residences-lane', 'villa-district-lane'])
+    expect(result.locationId).toMatch(/^(riverside-apartment|youth-apartment|student-dorm|old-residences|villa-district)-(101|201|202|301|302)$/)
   })
 
   it('keeps an explicitly cohabiting contact at the player home', async () => {
@@ -132,7 +132,7 @@ describe('location runtime', () => {
       }],
     })
 
-    expect(resolveContactRuntimeAt(scheduled, new Date(2026, 7, 2, 19), leafIds).locationId).toBe('riverside-apartment-room')
+    expect(resolveContactRuntimeAt(scheduled, new Date(2026, 7, 2, 19), leafIds).locationId).toBe('riverside-apartment-101')
     expect(resolveContactRuntimeAt(scheduled, new Date(startsAt), leafIds)).toMatchObject({ locationId: 'park-riverside', source: 'specialTask', taskId: 'future' })
   })
 

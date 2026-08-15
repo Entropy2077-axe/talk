@@ -1,4 +1,4 @@
-import type { AppSettings, Contact, PromptModuleSettings, PromptPreset, SamplingParameters } from '../types'
+import type { AppSettings, Contact, PromptModuleSettings, PromptPreset } from '../types'
 import { createDefaultPromptModules, normalizePromptModules } from './promptModules'
 import { db } from '../db/db'
 
@@ -6,18 +6,6 @@ export const SYSTEM_DEFAULT_PROMPT_PRESET_ID = 'system-default-prompt'
 
 export function clonePromptModules(modules: PromptModuleSettings): PromptModuleSettings {
   return structuredClone(normalizePromptModules(modules))
-}
-
-export function normalizeSamplingParameters(value: unknown): SamplingParameters {
-  const input = value && typeof value === 'object' ? value as Partial<SamplingParameters> : {}
-  const temperature = Number(input.temperature)
-  const topP = Number(input.topP)
-  const topK = Number(input.topK)
-  return {
-    ...(Number.isFinite(temperature) ? { temperature: Math.min(2, Math.max(0, temperature)) } : {}),
-    ...(Number.isFinite(topP) ? { topP: Math.min(1, Math.max(0, topP)) } : {}),
-    ...(Number.isFinite(topK) && topK >= 1 ? { topK: Math.floor(topK) } : {}),
-  }
 }
 
 export function systemDefaultPromptPreset(): PromptPreset {
@@ -42,7 +30,6 @@ export function normalizePromptPresets(value: unknown, legacyModules?: PromptMod
       id: candidate.id,
       name: candidate.name.trim() || '未命名提示词',
       modules: normalizePromptModules(candidate.modules),
-      sampling: normalizeSamplingParameters(candidate.sampling),
       systemDefault: candidate.id === SYSTEM_DEFAULT_PROMPT_PRESET_ID,
       createdAt: typeof candidate.createdAt === 'number' ? candidate.createdAt : Date.now(),
       updatedAt: typeof candidate.updatedAt === 'number' ? candidate.updatedAt : Date.now(),

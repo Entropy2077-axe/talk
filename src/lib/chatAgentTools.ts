@@ -26,7 +26,7 @@ interface ToolPlan { calls?: Array<{ name?: unknown; arguments?: unknown }> }
 
 const PRIVATE_TURN_TOOL_NAME = 'submit_turn'
 
-const GROUP_ACTION_TOOL_NAMES = new Set(['send_image', 'create_schedule'])
+const GROUP_ACTION_TOOL_NAMES = new Set(['send_image', 'create_schedule', 'start_activity_now'])
 
 const text = (value: unknown, max: number) => typeof value === 'string' ? value.trim().slice(0, max) : ''
 const positiveInteger = (value: unknown) => {
@@ -79,10 +79,11 @@ export function privateChatTools(opts: Pick<AgentToolOptions, 'stickerNames' | '
     activity: { type: 'string' }, phoneAccess: { type: 'string', enum: ['available', 'unavailable'] }, summary: { type: 'string' },
     ...commonProperties(),
   }, ['date', 'startHour', 'endHour', 'locationId', 'activity', 'phoneAccess', 'summary', 'thought', 'mood']))
-  if (opts.scheduleEnabled && opts.locationIds.length) tools.push(fn('start_activity_now', '角色明确决定现在立刻前往某个具体地点并开始一项活动时调用。适用于“现在去厨房做菜”这类即时行动，不用于未来安排、仅讨论可能性、拒绝或尚未答应的请求。调用后必须同时用 send_text 自然回应。', {
+  if (opts.scheduleEnabled && opts.locationIds.length) tools.push(fn('start_activity_now', '角色明确决定马上或在很短时间内前往某个具体地点并开始一项活动时调用。适用于“现在去厨房做菜”或“半小时后去对方家”这类已答应的行动；delayMinutes 不填或为 0 表示立刻出发，填写 1-720 表示约定的等待分钟数。不用于模糊未来安排、仅讨论可能性、拒绝或尚未答应的请求。调用后必须同时用 send_text 自然回应。', {
     locationId: { type: 'string', enum: opts.locationIds },
     activity: { type: 'string', description: '现在开始进行的简短活动，例如“做菜”。' },
     durationMinutes: { type: 'integer', minimum: 5, maximum: 480, description: '预计持续分钟数；根据活动合理估计。' },
+    delayMinutes: { type: 'integer', minimum: 0, maximum: 720, description: '出发前明确约定等待的分钟数；立刻出发填 0 或省略。' },
     phoneAccess: { type: 'string', enum: ['available', 'unavailable'] },
     ...commonProperties(),
   }, ['locationId', 'activity', 'durationMinutes', 'phoneAccess', 'thought', 'mood']))
@@ -125,7 +126,7 @@ export function privateTurnToolDefinition(opts: Pick<AgentToolOptions, 'stickerN
         properties: {
           type: {
             type: 'string', enum: eventTypes,
-            description: '事件类型及必填字段：text→content；sticker→name；image→query/kind/participants；schedule→date/startHour/endHour/locationId/activity/phoneAccess/summary；activity_now→locationId/activity/durationMinutes/phoneAccess；contact_recommendation→candidateName/relationToRecommender/recommendationReason/shortDescription/gender/ageRange/occupation/hobbies/personalityClues；transfer→amount/note；red_packet→amount/blessing；loan_request→amount/reason；loan_decision→loanId/decision/amount；gift_purchase→amount/name/icon/description。',
+            description: '事件类型及必填字段：text→content；sticker→name；image→query/kind/participants；schedule→date/startHour/endHour/locationId/activity/phoneAccess/summary；activity_now→locationId/activity/durationMinutes/phoneAccess，可选 delayMinutes（0-720，半小时后出发填30）；contact_recommendation→candidateName/relationToRecommender/recommendationReason/shortDescription/gender/ageRange/occupation/hobbies/personalityClues；transfer→amount/note；red_packet→amount/blessing；loan_request→amount/reason；loan_decision→loanId/decision/amount；gift_purchase→amount/name/icon/description。',
           },
           content: { type: 'string', description: 'type=text 时的自然聊天正文。' },
           name: opts.stickerSearchEnabled
@@ -142,6 +143,7 @@ export function privateTurnToolDefinition(opts: Pick<AgentToolOptions, 'stickerN
           phoneAccess: { type: 'string', enum: ['available', 'unavailable'] },
           summary: { type: 'string' },
           durationMinutes: { type: 'integer', minimum: 5, maximum: 480 },
+          delayMinutes: { type: 'integer', minimum: 0, maximum: 720 },
           amount: { type: 'integer', minimum: 1 },
           note: { type: 'string' },
           blessing: { type: 'string' },
@@ -204,9 +206,9 @@ export function parsePrivateToolCalls(calls: ChatToolCall[]): ParsedAiTurn {
       if (/^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isInteger(startHour) && startHour >= 0 && startHour <= 23 && Number.isInteger(endHour) && endHour >= 1 && endHour <= 24 && startHour !== endHour && locationId && activity && summary && (phoneAccess === 'available' || phoneAccess === 'unavailable')) bubbles.push({ type: 'scheduleChange', date, startHour, endHour, location: locationId, locationId, activity, summary, phoneAccess })
     } else if (call.function.name === 'start_activity_now') {
       const locationId = text(args.locationId, 80), activity = text(args.activity, 16)
-      const durationMinutes = Number(args.durationMinutes), phoneAccess = args.phoneAccess
-      if (locationId && activity && Number.isInteger(durationMinutes) && durationMinutes >= 5 && durationMinutes <= 480 && (phoneAccess === 'available' || phoneAccess === 'unavailable') && immediateActivities.length === 0) {
-        immediateActivities.push({ locationId, activity, durationMinutes, phoneAccess })
+      const durationMinutes = Number(args.durationMinutes), delayMinutes = args.delayMinutes === undefined ? 0 : Number(args.delayMinutes), phoneAccess = args.phoneAccess
+      if (locationId && activity && Number.isInteger(durationMinutes) && durationMinutes >= 5 && durationMinutes <= 480 && Number.isInteger(delayMinutes) && delayMinutes >= 0 && delayMinutes <= 720 && (phoneAccess === 'available' || phoneAccess === 'unavailable') && immediateActivities.length === 0) {
+        immediateActivities.push({ locationId, activity, durationMinutes, ...(delayMinutes ? { delayMinutes } : {}), phoneAccess })
       }
     } else if (call.function.name === 'transfer_money') {
       const amount = positiveInteger(args.amount); if (amount) bubbles.push({ type: 'transfer', amount, note: text(args.note, 80) })
@@ -246,7 +248,7 @@ const PRIVATE_EVENT_TOOL_NAMES: Record<string, string> = {
 }
 
 function parsePrivateTurnCall(call: ChatToolCall): ParsedAiTurn {
-  if (call.function.name !== PRIVATE_TURN_TOOL_NAME) return { bubbles: [], knowledgeQueries: [] }
+  if (call.function.name !== PRIVATE_TURN_TOOL_NAME && call.function.name !== 'decide_turn_actions') return { bubbles: [], knowledgeQueries: [] }
   const args = argumentsObject(call)
   if (!args || !Array.isArray(args.events)) return { bubbles: [], knowledgeQueries: [] }
   const thought = text(args.thought, 100)
@@ -276,6 +278,105 @@ function privateTurnIsValid(parsed: ParsedAiTurn): boolean {
   const requiresText = !!parsed.immediateActivities?.length || parsed.bubbles.some((bubble) =>
     ['image', 'link', 'scheduleChange', 'transfer', 'redPacket', 'loanRequest', 'loanDecision', 'giftPurchase'].includes(bubble.type))
   return !requiresText || parsed.bubbles.some((bubble) => bubble.type === 'text')
+}
+
+function textOnlyTurnTool(): ChatToolDefinition {
+  return fn(PRIVATE_TURN_TOOL_NAME, '只生成用户可见的自然聊天正文。不得生成、提及或决定任何工具、日程、地点、图片、资金或其他行动；这些由独立的行动模型处理。', {
+    events: {
+      type: 'array', minItems: 1, maxItems: 8,
+      items: { type: 'object', additionalProperties: false, properties: {
+        type: { type: 'string', enum: ['text'] },
+        content: { type: 'string', description: '自然聊天正文。' },
+      }, required: ['type', 'content'] },
+    },
+    thought: { type: 'string' }, mood: { type: 'string' }, knowledgeQueries: { type: 'array', maxItems: 0, items: { type: 'string' } },
+  }, ['events', 'thought', 'mood', 'knowledgeQueries'])
+}
+
+function actionDecisionTool(locationIds: string[]): ChatToolDefinition {
+  return fn('decide_turn_actions', '只决定本轮是否需要执行结构化行动，绝不生成用户可见正文。若无需行动，decided=false、events=[]，并简短说明原因。若需要行动，decided=true，并只填已经明确成立的事件。', {
+    decided: { type: 'boolean' }, reason: { type: 'string', description: '说明为何执行或不执行行动，仅供系统调试。' },
+    events: { type: 'array', maxItems: 6, items: { type: 'object', additionalProperties: false, properties: {
+      type: { type: 'string', enum: ['sticker', 'image', 'schedule', 'activity_now', 'contact_recommendation', 'transfer', 'red_packet', 'loan_request', 'loan_decision', 'gift_purchase'] },
+      name: { type: 'string' }, query: { type: 'string' }, kind: { type: 'string', enum: ['selfie', 'portrait', 'scene', 'object'] }, participants: { type: 'array', items: { type: 'string', enum: ['self', 'user'] } },
+      date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' }, startHour: { type: 'integer', minimum: 0, maximum: 23 }, endHour: { type: 'integer', minimum: 1, maximum: 24 }, locationId: { type: 'string', enum: locationIds.length ? locationIds : [''] }, activity: { type: 'string' }, durationMinutes: { type: 'integer', minimum: 5, maximum: 480 }, delayMinutes: { type: 'integer', minimum: 0, maximum: 720 }, phoneAccess: { type: 'string', enum: ['available', 'unavailable'] }, summary: { type: 'string' },
+      amount: { type: 'integer', minimum: 1 }, note: { type: 'string' }, blessing: { type: 'string' }, reason: { type: 'string' }, loanId: { type: 'string' }, decision: { type: 'string', enum: ['accept', 'reject'] }, icon: { type: 'string' }, description: { type: 'string' },
+      candidateName: { type: 'string' }, relationToRecommender: { type: 'string' }, recommendationReason: { type: 'string' }, shortDescription: { type: 'string' }, gender: { type: 'string' }, ageRange: { type: 'string' }, occupation: { type: 'string' }, hobbies: { type: 'array', maxItems: 6, items: { type: 'string' } }, personalityClues: { type: 'array', maxItems: 6, items: { type: 'string' } },
+    }, required: ['type'] } },
+    thought: { type: 'string' }, mood: { type: 'string' }, knowledgeQueries: { type: 'array', maxItems: 2, items: { type: 'string' } },
+  }, ['decided', 'reason', 'events', 'thought', 'mood', 'knowledgeQueries'])
+}
+
+export interface PrivateActionDecision {
+  decided: boolean
+  reason: string
+  parsed: ParsedAiTurn
+  raw: string
+}
+
+/** Generates user-visible prose only. This can run in parallel with action selection. */
+export async function generatePrivateTextTurn(opts: AgentToolOptions): Promise<{ parsed: ParsedAiTurn; raw: string }> {
+  const response = await chatCompletion({
+    apiKey: opts.apiKey, baseUrl: opts.baseUrl, model: opts.model, messages: opts.messages,
+    tools: [textOnlyTurnTool()], toolChoice: { type: 'function', function: { name: PRIVATE_TURN_TOOL_NAME } }, signal: opts.signal,
+    purpose: opts.purpose, automatic: opts.automatic, thinking: 'disabled', temperature: 0.82, maxTokens: 1_600, trace: opts.trace,
+  })
+  if (response.status !== 'ok') throw new Error('正文模型没有返回有效回复')
+  const call = (response.toolCalls ?? []).find((item) => item.function.name === PRIVATE_TURN_TOOL_NAME)
+  const parsed = call ? parsePrivateTurnCall(call) : { bubbles: [], knowledgeQueries: [] }
+  if (!privateTurnIsValid(parsed) || !parsed.bubbles.every((bubble) => bubble.type === 'text')) throw new Error('正文模型没有提交有效文本事件')
+  return { parsed, raw: serializePrivateTurn(parsed) }
+}
+
+/** Chooses actions but can never generate user-visible text. */
+export async function decidePrivateTurnActions(opts: AgentToolOptions): Promise<PrivateActionDecision> {
+  const response = await chatCompletion({
+    apiKey: opts.apiKey, baseUrl: opts.baseUrl, model: opts.utilityModel || opts.model, messages: opts.messages,
+    tools: [actionDecisionTool(opts.locationIds)], toolChoice: { type: 'function', function: { name: 'decide_turn_actions' } }, signal: opts.signal,
+    purpose: opts.purpose, automatic: opts.automatic, thinking: 'disabled', temperature: 0, maxTokens: 900,
+    trace: { ...opts.trace, stage: 'tool_call' },
+  })
+  if (response.status !== 'ok') throw new Error('行动模型没有返回有效决策')
+  const call = (response.toolCalls ?? []).find((item) => item.function.name === 'decide_turn_actions')
+  const args = call ? argumentsObject(call) : null
+  if (!call || !args || typeof args.decided !== 'boolean' || typeof args.reason !== 'string') throw new Error('行动模型缺少 decided 或 reason')
+  const parsed = parsePrivateTurnCall(call)
+  const decided = args.decided === true && (parsed.bubbles.length > 0 || !!parsed.immediateActivities?.length || parsed.knowledgeQueries.length > 0)
+  return { decided, reason: args.reason.trim().slice(0, 240), parsed, raw: JSON.stringify(args) }
+}
+
+export async function planPrivateActionPlacements(opts: Pick<AgentToolOptions, 'apiKey' | 'baseUrl' | 'utilityModel' | 'model' | 'signal' | 'purpose' | 'automatic' | 'trace'> & { textRaw: string; actionRaw: string; actionCount: number }): Promise<number[]> {
+  if (opts.actionCount === 0) return []
+  const raw = await chatCompletionText({
+    apiKey: opts.apiKey, baseUrl: opts.baseUrl, model: opts.utilityModel || opts.model, signal: opts.signal, purpose: opts.purpose, automatic: opts.automatic,
+    thinking: 'disabled', temperature: 0, maxTokens: 240, jsonMode: true, trace: { ...opts.trace, stage: 'review_and_repair' },
+    messages: [{ role: 'system', content: `你是聊天事件编排器。正文和行动决策都已完成，绝不改写正文、绝不新增或删除行动。仅输出JSON：{"placements":[0]}。placements长度必须等于行动数；每个数字表示该行动插在第几条正文之后，0表示正文前，1表示第1条正文后。根据语义决定位置。\n【正文模型结果】\n${opts.textRaw}\n【行动模型结果】\n${opts.actionRaw}` }],
+  })
+  const parsed = parseJsonLoose<{ placements?: unknown }>(raw)
+  if (!Array.isArray(parsed?.placements) || parsed!.placements!.length !== opts.actionCount) return Array.from({ length: opts.actionCount }, () => Number.MAX_SAFE_INTEGER)
+  return parsed!.placements!.map((value) => Number.isInteger(value) && Number(value) >= 0 ? Number(value) : Number.MAX_SAFE_INTEGER)
+}
+
+/** Mechanical merge: the placement model chooses indexes, never rewrites content. */
+export function mergePrivateTurnActions(textTurn: ParsedAiTurn, actionTurn: ParsedAiTurn, placements: number[]): ParsedAiTurn {
+  const actionBubbles = actionTurn.bubbles
+  const groups = new Map<number, typeof actionBubbles>()
+  actionBubbles.forEach((bubble, index) => {
+    const point = Math.min(textTurn.bubbles.length, placements[index] ?? textTurn.bubbles.length)
+    groups.set(point, [...(groups.get(point) ?? []), bubble])
+  })
+  const bubbles: ParsedAiTurn['bubbles'] = []
+  for (let index = 0; index <= textTurn.bubbles.length; index++) {
+    bubbles.push(...(groups.get(index) ?? []))
+    if (index < textTurn.bubbles.length) bubbles.push(textTurn.bubbles[index])
+  }
+  return {
+    bubbles,
+    knowledgeQueries: actionTurn.knowledgeQueries,
+    mood: textTurn.mood,
+    thought: textTurn.thought,
+    immediateActivities: actionTurn.immediateActivities,
+  }
 }
 
 async function fallbackCalls(opts: AgentToolOptions, raw: string, tools: ChatToolDefinition[]): Promise<ChatToolCall[]> {
@@ -404,7 +505,7 @@ export async function generatePrivateAgentTurn(opts: AgentToolOptions): Promise<
 }
 
 export function groupChatTools(speakerNames: string[], memberNames: string[], base: ReturnType<typeof privateChatTools>): ChatToolDefinition[] {
-  const allowed = new Set(['send_text', 'send_sticker', 'send_image', 'search_knowledge', 'create_schedule'])
+  const allowed = new Set(['send_text', 'send_sticker', 'send_image', 'search_knowledge', 'create_schedule', 'start_activity_now'])
   return base.filter((tool) => allowed.has(tool.function.name)).map((tool) => {
     if (tool.function.name === 'search_knowledge') return tool
     const parameters = tool.function.parameters as { properties: Record<string, unknown>; required: string[] }
@@ -424,9 +525,14 @@ export function groupChatTools(speakerNames: string[], memberNames: string[], ba
   })
 }
 
-export function parseGroupToolCalls(calls: ChatToolCall[], speakerCount: number, memberCount = speakerCount): { bubbles: GroupAiBubble[]; knowledgeQueries: string[]; turnSummary: string; planCandidates: [] } {
+export interface GroupImmediateActivityAction extends ImmediateActivityAction {
+  speakerIndex: number
+}
+
+export function parseGroupToolCalls(calls: ChatToolCall[], speakerCount: number, memberCount = speakerCount): { bubbles: GroupAiBubble[]; knowledgeQueries: string[]; immediateActivities: GroupImmediateActivityAction[]; turnSummary: string; planCandidates: [] } {
   const bubbles: GroupAiBubble[] = []
   const knowledgeQueries: string[] = []
+  const immediateActivities: GroupImmediateActivityAction[] = []
   for (const call of calls) {
     const args = argumentsObject(call)
     if (!args) continue
@@ -446,9 +552,17 @@ export function parseGroupToolCalls(calls: ChatToolCall[], speakerCount: number,
       const privateParsed = parsePrivateToolCalls([{ ...call, function: { ...call.function, arguments: JSON.stringify({ ...args, speakerIndex: undefined }) } }])
       const schedule = privateParsed.bubbles.find((bubble) => bubble.type === 'scheduleChange')
       if (schedule?.type === 'scheduleChange') bubbles.push({ ...common, ...schedule })
+    } else if (call.function.name === 'start_activity_now') {
+      const locationId = text(args.locationId, 80), activity = text(args.activity, 16)
+      const durationMinutes = Number(args.durationMinutes), delayMinutes = args.delayMinutes === undefined ? 0 : Number(args.delayMinutes), phoneAccess = args.phoneAccess
+      if (locationId && activity && Number.isInteger(durationMinutes) && durationMinutes >= 5 && durationMinutes <= 480 && Number.isInteger(delayMinutes) && delayMinutes >= 0 && delayMinutes <= 720
+        && (phoneAccess === 'available' || phoneAccess === 'unavailable')
+        && !immediateActivities.some((action) => action.speakerIndex === speakerIndex)) {
+        immediateActivities.push({ speakerIndex, locationId, activity, durationMinutes, ...(delayMinutes ? { delayMinutes } : {}), phoneAccess })
+      }
     }
   }
-  return { bubbles, knowledgeQueries, turnSummary: bubbles.map((bubble) => bubble.type === 'text' ? bubble.content : bubble.type).join(' ').slice(0, 160), planCandidates: [] }
+  return { bubbles, knowledgeQueries, immediateActivities, turnSummary: bubbles.map((bubble) => bubble.type === 'text' ? bubble.content : bubble.type).join(' ').slice(0, 160), planCandidates: [] }
 }
 
 export async function generateGroupAgentTurn(opts: AgentToolOptions & { speakerNames: string[]; memberNames: string[]; messageBounds: { min: number; max: number } }): Promise<{ parsed: ReturnType<typeof parseGroupToolCalls>; raw: string; native: boolean }> {
@@ -467,11 +581,11 @@ export async function generateGroupAgentTurn(opts: AgentToolOptions & { speakerN
       if (parsed.bubbles.length < opts.messageBounds.min || parsed.bubbles.length > opts.messageBounds.max) {
         throw new Error(`群聊消息量不符合${opts.messageBounds.min}-${opts.messageBounds.max}条的硬约束`)
       }
-      return { parsed, raw: JSON.stringify({ messages: parsed.bubbles, turnSummary: parsed.turnSummary, knowledgeQueries: parsed.knowledgeQueries, planCandidates: [] }), native: false }
+      return { parsed, raw: JSON.stringify({ messages: parsed.bubbles, immediateActivities: parsed.immediateActivities, turnSummary: parsed.turnSummary, knowledgeQueries: parsed.knowledgeQueries, planCandidates: [] }), native: false }
     }
     const invalid = nativeCalls.filter((call) => {
       const parsed = parseGroupToolCalls([call], opts.speakerNames.length, opts.memberNames.length)
-      return parsed.bubbles.length === 0 && parsed.knowledgeQueries.length === 0
+      return parsed.bubbles.length === 0 && parsed.knowledgeQueries.length === 0 && parsed.immediateActivities.length === 0
     })
     accepted.push(...nativeCalls.filter((call) => !invalid.includes(call)))
     if (!invalid.length) {
@@ -497,7 +611,7 @@ export async function generateGroupAgentTurn(opts: AgentToolOptions & { speakerN
   }
   const completed = await completeGroupActionText(opts, tools, accepted, '')
   const parsed = parseGroupToolCalls(completed, opts.speakerNames.length, opts.memberNames.length)
-  if (!parsed.bubbles.length && !parsed.knowledgeQueries.length) throw new Error('模型连续返回了无效的群聊工具参数')
+  if (!parsed.bubbles.length && !parsed.knowledgeQueries.length && !parsed.immediateActivities.length) throw new Error('模型连续返回了无效的群聊工具参数')
   if (parsed.bubbles.length < opts.messageBounds.min || parsed.bubbles.length > opts.messageBounds.max) throw new Error(`群聊消息量不符合${opts.messageBounds.min}-${opts.messageBounds.max}条的硬约束`)
-  return { parsed, raw: JSON.stringify({ messages: parsed.bubbles, turnSummary: parsed.turnSummary, knowledgeQueries: parsed.knowledgeQueries, planCandidates: [] }), native: true }
+  return { parsed, raw: JSON.stringify({ messages: parsed.bubbles, immediateActivities: parsed.immediateActivities, turnSummary: parsed.turnSummary, knowledgeQueries: parsed.knowledgeQueries, planCandidates: [] }), native: true }
 }

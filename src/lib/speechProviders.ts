@@ -53,6 +53,7 @@ export function contactSpeechVoice(contact: Contact | undefined, provider: Speec
 }
 
 export function speechVoiceGenerationContext(settings: Pick<AppSettings, 'speechProvider' | 'speechProviders'>): { provider: Exclude<SpeechProviderId, 'none'>; options: SpeechVoiceOption[] } | undefined {
+  if (Array.isArray((settings as Partial<AppSettings>).enabledModules) && !(settings as Partial<AppSettings>).enabledModules!.includes('speech')) return undefined
   if (!isSpeechProviderReady(settings) || settings.speechProvider === 'none') return undefined
   const options = speechVoiceOptions(settings)
   return options.length ? { provider: settings.speechProvider, options } : undefined

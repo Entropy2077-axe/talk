@@ -39,9 +39,29 @@ function groupMessageBounds(level: import('../types').GroupEnergyLevel, speakerC
   if (level === 'lively') return { min: Math.min(6, Math.max(3, speakers + 1)), max: Math.min(12, Math.max(6, speakers * 3)) }
   return { min: Math.min(3, Math.max(2, speakers)), max: Math.min(7, Math.max(4, speakers * 2)) }
 }
+
+interface ImmediateLocationRequest {
+  locationId: string
+  locationName: string
+}
+
+function findImmediateLocationRequest(userText: string, locations: Array<{ id: string; name: string }>): ImmediateLocationRequest | undefined {
+  if (!/(?:现在|立刻|马上|这就|赶紧|去|到|进|回|让.{0,8}去|叫.{0,8}去)/.test(userText)) return undefined
+  const target = locations.find((location) => location.name.length >= 2 && userText.includes(location.name))
+  return target ? { locationId: target.id, locationName: target.name } : undefined
+}
+
+/** Turns an unambiguous user instruction such as “让他现在去厨房” into a
+ * model-facing execution contract.  The model still decides whether the
+ * character refuses, but an acceptance may no longer be text-only. */
+function immediateLocationInstruction(request?: ImmediateLocationRequest) {
+  if (!request) return ''
+  return `\n【即时地点行动，不能漏】用户正在要求相关联系人立刻前往“${request.locationName}”（${request.locationId}）。角色可以按人设明确拒绝；但只要角色在可见回复中同意、表示正在动身，或实际开始该活动，就必须由该角色调用 start_activity_now，locationId 必须是 ${request.locationId}。绝不能只发“我去/我马上过去”之类文字而不调用行动工具。`
+}
 import { realisticReplyDelayMs } from './replyTiming'
 import { createMediaAsset, startMediaAsset } from './imageAssets'
-import { generateGroupAgentTurn } from './chatAgentTools'
+import { generateGroupAgentTurn, type GroupImmediateActivityAction } from './chatAgentTools'
+import { createScheduleInternalTask } from './internalTasks'
 import { traceTurnEvent } from './deepseek'
 import type { AppSettings, Contact, Group, GroupAiBubble, Message, Sticker } from '../types'
 
@@ -113,14 +133,13 @@ function parseGroupTurnDebugPayload(
   bubbles: GroupAiBubble[],
   knowledgeQueries: string[],
   turnSummary: string,
-  storyOutline?: string,
 ): unknown {
   const parsed = parseJsonLoose(finalRaw)
   if (parsed && typeof parsed === 'object') {
-    return { ...(parsed as Record<string, unknown>), mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, storyOutline, promptTrace: { sections: [{ label: '群聊主提示词', content: mainPrompt }] } }
+    return { ...(parsed as Record<string, unknown>), mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, promptTrace: { sections: [{ label: '群聊主提示词', content: mainPrompt }] } }
   }
   if (parsed !== null) return parsed
-  return { mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, knowledgeQueries, turnSummary, storyOutline, promptTrace: { sections: [{ label: '群聊主提示词', content: mainPrompt }] } }
+  return { mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, knowledgeQueries, turnSummary, promptTrace: { sections: [{ label: '群聊主提示词', content: mainPrompt }] } }
 }
 
 /** Cancels a group generation and its queued bubbles. */
@@ -377,7 +396,10 @@ async function runGroupAiTurn(
 ): Promise<void> {
   const engine = useChatEngineStore.getState()
   let responseTimeout: ReturnType<typeof setTimeout> | undefined
-  const directOutput = isModuleEnabled('directOutput')
+  // The experimental JSON-direct mode has no group action protocol. A
+  // location scene must stay on the native group-tool pipeline so moves are
+  // executable rather than merely narrated.
+  const directOutput = isModuleEnabled('directOutput') && group.kind !== 'location'
   const turnStartedAt = performance.now()
   engine.patch(conversationId, { aiTyping: true, error: '', typingLabel: '群成员' })
   const timeoutMs = Math.max(0, Math.min(10 * 60 * 1000, Math.round(settings.chatResponseTimeoutMs ?? 60 * 1000)))
@@ -432,6 +454,8 @@ async function runGroupAiTurn(
     const allLocations = isModuleEnabled('location') ? await db.locations.toArray() : []
     const leafLocations = allLocations.filter((candidate) => !allLocations.some((child) => child.parentId === candidate.id))
     const locationToolContext = leafLocations.length ? `\n可创建日程的合法地点：${leafLocations.map((candidate) => `${candidate.name}(${candidate.id})`).join('、')}` : ''
+    const immediateActionRequest = findImmediateLocationRequest(latestUserMessage?.content ?? '', leafLocations)
+    const immediateActionContext = immediateLocationInstruction(immediateActionRequest)
     const promptBuilder = group.kind === 'location' ? buildLocationRawChatPrompt : buildGroupRawChatPrompt
     const participantPositions = locationParticipants
       ? [
@@ -469,10 +493,6 @@ async function runGroupAiTurn(
     const controller = new AbortController()
     turns.setAbortController(conversationId, controller)
 
-    // Per-turn pre-draft outlines add a complete
-    // serial model request before every group reply. The main prompt already
-    // contains the same planning, persona, pacing, and topic contracts.
-    const storyOutline = ''
     // Group history needs an explicit "who said this" label per line — unlike
     // 1:1 chat where the single assistant persona is implicit from the system
     // prompt, a group turn's assistant block can contain several different
@@ -495,14 +515,14 @@ async function runGroupAiTurn(
       { role: 'system', content: '【最终生成提醒】准备自然群聊内容，并按后续要求通过本轮原生函数提交；不要在用户可见正文中输出JSON、分析、标题、Markdown、工具名或协议。' },
     ])
     let rawText: string
-    let agentParsed: ReturnType<typeof parseGroupAiResponse>
+    let agentParsed: ReturnType<typeof parseGroupAiResponse> & { immediateActivities?: GroupImmediateActivityAction[] }
     if (directOutput) {
       rawText = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, messages: chatMessages, signal: controller.signal, purpose: 'chat', thinking: 'disabled', temperature: regenerationInstruction ? 0.55 : 0.9, maxTokens: 1400, jsonMode: true, trace: { turnId: streamId, stage: 'original_generation', conversationId } })
       agentParsed = parseGroupAiResponse(rawText, speakers.length)
     } else {
       const generated = await generateGroupAgentTurn({
         apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, utilityModel: settings.utilityModel,
-        messages: [...chatMessages, { role: 'system', content: `本轮必须通过提供的函数发送群聊消息或执行行动。消息总量由工具执行层硬性校验，不得少于或超过指定范围。成员始终可以自然互相接话，但不要机械轮流。send_image 只发送纯图片，发图的同一位联系人必须同时调用 send_text 自然说话；create_schedule 也不能单独作为回复。表情包可以单独发送。每条消息都必须填写该发言人的真实想法和简短中文文字心情；心情禁止使用 emoji。严格选择正确的 speakerIndex。${locationToolContext}` }],
+        messages: [...chatMessages, { role: 'system', content: `本轮必须通过提供的函数发送群聊消息或执行行动。消息总量由工具执行层硬性校验，不得少于或超过指定范围。成员始终可以自然互相接话，但不要机械轮流。send_image 只发送纯图片，发图的同一位联系人必须同时调用 send_text 自然说话；create_schedule 也不能单独作为回复。表情包可以单独发送。每条消息都必须填写该发言人的真实想法和简短中文文字心情；心情禁止使用 emoji。严格选择正确的 speakerIndex。${locationToolContext}${immediateActionContext}` }],
         signal: controller.signal, purpose: 'chat', trace: { turnId: streamId, stage: 'original_generation', conversationId },
         stickerNames: stickers.map((sticker) => sticker.name), stickerSearchEnabled: remoteStickerSearchEnabled,
         imageEnabled: imageGenerationEnabled || !!settings.pexelsApiKey, knowledgeEnabled: featureActive(settings, 'knowledgeBase'),
@@ -522,7 +542,7 @@ async function runGroupAiTurn(
     console.log('[group] 审核模型已完成群聊原文审核和JSON翻译，未调用第三个翻译模型')
 
     let finalRaw = jsonRaw
-    let { bubbles, knowledgeQueries, turnSummary, planCandidates } = parsedTurn
+    let { bubbles, knowledgeQueries, immediateActivities = [], turnSummary, planCandidates } = parsedTurn
     bubbles = ensureGroupImagesHaveText(bubbles)
     const initiallyRequestedKnowledge = [...knowledgeQueries]
     const runLogicReview = (stage: 'first_quality' | 'second_quality') => reviewTurnLogic({
@@ -560,7 +580,7 @@ async function runGroupAiTurn(
       if (knowledge.text) {
         const regenerated = await generateGroupAgentTurn({
           apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, utilityModel: settings.utilityModel,
-          messages: [...chatMessages, { role: 'user', content: `刚才出现了你们不了解的词。搜索结果如下：\n${knowledge.text}\n请基于结果自然接话，不要写成报告。` }, { role: 'system', content: `必须通过提供的函数发送消息。send_image 只发送纯图片，发图的同一位联系人必须同时调用 send_text；create_schedule 也必须由同一位联系人同时调用 send_text。每条消息填写真实想法和中文文字心情，禁止使用 emoji。${locationToolContext}` }],
+          messages: [...chatMessages, { role: 'user', content: `刚才出现了你们不了解的词。搜索结果如下：\n${knowledge.text}\n请基于结果自然接话，不要写成报告。` }, { role: 'system', content: `必须通过提供的函数发送消息。send_image 只发送纯图片，发图的同一位联系人必须同时调用 send_text；create_schedule 也必须由同一位联系人同时调用 send_text。每条消息填写真实想法和中文文字心情，禁止使用 emoji。${locationToolContext}${immediateActionContext}` }],
           signal: controller.signal, purpose: 'chat', trace: { turnId: streamId, stage: 'second_chat', conversationId },
           stickerNames: stickers.map((sticker) => sticker.name), stickerSearchEnabled: remoteStickerSearchEnabled,
           imageEnabled: imageGenerationEnabled || !!settings.pexelsApiKey, knowledgeEnabled: false,
@@ -571,8 +591,41 @@ async function runGroupAiTurn(
         if (enrichedConverted.bubbles.length === 0) throw new Error('知识补全后的审核模型没有产出有效群聊JSON')
         jsonRaw = rawText
         finalRaw = jsonRaw
-        ;({ bubbles, knowledgeQueries, turnSummary, planCandidates } = enrichedConverted)
+        ;({ bubbles, knowledgeQueries, immediateActivities, turnSummary, planCandidates } = enrichedConverted)
         bubbles = ensureGroupImagesHaveText(bubbles)
+      }
+    }
+    // Providers occasionally return a perfectly natural acceptance such as
+    // “好，我这就去厨房”, but omit the accompanying tool call.  That is a
+    // protocol failure, not a character decision.  Recover the executable
+    // action from the explicit user instruction only after the same speaker
+    // has clearly accepted; explicit refusals remain untouched.
+    if (!directOutput && isModuleEnabled('location') && immediateActionRequest && immediateActivities.length === 0) {
+      const userRequest = latestUserMessage?.content ?? ''
+      const repliedContactId = replied?.role === 'assistant' ? replied.speakerContactId : undefined
+      const addressedContactId = latestUserMessage?.mentions?.find((id) => speakers.some((speaker) => speaker.id === id))
+        ?? repliedContactId
+        ?? speakers.find((speaker) => userRequest.includes(speaker.name))?.id
+      const refusal = /不去|不能去|不想去|没法去|不方便|晚点|之后|下次|等会/
+      const acceptance = /好[呀吧]?|行[呀吧]?|可以|没问题|当然|这就|马上|现在就|我去|我来|动身|出发|过去|走吧/
+      const acceptedBubble = bubbles.find((bubble) => {
+        if (bubble.type !== 'text' || refusal.test(bubble.content) || !acceptance.test(bubble.content)) return false
+        const speaker = speakers[bubble.speakerIndex - 1]
+        return !!speaker && (!addressedContactId || speaker.id === addressedContactId)
+      })
+      if (acceptedBubble) {
+        const activity = /做饭|煮饭|炒菜|下厨/.test(userRequest)
+          ? '做饭'
+          : /拿|取/.test(userRequest) ? '取物'
+            : `前往${immediateActionRequest.locationName}`
+        immediateActivities = [{
+          speakerIndex: acceptedBubble.speakerIndex,
+          locationId: immediateActionRequest.locationId,
+          activity,
+          durationMinutes: activity === '做饭' ? 60 : 20,
+          phoneAccess: 'available',
+        }]
+        void traceTurnEvent({ turnId: streamId, conversationId, stage: 'tool_call', output: `补全遗漏的即时行动：${activity}｜${immediateActionRequest.locationName}` })
       }
     }
     console.log(`[group] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 群=${group.name}`)
@@ -581,12 +634,45 @@ async function runGroupAiTurn(
       engine.patch(conversationId, { error: '群里这次没有人回复 可以再发一条试试', aiTyping: false, typingLabel: undefined })
       return
     }
+    // A location-scene group turn uses the same immediate-action contract as
+    // private chat.  Previously the group tool whitelist discarded
+    // start_activity_now, so a contact could say they were heading somewhere
+    // but their runtime position never changed.
+    if (!directOutput && isModuleEnabled('location') && immediateActivities.length > 0) {
+      const actionNow = Date.now()
+      const userRequest = latestUserMessage?.content ?? ''
+      for (const action of immediateActivities) {
+        const speaker = speakers[action.speakerIndex - 1]
+        const location = allLocations.find((candidate) => candidate.id === action.locationId)
+        if (!speaker || !location) continue
+        // “去厨房” is an explicit instruction to enter the map's private
+        // home kitchen, even when the user does not redundantly say “我家”.
+        const playerHomeVisit = /来我家|到我家|去我家|来家里|到家里|去家里|邀请你.*家/.test(userRequest)
+          || (action.locationId === 'home-kitchen' && /(?:去|来|到|进|往|回).{0,6}厨房|厨房.{0,6}(?:做|去|来|待|等)/.test(userRequest))
+        const startsAt = actionNow + (action.delayMinutes ?? 0) * 60_000
+        const result = await createScheduleInternalTask(speaker.id, conversationId, {
+          startsAt,
+          endsAt: startsAt + action.durationMinutes * 60_000,
+          locationId: action.locationId,
+          activity: action.activity,
+          summary: `${action.activity} · ${location.name}`,
+          phoneAccess: action.phoneAccess,
+          sourceConversationId: conversationId,
+          playerHomeVisit,
+        }, actionNow)
+        if (result.success) {
+          void traceTurnEvent({ turnId: streamId, conversationId, stage: 'location_change', output: `${displayName(speaker)}：${action.delayMinutes ? `${action.delayMinutes}分钟后` : '立即'}行动 ${action.activity}｜${location.name}｜${action.durationMinutes}分钟` })
+        } else {
+          console.warn(`[group] 立即行动执行失败 contact=${displayName(speaker)} code=${result.code}`)
+        }
+      }
+    }
     const aiTurnId = uuid()
     await db.aiTurns.add({
       id: aiTurnId,
       conversationId,
       raw: finalRaw,
-      parsed: parseGroupTurnDebugPayload(systemPrompt, rawText, draftFeedback, jsonRaw, finalRaw, bubbles, knowledgeQueries, turnSummary, storyOutline),
+      parsed: parseGroupTurnDebugPayload(systemPrompt, rawText, draftFeedback, jsonRaw, finalRaw, bubbles, knowledgeQueries, turnSummary),
       knowledgeQueries,
       createdAt: Date.now(),
     })

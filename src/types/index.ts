@@ -1,9 +1,10 @@
 /** Single-dimension warmth model, -100 (hostile) to +100 (bonded) — see lib/relationship.ts. */
 export interface Contact {
   id: string
-  name: string // the persona's own name; administrators may correct it after creation
+  /** Legacy required storage field, kept in sync with `nickname`. */
+  name: string
   remark?: string // user's own nickname for this contact, like a real contacts app; overrides name for display
-  /** Public identity facts. `name` remains the generated display nickname for compatibility. */
+  /** Public identity facts. `nickname` is the contact's displayed name. */
   realName?: string
   nickname?: string
   gender?: string
@@ -447,6 +448,8 @@ export interface WorldMapRecord {
 export interface LocationModuleState {
   id: 'active'
   currentLocationId?: string
+  /** Version of built-in residence-room migrations already applied. */
+  residenceLayoutVersion?: number
   /** Built-in locations removed by the user must not be recreated during initialization. */
   deletedLocationIds?: string[]
   updatedAt: number
@@ -874,6 +877,10 @@ export interface AppSettings {
   baseUrl: string
   model: string
   utilityModel: string // model for secondary tasks: shop generation, warmth scoring / memory updates, worldview drafts, etc.
+  /** Saved AI endpoints. Legacy fields above mirror the first item for older call sites. */
+  aiApiConfigs: AiApiConfig[]
+  /** Ordered primary-to-fallback route. */
+  aiApiFailoverOrder: string[]
   globalSystemPrompt: string
   /** Global, user-editable original prompt templates shared by all relevant model calls. */
   promptModules: PromptModuleSettings
@@ -979,7 +986,6 @@ export type PromptModuleId =
   | 'worldview'
   | 'moments'
   | 'knowledgeBase'
-  | 'storyOutline'
   | 'nuwaMode'
   | 'career'
   | 'shop'
@@ -991,19 +997,30 @@ export interface PromptModuleConfig {
 
 export type PromptModuleSettings = Record<PromptModuleId, PromptModuleConfig>
 
-/** Optional decoding controls stored alongside a reusable AI preset. */
+/** Optional decoding controls stored alongside an API configuration. */
 export interface SamplingParameters {
   temperature?: number
   topP?: number
   topK?: number
 }
 
+export interface AiApiConfig {
+  id: string
+  name: string
+  provider: import('../lib/aiProviders').AiProviderId
+  apiKey: string
+  baseUrl: string
+  model: string
+  utilityModel: string
+  sampling?: SamplingParameters
+  createdAt: number
+  updatedAt: number
+}
+
 export interface PromptPreset {
   id: string
   name: string
   modules: PromptModuleSettings
-  /** Empty values preserve the feature-specific defaults used by the app. */
-  sampling?: SamplingParameters
   systemDefault?: boolean
   createdAt: number
   updatedAt: number

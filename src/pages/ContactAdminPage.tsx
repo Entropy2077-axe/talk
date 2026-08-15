@@ -268,7 +268,8 @@ export function ContactAdminPage() {
     if (!contactId || !contact || !draft || !promptDraft) return;
     setStatus("");
     try {
-      if (!draft.name.trim()) throw new Error("联系人名称不能为空");
+      const nickname = (draft.nickname?.trim() || draft.name.trim());
+      if (!nickname) throw new Error("网名不能为空");
       const normalizedPromptDraft = normalizePromptModules(promptDraft);
       validatePromptModules(normalizedPromptDraft);
       const nextMemories = parseArray<ContactMemory>("AI记忆", memoryJson).map(
@@ -309,6 +310,10 @@ export function ContactAdminPage() {
         async () => {
           await db.contacts.put({
             ...draft,
+            // `name` remains the legacy required field, but must never drift
+            // from the nickname that the UI uses as the displayed name.
+            name: nickname,
+            nickname,
             id: contact.id,
             createdAt: contact.createdAt,
             mood: mood ?? undefined,
@@ -536,11 +541,6 @@ export function ContactAdminPage() {
           <h2 className="text-sm font-medium text-gray-900">身份与人设</h2>
           <div className="grid grid-cols-2 gap-3">
             <Field
-              label="显示名称"
-              value={draft.name}
-              onChange={(value) => patchDraft({ name: value })}
-            />
-            <Field
               label="备注"
               value={draft.remark ?? ""}
               onChange={(value) => patchDraft({ remark: value })}
@@ -551,9 +551,9 @@ export function ContactAdminPage() {
               onChange={(value) => patchDraft({ realName: value })}
             />
             <Field
-              label="网名/昵称"
-              value={draft.nickname ?? ""}
-              onChange={(value) => patchDraft({ nickname: value })}
+              label="网名/昵称（显示名称）"
+              value={draft.nickname ?? draft.name}
+              onChange={(value) => patchDraft({ nickname: value, name: value })}
             />
             <Field
               label="性别"
@@ -564,6 +564,32 @@ export function ContactAdminPage() {
               label="生日"
               value={draft.birthday ?? ""}
               onChange={(value) => patchDraft({ birthday: value })}
+            />
+            <Field
+              label="关系定位"
+              value={draft.relationshipBase}
+              onChange={(value) => patchDraft({ relationshipBase: value })}
+            />
+            <Field
+              label="好感度 -100~100"
+              type="number"
+              value={draft.warmth ?? 0}
+              onChange={(value) =>
+                patchDraft({
+                  warmth: Math.max(-100, Math.min(100, Number(value))),
+                })
+              }
+            />
+            <Field
+              label="职业"
+              value={draft.occupation ?? ""}
+              onChange={(value) => patchDraft({ occupation: value })}
+            />
+            <Field
+              label="月薪"
+              type="number"
+              value={draft.monthlySalary ?? 0}
+              onChange={(value) => patchDraft({ monthlySalary: Number(value) })}
             />
           </div>
           <Area
@@ -617,32 +643,6 @@ export function ContactAdminPage() {
             关系、状态与生活
           </h2>
           <div className="grid grid-cols-2 gap-3">
-            <Field
-              label="关系定位"
-              value={draft.relationshipBase}
-              onChange={(value) => patchDraft({ relationshipBase: value })}
-            />
-            <Field
-              label="好感度 -100~100"
-              type="number"
-              value={draft.warmth ?? 0}
-              onChange={(value) =>
-                patchDraft({
-                  warmth: Math.max(-100, Math.min(100, Number(value))),
-                })
-              }
-            />
-            <Field
-              label="职业"
-              value={draft.occupation ?? ""}
-              onChange={(value) => patchDraft({ occupation: value })}
-            />
-            <Field
-              label="月薪"
-              type="number"
-              value={draft.monthlySalary ?? 0}
-              onChange={(value) => patchDraft({ monthlySalary: Number(value) })}
-            />
             <Field
               label="当前位置ID"
               value={draft.currentLocationId ?? ""}

@@ -11,7 +11,7 @@ import { displayName } from '../lib/contact'
 import { formatListTime } from '../lib/time'
 import { momentsUnreadCount } from '../lib/momentsUnread'
 import { useSettingsStore } from '../store/useSettingsStore'
-import { ALL_MODULES, useModuleEnabled } from '../features'
+import { getEnabledDiscoverEntries, useModuleEnabled } from '../features'
 import { uiThemeName } from '../lib/uiTheme'
 import { UiIcon } from './UiIcon'
 import { isAiTestId } from '../lib/aiTestIsolation'
@@ -200,6 +200,7 @@ function DiscoverList({ query }: { query: string }) {
   const navigate = useNavigate()
   const location = useLocation()
   const enabledModules = useSettingsStore((state) => state.enabledModules)
+  const experienceMode = useSettingsStore((state) => state.experienceMode)
   const adminModeEnabled = useSettingsStore((state) => state.adminModeEnabled)
   const entries = useMemo(() => {
     const result = [
@@ -208,12 +209,9 @@ function DiscoverList({ query }: { query: string }) {
       { to: '/relationships', label: '关系网', icon: 'network', note: '查看 AI 之间的关系连接' },
     ]
     if (adminModeEnabled) result.push({ to: '/ai-test-cards', label: 'AI 自动测试', icon: '🧪', note: '后台运行人工评测用例' })
-    for (const module of ALL_MODULES) {
-      if (!enabledModules.includes(module.id)) continue
-      for (const entry of module.discoverEntries ?? []) result.push({ ...entry, note: '功能模块' })
-    }
+    for (const entry of getEnabledDiscoverEntries({ enabledModules, experienceMode })) result.push({ ...entry, note: '功能模块' })
     return [...new Map(result.map((entry) => [entry.to, entry])).values()].filter((entry) => entry.label.includes(query.trim()))
-  }, [adminModeEnabled, enabledModules, query])
+  }, [adminModeEnabled, enabledModules, experienceMode, query])
   return <>{entries.map((entry) => <button type="button" key={entry.to} className={`desktop-list-row ${location.pathname === entry.to ? 'active' : ''}`} onClick={() => navigate(entry.to)}><span className="desktop-menu-avatar"><UiIcon name={entry.icon} size={20} /></span><span className="desktop-list-copy"><strong>{entry.label}</strong><small>{entry.note}</small></span></button>)}</>
 }
 

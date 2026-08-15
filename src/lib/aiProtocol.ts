@@ -13,6 +13,8 @@ export interface ImmediateActivityAction {
   locationId: string
   activity: string
   durationMinutes: number
+  /** Delay before departure; omitted means the activity starts now. */
+  delayMinutes?: number
   phoneAccess: 'available' | 'unavailable'
 }
 

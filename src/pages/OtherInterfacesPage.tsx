@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { TopBar } from '../components/TopBar'
 import { ToggleSwitch } from '../components/ToggleSwitch'
 import { useSettingsStore } from '../store/useSettingsStore'
+import { useModuleEnabled } from '../features'
 import { apiKeyFingerprint, randomAnimeAvatar, searchAnimeAvatar, testPexelsConnection } from '../lib/photoSearch'
 import { tavilySearch } from '../lib/webSearch'
 import { friendlyConnectionError } from '../lib/connectionError'
@@ -11,6 +12,7 @@ const inputClass = 'w-full rounded-[var(--ui-radius-control)] border border-[var
 
 export function OtherInterfacesPage() {
   const settings = useSettingsStore()
+  const speechEnabled = useModuleEnabled('speech')
   const { setSettings } = settings
   const [tavilyKey, setTavilyKey] = useState(settings.tavilyApiKey)
   const [pexelsKey, setPexelsKey] = useState(settings.pexelsApiKey)
@@ -97,7 +99,7 @@ export function OtherInterfacesPage() {
         <h2 className="px-4 pb-2 pt-5 text-xs font-medium text-[var(--ui-text-3)]">生成服务</h2>
         <section className="mx-4 overflow-hidden rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow)]">
           <a href="#/settings/image-generation" className="flex items-center justify-between gap-3 border-b border-[var(--ui-border-soft)] px-4 py-4"><span><span className="block text-[15px] text-[var(--ui-text)]">图片生成</span><span className="mt-1 block text-[11px] text-[var(--ui-text-3)]">Atlas、NovelAI、ComfyUI、Stable Diffusion 等</span></span><span className="text-[var(--ui-text-3)]">›</span></a>
-          <a href="#/settings/speech-generation" className="flex items-center justify-between gap-3 px-4 py-4"><span><span className="block text-[15px] text-[var(--ui-text)]">语音生成</span><span className="mt-1 block text-[11px] text-[var(--ui-text-3)]">豆包语音、小米 MiMo</span></span><span className="text-[var(--ui-text-3)]">›</span></a>
+          {speechEnabled && <a href="#/settings/speech-generation" className="flex items-center justify-between gap-3 px-4 py-4"><span><span className="block text-[15px] text-[var(--ui-text)]">语音生成</span><span className="mt-1 block text-[11px] text-[var(--ui-text-3)]">豆包语音、小米 MiMo</span></span><span className="text-[var(--ui-text-3)]">›</span></a>}
         </section>
 
         <h2 className="px-4 pb-2 pt-5 text-xs font-medium text-[var(--ui-text-3)]">图片来源</h2>

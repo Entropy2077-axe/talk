@@ -18,6 +18,7 @@
     "src/components/WorldbookEntrySelector.tsx",
     "src/pages/AlbumPage.tsx",
     "src/pages/AiTestCardsPage.tsx",
+    "src/pages/ApiConfigurationsPage.tsx",
     "src/pages/AppearancePage.tsx",
     "src/pages/ContactAdminPage.tsx",
     "src/pages/ContactCardPage.tsx",

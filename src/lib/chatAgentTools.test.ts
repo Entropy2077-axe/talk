@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { generateGroupAgentTurn, generatePrivateAgentTurn, parseGroupToolCalls, parsePrivateToolCalls, privateChatTools } from './chatAgentTools'
+import { generateGroupAgentTurn, generatePrivateAgentTurn, mergePrivateTurnActions, parseGroupToolCalls, parsePrivateToolCalls, privateChatTools } from './chatAgentTools'
 import type { ChatToolCall } from './deepseek'
 
 const call = (name: string, args: Record<string, unknown>, id = name): ChatToolCall => ({
@@ -28,6 +28,20 @@ afterEach(() => {
 })
 
 describe('native chat agent tools', () => {
+  it('inserts action events at the planner-selected text boundary without rewriting prose', () => {
+    const merged = mergePrivateTurnActions(
+      { bubbles: [{ type: 'text', content: '你看我拍的怎么样' }, { type: 'text', content: '我今天路过那家店了' }], knowledgeQueries: [], mood: '开心', thought: '想分享' },
+      { bubbles: [{ type: 'image', query: 'night street selfie', kind: 'selfie', participants: ['self'] }], knowledgeQueries: [], immediateActivities: [{ locationId: 'cafe-1', activity: '出发', durationMinutes: 30, phoneAccess: 'available' }] },
+      [1],
+    )
+    expect(merged.bubbles).toEqual([
+      { type: 'text', content: '你看我拍的怎么样' },
+      { type: 'image', query: 'night street selfie', kind: 'selfie', participants: ['self'] },
+      { type: 'text', content: '我今天路过那家店了' },
+    ])
+    expect(merged.immediateActivities).toEqual([{ locationId: 'cafe-1', activity: '出发', durationMinutes: 30, phoneAccess: 'available' }])
+  })
+
   it('keeps ordered bubbles plus textual mood and private thought', () => {
     const parsed = parsePrivateToolCalls([
       call('send_text', { content: '那就这么定啦', thought: '我很期待见面', mood: '期待' }),
@@ -77,6 +91,16 @@ describe('native chat agent tools', () => {
   it('keeps group speaker identity and textual per-message mood', () => {
     const parsed = parseGroupToolCalls([call('send_text', { speakerIndex: 2, content: '我也去', thought: '不想错过', mood: '兴奋' })], 3)
     expect(parsed.bubbles).toEqual([{ speakerIndex: 2, type: 'text', content: '我也去', thought: '不想错过', mood: '兴奋' }])
+  })
+
+  it('keeps a group immediate activity with the actor identity', () => {
+    const parsed = parseGroupToolCalls([call('start_activity_now', {
+      speakerIndex: 2, locationId: 'cafe-1', activity: '做饭', durationMinutes: 60,
+      phoneAccess: 'available', thought: '现在就去准备', mood: '积极',
+    })], 2)
+    expect(parsed.immediateActivities).toEqual([{
+      speakerIndex: 2, locationId: 'cafe-1', activity: '做饭', durationMinutes: 60, phoneAccess: 'available',
+    }])
   })
 
   it('submits text and a schedule through one forced native turn call', async () => {
@@ -178,6 +202,20 @@ describe('native chat agent tools', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps an agreed delayed activity for relative-time appointments', async () => {
+    const response = turnCall([
+      { type: 'text', content: '我收拾一下，半小时后过去找你。' },
+      { type: 'activity_now', locationId: 'cafe-1', activity: '前往见面', durationMinutes: 90, delayMinutes: 30, phoneAccess: 'available' },
+    ])
+    vi.stubGlobal('fetch', vi.fn(async () => completion([response])))
+
+    const result = await generatePrivateAgentTurn(agentOptions)
+
+    expect(result.parsed.immediateActivities).toEqual([{
+      locationId: 'cafe-1', activity: '前往见面', durationMinutes: 90, delayMinutes: 30, phoneAccess: 'available',
+    }])
+  })
+
   it('adds group schedule text from the same speaker and creates one card', async () => {
     const schedule = call('create_schedule', { speakerIndex: 2, date: '2026-08-12', startHour: 14, endHour: 16, locationId: 'cafe-1', activity: '见面', phoneAccess: 'available', summary: '下午见面', thought: '愿意赴约', mood: '期待' }, 'group-schedule')
     const reply = call('send_text', { speakerIndex: 2, content: '我来定吧，下午两点见。', thought: '想把时间定下来', mood: '期待' }, 'group-text')
@@ -193,6 +231,21 @@ describe('native chat agent tools', () => {
     const result = await generateGroupAgentTurn({ ...agentOptions, speakerNames: ['小林', '阿青'], memberNames: ['小林', '阿青'], messageBounds: { min: 1, max: 4 } })
 
     expect(result.parsed.bubbles.map((bubble) => [bubble.speakerIndex, bubble.type])).toEqual([[2, 'text'], [2, 'scheduleChange']])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('adds group immediate-action text from the same speaker', async () => {
+    const action = call('start_activity_now', { speakerIndex: 2, locationId: 'cafe-1', activity: '做饭', durationMinutes: 60, phoneAccess: 'available', thought: '现在就开始', mood: '积极' }, 'group-activity')
+    const reply = call('send_text', { speakerIndex: 2, content: '好，我现在去厨房做饭。', thought: '当下就动身', mood: '积极' }, 'group-activity-text')
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(completion([action]))
+      .mockResolvedValueOnce(completion([reply]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await generateGroupAgentTurn({ ...agentOptions, speakerNames: ['小林', '阿青'], memberNames: ['小林', '阿青'], messageBounds: { min: 1, max: 4 } })
+
+    expect(result.parsed.bubbles.map((bubble) => [bubble.speakerIndex, bubble.type])).toEqual([[2, 'text']])
+    expect(result.parsed.immediateActivities).toEqual([expect.objectContaining({ speakerIndex: 2, locationId: 'cafe-1', activity: '做饭' })])
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 

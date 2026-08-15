@@ -520,7 +520,7 @@ async function commitTask(task: ContactGenerationTask) {
         const cohabitsWithUser = /女仆|佣人|管家|保姆|住家|同居|室友|妹妹|姐姐|弟弟|哥哥|家人|妻子|丈夫|未婚妻|未婚夫/.test(profile)
         const student = /学生|大学|高中|初中|学校|上课/.test(profile)
         return {
-          locationId: cohabitsWithUser ? 'home-living' : student ? 'student-dorm-room' : 'riverside-apartment-room',
+          locationId: cohabitsWithUser ? 'home-living' : student ? 'student-dorm-101' : 'riverside-apartment-101',
           kind: cohabitsWithUser ? 'player_home' as const : student ? 'dorm' as const : 'apartment' as const,
           cohabitsWithUser,
           establishedBy: 'generation' as const,

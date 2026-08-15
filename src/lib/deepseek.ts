@@ -27,7 +27,6 @@ import { db } from '../db/db'
 import type { AdminAiTraceStage, AiUsagePurpose } from '../types'
 import { friendlyConnectionError, httpFailureMessage, parseJsonText, requireApiKey, requireHttpUrl } from './connectionError'
 import { useSettingsStore } from '../store/useSettingsStore'
-import { activePromptPreset } from './promptPresets'
 import { appFetch } from './appFetch'
 import {
   AI_PROVIDERS,
@@ -36,6 +35,8 @@ import {
   resolveModelsUrl,
   type AiProviderId,
 } from './aiProviders'
+import { orderedAiApiConfigs } from './aiApiConfigs'
+import type { SamplingParameters } from '../types'
 
 /**
  * Merges consecutive same-role messages into one. Each AI turn is stored as
@@ -173,6 +174,9 @@ export interface ChatCompletionOptions {
   baseUrl: string
   model: string
   provider?: AiProviderId
+  /** Bound by the API configuration resolver; callers normally do not set this. */
+  sampling?: SamplingParameters
+  configurationId?: string
   messages: ChatMessage[]
   signal?: AbortSignal
   /**
@@ -194,6 +198,8 @@ export interface ChatCompletionOptions {
   singleRequest?: boolean
   tools?: ChatToolDefinition[]
   toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } }
+  /** Internal guard used while trying a saved fallback configuration. */
+  disableFailover?: boolean
 }
 
 /**
@@ -320,7 +326,7 @@ function requestBody(opts: ChatCompletionOptions, messages: ChatMessage[], provi
     : adapter.tokenParameter
   const body: Record<string, unknown> = { model: opts.model, messages }
   if (opts.jsonMode && !overrides.disableJson && adapter.responseFormat !== 'ignored') body.response_format = { type: 'json_object' }
-  const sampling = activePromptPreset(useSettingsStore.getState()).sampling
+  const sampling = opts.sampling
   const temperature = clampProviderTemperature(provider, sampling?.temperature ?? opts.temperature ?? 1.1)
   if (temperature !== undefined) body.temperature = temperature
   if (sampling?.topP !== undefined) body.top_p = sampling.topP
@@ -348,6 +354,38 @@ function retryableProtocolError(status: number, payload: unknown): 'response_for
 }
 
 export async function chatCompletion(opts: ChatCompletionOptions): Promise<ChatCompletionResult> {
+  // All existing feature call sites pass the active settings' legacy fields.
+  // Resolve those calls once here so chat, memory, persona and background jobs
+  // share the exact same ordered primary/fallback behaviour.
+  if (!opts.disableFailover) {
+    const settings = useSettingsStore.getState()
+    const belongsToActiveConfig = opts.apiKey === settings.apiKey && opts.baseUrl === settings.baseUrl
+    const routes = belongsToActiveConfig ? orderedAiApiConfigs(settings) : []
+    if (routes.length > 1) {
+      let lastError: unknown
+      for (let index = 0; index < routes.length; index += 1) {
+        const route = routes[index]
+        const usesUtilityModel = opts.model === settings.utilityModel
+        try {
+          const result = await chatCompletion({ ...opts, apiKey: route.apiKey, baseUrl: route.baseUrl, model: usesUtilityModel ? (route.utilityModel || route.model) : route.model, provider: route.provider, sampling: route.sampling, configurationId: route.id, disableFailover: true })
+          if (index > 0) console.warn(`[ai-failover] recovered with ${route.name}`)
+          return result
+        } catch (error) {
+          lastError = error
+          const message = error instanceof Error ? error.message : String(error)
+          const retryable = /\b(?:408|429|5\d\d)\b|网络|network|超时|timeout|timed out|failed to fetch|load failed/i.test(message)
+          if (!retryable || index === routes.length - 1) throw error
+          console.warn(`[ai-failover] ${route.name} unavailable; trying next configured API`, error)
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error(String(lastError))
+    }
+    if (routes.length === 1) {
+      const route = routes[0]
+      const usesUtilityModel = opts.model === settings.utilityModel
+      return chatCompletion({ ...opts, apiKey: route.apiKey, baseUrl: route.baseUrl, model: usesUtilityModel ? (route.utilityModel || route.model) : route.model, provider: route.provider, sampling: route.sampling, configurationId: route.id, disableFailover: true })
+    }
+  }
   const purpose = opts.purpose ?? 'other'
   const automatic = opts.automatic ?? false
   const provider = opts.provider ?? useSettingsStore.getState().aiProvider ?? 'deepseek'
@@ -403,7 +441,7 @@ export async function chatCompletion(opts: ChatCompletionOptions): Promise<ChatC
   const usageWrite = recordAiUsage({ purpose, model: opts.model, automatic, success, inputTokens: recordedInputTokens, outputTokens: recordedOutputTokens, estimated: typeof promptTokens !== 'number' || typeof completionTokens !== 'number' })
   if (automatic) await usageWrite
   else void usageWrite.catch(() => undefined)
-  void traceAiCall({ purpose, model: opts.model, messages, output: traceOutput, inputTokens: recordedInputTokens, outputTokens: recordedOutputTokens, durationMs, diagnostics: { provider, status: result.status, finishReason: result.finishReason, usage: result.usage, rawShapeSummary: result.rawShapeSummary, retried: result.retried ?? false }, ...opts.trace })
+  void traceAiCall({ purpose, model: opts.model, messages, output: traceOutput, inputTokens: recordedInputTokens, outputTokens: recordedOutputTokens, durationMs, diagnostics: { provider, configurationId: opts.configurationId, status: result.status, finishReason: result.finishReason, usage: result.usage, rawShapeSummary: result.rawShapeSummary, retried: result.retried ?? false }, ...opts.trace })
   console.info(`[ai-call] purpose=${purpose} provider=${provider} model=${opts.model} status=${result.status} finish=${result.finishReason ?? 'unknown'} contentChars=${content.length} reasoningTokens=${result.usage?.reasoningTokens ?? 'unknown'} outputTokens=${result.usage?.completionTokens ?? 'unknown'} retried=${result.retried ? 'yes' : 'no'}`)
   if (!success) console.warn(`[ai-call] ${completionStatusMessage(result)}`)
   return result
@@ -437,6 +475,26 @@ export interface ChatCompletionProgressSnapshot {
 export async function chatCompletionProgress(
   opts: ChatCompletionOptions & { onProgress: (snapshot: ChatCompletionProgressSnapshot) => void | Promise<void> },
 ): Promise<ChatCompletionResult> {
+  if (!opts.disableFailover) {
+    const settings = useSettingsStore.getState()
+    const belongsToActiveConfig = opts.apiKey === settings.apiKey && opts.baseUrl === settings.baseUrl
+    const routes = belongsToActiveConfig ? orderedAiApiConfigs(settings) : []
+    if (routes.length) {
+      const usesUtilityModel = opts.model === settings.utilityModel
+      for (let index = 0; index < routes.length; index += 1) {
+        const route = routes[index]
+        let published = false
+        try {
+          return await chatCompletionProgress({ ...opts, apiKey: route.apiKey, baseUrl: route.baseUrl, model: usesUtilityModel ? (route.utilityModel || route.model) : route.model, provider: route.provider, sampling: route.sampling, configurationId: route.id, disableFailover: true, onProgress: async (snapshot) => { published = true; await opts.onProgress(snapshot) } })
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          const retryable = /\b(?:408|429|5\d\d)\b|网络|network|超时|timeout|timed out|failed to fetch|load failed/i.test(message)
+          if (published || !retryable || index === routes.length - 1) throw error
+          console.warn(`[ai-failover] ${route.name} failed before streaming; trying next configured API`, error)
+        }
+      }
+    }
+  }
   const { onProgress, ...completionOptions } = opts
   const purpose = opts.purpose ?? 'other'
   const automatic = opts.automatic ?? false
@@ -462,7 +520,7 @@ export async function chatCompletionProgress(
       await onProgress({ content: result.content, toolCalls: result.toolCalls ?? [] })
       const outputTokens = result.usage?.completionTokens ?? estimateTokens(result.content)
       await recordAiUsage({ purpose, model: opts.model, automatic, success: result.status === 'ok', inputTokens: result.usage?.promptTokens ?? inputTokens, outputTokens, estimated: result.usage?.completionTokens === undefined })
-      await traceAiCall({ purpose, model: opts.model, messages: opts.messages, output: traceableCompletionOutput(result.content, result.toolCalls), inputTokens: result.usage?.promptTokens ?? inputTokens, outputTokens, durationMs: Date.now() - startedAt, diagnostics: { provider, status: result.status, nonStreamingFallback: true }, ...opts.trace })
+      await traceAiCall({ purpose, model: opts.model, messages: opts.messages, output: traceableCompletionOutput(result.content, result.toolCalls), inputTokens: result.usage?.promptTokens ?? inputTokens, outputTokens, durationMs: Date.now() - startedAt, diagnostics: { provider, configurationId: opts.configurationId, status: result.status, nonStreamingFallback: true }, ...opts.trace })
       return result
     }
     const fallback = await chatCompletion(completionOptions)
@@ -523,7 +581,7 @@ export async function chatCompletionProgress(
   const recordedInput = usage?.promptTokens ?? inputTokens
   const recordedOutput = usage?.completionTokens ?? estimateTokens(content || toolCalls.map((call) => call.function.arguments).join(''))
   await recordAiUsage({ purpose, model: opts.model, automatic, success: status === 'ok', inputTokens: recordedInput, outputTokens: recordedOutput, estimated: usage?.completionTokens === undefined })
-  await traceAiCall({ purpose, model: opts.model, messages: opts.messages, output: traceableCompletionOutput(result.content, toolCalls), inputTokens: recordedInput, outputTokens: recordedOutput, durationMs: Date.now() - startedAt, diagnostics: { provider, status, finishReason, streamed: true }, ...opts.trace })
+  await traceAiCall({ purpose, model: opts.model, messages: opts.messages, output: traceableCompletionOutput(result.content, toolCalls), inputTokens: recordedInput, outputTokens: recordedOutput, durationMs: Date.now() - startedAt, diagnostics: { provider, configurationId: opts.configurationId, status, finishReason, streamed: true }, ...opts.trace })
   return result
 }
 
@@ -557,7 +615,7 @@ export async function chatCompletionStream(opts: ChatCompletionOptions & { onDel
     const outputTokens = result.usage?.completionTokens ?? estimateTokens(result.content)
     const durationMs = Date.now() - startedAt
     await recordAiUsage({ purpose, model: opts.model, automatic: opts.automatic ?? false, success: true, inputTokens: promptTokens, outputTokens, estimated: result.usage?.promptTokens === undefined || result.usage?.completionTokens === undefined })
-    await traceAiCall({ purpose, model: opts.model, messages, output: result.content, inputTokens: promptTokens, outputTokens, durationMs, diagnostics: { provider, status: result.status, finishReason: result.finishReason, nonStreamingFallback: true }, ...opts.trace })
+    await traceAiCall({ purpose, model: opts.model, messages, output: result.content, inputTokens: promptTokens, outputTokens, durationMs, diagnostics: { provider, configurationId: opts.configurationId, status: result.status, finishReason: result.finishReason, nonStreamingFallback: true }, ...opts.trace })
     return result.content
   }
   const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let output = ''

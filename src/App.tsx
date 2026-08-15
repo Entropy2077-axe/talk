@@ -6,7 +6,7 @@ import { refreshMoments } from './lib/moments'
 import { maybeTriggerProactiveMessage } from './lib/proactiveChat'
 import { installConsoleCapture } from './lib/consoleCapture'
 import { TabLayout } from './components/TabLayout'
-import { ALL_MODULES, isModuleAllowedInExperienceMode, useModuleEnabled } from './features'
+import { REGISTERED_MODULES, isModuleAllowedInExperienceMode, useModuleEnabled } from './features'
 import { NotificationBanner } from './components/NotificationBanner'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
 import { DesktopLayout } from './components/DesktopLayout'
@@ -45,6 +45,7 @@ const GroupAddPage = lazy(() => import('./pages/GroupAddPage').then((m) => ({ de
 const GroupInfoPage = lazy(() => import('./pages/GroupInfoPage').then((m) => ({ default: m.GroupInfoPage })))
 const MomentsPage = lazy(() => loadMomentsPage().then((m) => ({ default: m.MomentsPage })))
 const SettingsPage = lazy(() => loadSettingsPage().then((m) => ({ default: m.SettingsPage })))
+const ApiConfigurationsPage = lazy(() => import('./pages/ApiConfigurationsPage').then((m) => ({ default: m.ApiConfigurationsPage })))
 const GlobalPromptModulesPage = lazy(() => import('./pages/GlobalPromptModulesPage').then((m) => ({ default: m.GlobalPromptModulesPage })))
 const AppearancePage = lazy(() => import('./pages/AppearancePage').then((m) => ({ default: m.AppearancePage })))
 const ExperienceModePage = lazy(() => import('./pages/ExperienceModePage').then((m) => ({ default: m.ExperienceModePage })))
@@ -163,6 +164,7 @@ function App() {
   const uiTheme = useSettingsStore((s) => s.uiTheme ?? 'sage')
   const animationsEnabled = useSettingsStore((s) => s.animationsEnabled ?? true)
   const adminModeEnabled = useSettingsStore((s) => s.adminModeEnabled)
+  const speechEnabled = useModuleEnabled('speech')
   const enabledModules = useSettingsStore((s) => s.enabledModules)
   const experienceMode = useSettingsStore((s) => s.experienceMode)
   const location = useLocation()
@@ -204,8 +206,8 @@ function App() {
   const moduleRoutes = useMemo(() => {
     const seen = new Set<string>()
     const routes: { path: string; Component: ElementType }[] = []
-    for (const m of ALL_MODULES) {
-      if (!enabledModules.includes(m.id) || !isModuleAllowedInExperienceMode(m.id, experienceMode)) continue
+    for (const m of REGISTERED_MODULES) {
+      if ((m.id !== 'knowledgeBase' && !enabledModules.includes(m.id)) || !isModuleAllowedInExperienceMode(m.id, experienceMode)) continue
       for (const r of m.routes ?? []) {
         if (seen.has(r.path)) continue
         seen.add(r.path)
@@ -255,6 +257,7 @@ function App() {
         <Route path="/social-inbox" element={<SocialInboxPage />} />
         <Route path="/relationships" element={<RelationshipsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/settings/api-configurations" element={<ApiConfigurationsPage />} />
         <Route path="/settings/other-interfaces" element={<OtherInterfacesPage />} />
         <Route path="/presets" element={<GlobalPromptModulesPage />} />
         <Route path="/settings/global-prompts" element={<GlobalPromptModulesPage />} />
@@ -262,8 +265,8 @@ function App() {
         <Route path="/experience-mode" element={<ExperienceModePage />} />
         <Route path="/settings/image-generation" element={<ImageProviderListPage />} />
         <Route path="/settings/image-generation/:providerId" element={<ImageProviderSettingsPage />} />
-        <Route path="/settings/speech-generation" element={<SpeechProviderListPage />} />
-        <Route path="/settings/speech-generation/:providerId" element={<SpeechProviderSettingsPage />} />
+        {speechEnabled && <Route path="/settings/speech-generation" element={<SpeechProviderListPage />} />}
+        {speechEnabled && <Route path="/settings/speech-generation/:providerId" element={<SpeechProviderSettingsPage />} />}
         <Route path="/stickers" element={<StickersPage />} />
         <Route path="/stickers/remote" element={<StickerProviderListPage />} />
         <Route path="/stickers/remote/:providerId" element={<StickerProviderSettingsPage />} />

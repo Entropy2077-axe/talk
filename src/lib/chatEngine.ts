@@ -37,7 +37,7 @@ import type { CreateSpecialTaskResult } from './agentTasks'
 import { createScheduleInternalTask } from './internalTasks'
 import { createMediaAsset, startMediaAsset } from './imageAssets'
 import { buildDirectOutputInstruction, parseDirectOutputReview } from './directOutput'
-import { generatePrivateAgentTurn } from './chatAgentTools'
+import { decidePrivateTurnActions, generatePrivateAgentTurn, generatePrivateTextTurn, mergePrivateTurnActions, planPrivateActionPlacements } from './chatAgentTools'
 import { traceTurnEvent } from './deepseek'
 import type { AiBubble, AppSettings, Contact, InternalTask, Message, MessageType, ScheduleOverride, Sticker } from '../types'
 
@@ -248,6 +248,35 @@ export function buildUserProfileText(settings: AppSettings): string {
   return parts.join(' · ')
 }
 
+/**
+ * Message history has no native timestamp field in the model API. Keep the
+ * real clock and reply gap in system context so an old nearby message is not
+ * mistaken for something that happened just now.
+ */
+function buildReplyTimeContext(now: number, previousUserAt?: number): string {
+  const current = describeCurrentTime(new Date(now))
+  const hour = new Date(now).getHours()
+  const period = hour >= 5 && hour < 9 ? '清晨' : hour < 12 ? '上午' : hour < 18 ? '下午' : hour < 23 ? '晚上' : '深夜'
+  const clockFact = `当前现实时间是${period}${String(hour).padStart(2, '0')}点，不是其他时段；涉及起床、早晚、吃饭、今天稍后、明天等表述必须与此一致。`
+  if (!previousUserAt || now <= previousUserAt) {
+    return `【本轮时间锚点】现在是${current}（${period}）。${clockFact}这是本轮正在回应的消息所处的现实时间；任何历史消息都不是“刚刚”发生的，除非其发送时间明确接近现在。`
+  }
+
+  const gap = now - previousUserAt
+  const previous = describeCurrentTime(new Date(previousUserAt))
+  if (gap < 60 * 60 * 1000) {
+    return `【本轮时间锚点】现在是${current}（${period}）。${clockFact}对方上一条消息发送于${previous}，相隔约${Math.max(1, Math.round(gap / 60_000))}分钟。`
+  }
+
+  const hours = Math.round(gap / (6 * 60 * 1000)) / 10
+  return `【本轮时间锚点｜必须遵守】现在是${current}（${period}）。${clockFact}对方上一条消息发送于${previous}，至今已经相隔约${hours}小时。这段时间真实流逝了：不要把上次对话、当时的作息或“刚刚/一会儿/待会儿”等相对时间当成仍在当前发生。先按对方本轮新消息回应；只有本轮明确继续旧话题时才自然承接。结合关系、你在这段时间里的生活和当前时段决定是否流露“隔了一阵才收到回复”的感觉，但不要每次机械报时、指责或默认对方故意冷落你。`
+}
+
+function buildRecentMessageTimeline(messages: Message[]): string {
+  if (messages.length === 0) return ''
+  return `【近期消息时间线】${messages.map((message) => `${message.role === 'user' ? '对方' : '你'}：${describeCurrentTime(new Date(message.createdAt))}`).join('；')}。消息正文按此时间顺序排列；时间锚点与正文冲突时，以时间锚点为准。`
+}
+
 /** Sends a user message and kicks off the AI's reply — safe to call whether or not ChatPage is currently mounted for this conversation. */
 export async function sendMessage(
   conversationId: string,
@@ -365,16 +394,18 @@ async function runAiTurn(
   try {
     const directOutput = isModuleEnabled('directOutput')
     const history = await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt')
-    let absenceContext = ''
+    const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
+    const replyTimeContext = buildReplyTimeContext(now, offlineFrom)
+    const messageTimeline = buildRecentMessageTimeline(recentHistory)
+    let absenceContext = replyTimeContext
     if (!directOutput && offlineFrom && now - offlineFrom >= 60 * 60 * 1000) {
       try {
         const completed = await ensureOfflineExperiences({ contact, settings, from: offlineFrom, to: now })
-        absenceContext = completed.absenceContext
+        absenceContext = [replyTimeContext, completed.absenceContext].filter(Boolean).join('\n')
         const refreshed = await db.contacts.get(contact.id)
         if (refreshed) contact = refreshed
       } catch (error) {
         console.warn('[experiences] 离线经历补全失败，本轮降级继续聊天', error)
-        absenceContext = `【用户离线】对方距离上次回复约${Math.round((now - offlineFrom) / 360000) / 10}小时。结合关系和上次对话自然判断是否提及，不要机械报时，也不要默认对方故意忽视你。`
       }
     }
 
@@ -420,7 +451,7 @@ async function runAiTurn(
       const leafLocations = actionLocations.filter((location) => !actionLocations.some((candidate) => candidate.parentId === location.id))
       const locationCatalog = leafLocations.map((location) => `${location.name}(${location.id})`).join('、')
       locationFactsForReview = `当前地点=${currentLocation?.name ?? '未知地点'}(${contact.currentLocationId ?? '未知'})\n可执行地点=${locationCatalog}`
-      locationActionContext = `【地点与特殊任务】你当前位于：${currentLocation?.name ?? '未知地点'}（${contact.currentLocationId ?? '未知'}）。你可以按照自己的人设和意愿接受、拒绝，也可以主动提出行动。角色明确决定现在立刻前往某地并开始活动时，在 submit_turn.events 中加入 type=activity_now；未来安排只有日期、整点开始和结束时间、地点都明确且角色已经作出具体承诺时才加入 type=schedule。两种动作都不能代替自然聊天，整轮 events 必须至少包含一条 type=text。仅讨论可能性、拒绝、附带未满足条件或信息不全时不要执行动作。特殊任务一旦与某条默认任务重叠，那条默认任务会整项取消。以下列表是当前唯一可确认并执行的具体地点：${locationCatalog}。玩家提到列表外地点，或名称无法可靠对应列表时，不能假装去过、看过、知道它存在，也不能直接答应；请保持角色口吻自然询问位置或让对方进一步说明，不要提“系统”“目录”或地点ID。`
+      locationActionContext = `【地点与特殊任务】你当前位于：${currentLocation?.name ?? '未知地点'}（${contact.currentLocationId ?? '未知'}）。你可以按照自己的人设和意愿接受、拒绝，也可以主动提出行动。只有角色明确决定现在立刻前往某地并开始活动时，才在 submit_turn.events 中加入 type=activity_now；未来安排只有日期、整点开始和结束时间、地点都明确且角色已经作出具体承诺时才加入 type=schedule。行动工具从不代替自然聊天，整轮 events 必须至少包含一条 type=text。普通邀请、讨论可能性、拒绝、附带未满足条件或信息不全时，只需自然聊天，不要创建行动或日程。特殊任务一旦与某条默认任务重叠，那条默认任务会整项取消。玩家说“来我家/去我家/到我家/家里”是在邀请你去玩家的私人住宅，目的地只能是 客厅(home-living)，绝不能误用你自己的住所、住宅楼或任何其他联系人住处。以下列表是当前唯一可确认并执行的具体地点：${locationCatalog}。玩家提到列表外地点，或名称无法可靠对应列表时，不能假装去过、看过、知道它存在，也不能直接答应；请保持角色口吻自然询问位置或让对方进一步说明，不要提“系统”“目录”或地点ID。`
     }
     const memoryPromptOn = promptModuleEnabled(contactPromptSettings, 'memory')
     const [recentMemories, financeContext, socialMemories, sharedOriginalContext, worldbookTrace, existingContacts] = await Promise.all([
@@ -478,6 +509,7 @@ async function runAiTurn(
       situationContext: [
         situationText,
         absenceContext,
+        messageTimeline,
         proactiveContext,
       ].filter(Boolean).join('\n\n'),
       stickerNames: stickers.map((s) => s.name),
@@ -488,7 +520,6 @@ async function runAiTurn(
     })
     if (!contextSections.trim()) throw new Error('对话核心提示词模块已屏蔽')
 
-    const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
     const controller = new AbortController()
     turns.setAbortController(conversationId, controller)
     const regenerationPrompt = regenerationInstruction
@@ -508,7 +539,7 @@ async function runAiTurn(
         return { role: m.role, content: m.content }
       }),
       ...(regenerationUserMessage ? [{ role: 'user' as const, content: regenerationUserMessage }] : []),
-      { role: 'system', content: '【最终生成提醒】准备自然聊天内容，并按后续要求通过 submit_turn 原生函数提交；不要在用户可见正文中输出JSON、分析、标题、Markdown、工具名或协议。' },
+      { role: 'system', content: `【最终生成前时间核对｜最高优先级】${replyTimeContext}\n生成前先逐项检查：不得把晚上/深夜写成早晨、上午或下午；不得把22点误读成10点；不得在当前时段不成立时写“刚起床”“下午再去”等话。除非人设或日程明确说明昼夜颠倒，否则按这里的现实时间作答。\n【最终生成提醒】准备自然聊天内容，并按后续要求通过 submit_turn 原生函数提交；不要在用户可见正文中输出JSON、分析、标题、Markdown、工具名或协议。` },
     ])
     console.info(`[chat-perf] context-ready=${Math.round(performance.now() - turnStartedAt)}ms contact=${displayName(contact)}`)
 
@@ -517,6 +548,9 @@ async function runAiTurn(
     // is deliberately not used as a compatibility fallback here.
     let rawText: string
     let localTurn
+    let actionDecisionRaw = ''
+    let actionPlacementRaw = ''
+    const splitActionPipeline = !directOutput
     if (directOutput) {
       rawText = await chatCompletion({
         apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model,
@@ -526,18 +560,33 @@ async function runAiTurn(
       })
       localTurn = parseAiResponse(rawText)
     } else {
-      const generated = await generatePrivateAgentTurn({
+      const actionLocationIds = actionLocations.filter((location) => !actionLocations.some((candidate) => candidate.parentId === location.id)).map((location) => location.id)
+      const common = {
         apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, utilityModel: settings.utilityModel,
-        messages: [...chatMessages, { role: 'system', content: `本轮必须通过唯一的 submit_turn 原生函数一次性提交完整回复。events 按实际发送顺序排列，可以自然地连续发送多段文字、多张图片或穿插消息与行动，不要固定成“一张图片配一句话”。image、activity_now、schedule、contact_recommendation、transfer、red_packet、loan_request、loan_decision、gift_purchase 等事件不能单独作为回复，但只要求整轮至少有一条 text，文字可以在行动前后；sticker 可以单独发送。contact_recommendation 仅在你以当前角色身份确实认识某人、此刻自然适合牵线时使用，禁止为了展示功能、活跃气氛或完成任务而调用。${recommendationConstraint} 填写真实想法和中文文字心情，心情禁止使用 emoji。不要在普通 content 中输出 JSON、工具名或协议。${locationActionContext ? `\n${locationActionContext}` : ''}` }],
-        signal: controller.signal, purpose: proactiveContext ? 'proactive' : 'chat', automatic: !!proactiveContext,
-        trace: { turnId: streamId, stage: 'original_generation', conversationId },
+        signal: controller.signal, purpose: proactiveContext ? 'proactive' as const : 'chat' as const, automatic: !!proactiveContext,
         stickerNames: stickers.map((sticker) => sticker.name), stickerSearchEnabled: isStickerProviderReady(settings),
         imageEnabled: isImageProviderReady(settings) || !!settings.pexelsApiKey,
-        knowledgeEnabled: featureActive(contactPromptSettings, 'knowledgeBase'),
-        scheduleEnabled: isModuleEnabled('location'), locationIds: actionLocations.filter((location) => !actionLocations.some((candidate) => candidate.parentId === location.id)).map((location) => location.id),
-      })
-      rawText = generated.raw
-      localTurn = generated.parsed
+        knowledgeEnabled: false, scheduleEnabled: isModuleEnabled('location'), locationIds: actionLocationIds,
+      }
+      const baseMessages = chatMessages.slice(0, -1)
+      const textMessages = [...baseMessages, { role: 'system' as const, content: `【最终时间核对】${replyTimeContext}\n本轮只通过 submit_turn 生成用户可见的自然聊天正文。不得生成、提及或决定任何工具、地点、日程、图片、资金或其他行动；这些由独立模型处理。` }]
+      const actionMessages = [...baseMessages, { role: 'system' as const, content: `【当前事实】${replyTimeContext}\n你是本轮唯一的世界状态决策者。只调用 decide_turn_actions，绝不生成用户可见正文。必须在 decided=false 与 decided=true 之间作出明确决定；false 时 events 必须为空并说明原因，true 时只填已由用户请求和当前事实充分支持的工具事件。${recommendationConstraint}${locationActionContext ? `\n${locationActionContext}` : ''}` }]
+      const [textGenerated, actionDecision] = await Promise.all([
+        generatePrivateTextTurn({ ...common, messages: textMessages, trace: { turnId: streamId, stage: 'original_generation', conversationId } }),
+        decidePrivateTurnActions({ ...common, messages: actionMessages, trace: { turnId: streamId, stage: 'tool_call', conversationId } }),
+      ])
+      rawText = textGenerated.raw
+      actionDecisionRaw = actionDecision.raw
+      if (actionDecision.decided) {
+        const placements = await planPrivateActionPlacements({
+          ...common, textRaw: textGenerated.raw, actionRaw: actionDecision.raw, actionCount: actionDecision.parsed.bubbles.length,
+          trace: { turnId: streamId, stage: 'review_and_repair', conversationId },
+        })
+        actionPlacementRaw = JSON.stringify(placements)
+        localTurn = mergePrivateTurnActions(textGenerated.parsed, actionDecision.parsed, placements)
+      } else {
+        localTurn = textGenerated.parsed
+      }
     }
 
     if (!turns.isCurrent(conversationId, streamId)) return
@@ -545,7 +594,9 @@ async function runAiTurn(
 
     // The audit model performs the final JSON translation; there is no third translator.
     console.info(`[chat-perf] model-ready=${Math.round(performance.now() - turnStartedAt)}ms contact=${displayName(contact)}`)
-    let conversionPrompt = '审核模型已同时完成原文格式审核和JSON翻译；未调用第三个翻译模型。'
+    let conversionPrompt = splitActionPipeline
+      ? `并行工作流：正文模型=${rawText}；行动模型=${actionDecisionRaw || '无'}；${actionPlacementRaw ? `编排位置=${actionPlacementRaw}` : '未调用编排器'}。`
+      : '审核模型已同时完成原文格式审核和JSON翻译；未调用第三个翻译模型。'
     let jsonRaw = serializePrivateTurn(localTurn)
     let parsedTurn = localTurn
     if (directOutput) {
@@ -585,7 +636,7 @@ async function runAiTurn(
     })
     void runLogicReview
     knowledgeQueries = Array.from(new Set([...initiallyRequestedKnowledge, ...knowledgeQueries])).slice(0, 2)
-    if (!directOutput && featureActive(contactPromptSettings, 'knowledgeBase') && knowledgeQueries.length > 0) {
+    if (!splitActionPipeline && !directOutput && featureActive(contactPromptSettings, 'knowledgeBase') && knowledgeQueries.length > 0) {
       const knowledge = await resolveKnowledgeQueries(knowledgeQueries, settings)
       if (knowledge.text) {
         const enrichedMessages = chatMessages.map((message, index) => index === 0
@@ -657,9 +708,10 @@ async function runAiTurn(
       const action = immediateActivities[0]
       const location = actionLocations.find((candidate) => candidate.id === action.locationId)
       const playerHomeVisit = /来我家|到我家|去我家|来家里|到家里|去家里|邀请你.*家/.test(_triggeringUserText)
+      const startsAt = now + (action.delayMinutes ?? 0) * 60_000
       const toolResult = await createScheduleInternalTask(contact.id, conversationId, {
-        startsAt: now,
-        endsAt: now + action.durationMinutes * 60_000,
+        startsAt,
+        endsAt: startsAt + action.durationMinutes * 60_000,
         locationId: action.locationId,
         activity: action.activity,
         summary: `${action.activity} · ${location?.name ?? action.locationId}`,
@@ -669,13 +721,9 @@ async function runAiTurn(
       }, now)
       if (toolResult.success) {
         internalTask = toolResult.internalTask
-        void traceTurnEvent({ turnId: streamId, conversationId, stage: 'location_change', output: `立即行动：${action.activity}｜${location?.name ?? action.locationId}｜${action.durationMinutes}分钟` })
+        void traceTurnEvent({ turnId: streamId, conversationId, stage: 'location_change', output: `${action.delayMinutes ? `${action.delayMinutes}分钟后` : '立即'}行动：${action.activity}｜${location?.name ?? action.locationId}｜${action.durationMinutes}分钟` })
       } else {
-        bubbles = [{ type: 'text', content: '我刚想动身，但这个地点现在去不了。' }]
-        immediateActivities = []
-        turnThought = undefined
-        finalRaw = serializePrivateTurn({ bubbles, knowledgeQueries: [], mood: turnMood, thought: turnThought })
-        jsonRaw = finalRaw
+        console.warn(`[agent] 行动记录未写入；保留角色原本回复 contact=${displayName(contact)} code=${toolResult.code}`)
       }
     }
     // Normal turns only execute explicit [schedule:...] markers parsed above.
@@ -706,10 +754,6 @@ async function runAiTurn(
         actionCommittee = { ...actionCommittee, toolResult }
         if (!toolResult.success) {
           console.warn(`[agent] 特殊任务执行失败 contact=${displayName(contact)} code=${toolResult.code}`)
-          bubbles = [{ type: 'text', content: '我刚才想了一下，这个安排现在还定不下来，等我确认好再告诉你。' }]
-          turnThought = undefined
-          finalRaw = serializePrivateTurn({ bubbles, knowledgeQueries: [], mood: turnMood, thought: turnThought })
-          jsonRaw = finalRaw
         } else {
           internalTask = toolResult.internalTask
         }

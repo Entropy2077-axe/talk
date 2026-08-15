@@ -15,6 +15,7 @@ import { SYSTEM_DEFAULT_PROMPT_PRESET_ID, normalizePromptPresets } from '../lib/
 import { normalizeChatPageSize } from '../lib/chatPagination'
 import type { AiProviderId } from '../lib/aiProviders'
 import { normalizeUiTheme } from '../lib/uiTheme'
+import { legacyAiApiConfig, legacyFieldsForApiConfig, normalizeAiApiConfigs } from '../lib/aiApiConfigs'
 
 interface SettingsState extends AppSettings {
   setSettings: (patch: Partial<AppSettings>) => void
@@ -48,6 +49,8 @@ export const useSettingsStore = create<SettingsState>()(
       baseUrl: envBaseUrl,
       model: 'deepseek-v4-pro',
       utilityModel: 'deepseek-v4-flash',
+      aiApiConfigs: [legacyAiApiConfig({ aiProvider: 'deepseek', apiKey: envKey, baseUrl: envBaseUrl, model: 'deepseek-v4-pro', utilityModel: 'deepseek-v4-flash' })],
+      aiApiFailoverOrder: ['legacy-primary-api'],
       globalSystemPrompt: DEFAULT_STYLE_PROMPT,
       promptModules: createDefaultPromptModules(),
       promptPresets: normalizePromptPresets(undefined, createDefaultPromptModules()),
@@ -109,12 +112,12 @@ export const useSettingsStore = create<SettingsState>()(
       moodExpiryMs: 30 * 60 * 1000,
       chatResponseTimeoutMs: 60 * 1000,
       adminModeEnabled: false,
-      enabledModules: ['shop', 'warehouse', 'saveLoad', 'knowledgeBase', 'relationship', 'storyOutline', 'career', 'location'],
+      enabledModules: ['shop', 'warehouse', 'saveLoad', 'relationship', 'speech', 'career', 'location'],
       setSettings: (patch) => set(patch),
     }),
     {
       name: 'talk-settings',
-      version: 28,
+      version: 30,
       migrate: (persisted, version) => {
         const next = persisted as Partial<SettingsState>
         if (next.experienceMode !== 'immersive' && next.experienceMode !== 'free') next.experienceMode = 'free'
@@ -126,9 +129,6 @@ export const useSettingsStore = create<SettingsState>()(
         }
         if (version < 2 && Array.isArray(next.enabledModules)) {
           next.enabledModules = next.enabledModules.filter((id) => id !== 'validator')
-        }
-        if (version < 3 && Array.isArray(next.enabledModules) && !next.enabledModules.includes('storyOutline')) {
-          next.enabledModules = [...next.enabledModules, 'storyOutline']
         }
         if (version < 4 && Array.isArray(next.enabledModules) && !next.enabledModules.includes('career')) next.enabledModules = [...next.enabledModules, 'career']
         if (typeof next.userOccupation !== 'string') next.userOccupation = ''
@@ -195,6 +195,17 @@ export const useSettingsStore = create<SettingsState>()(
         if (Array.isArray(next.enabledModules)) next.enabledModules = next.enabledModules.filter((id) => id !== 'slg')
         if (Array.isArray(next.enabledModules)) next.enabledModules = next.enabledModules.filter((id) => !['personalityTraits', 'intent', 'lifeSimulation'].includes(id))
         if (version < 16 && Array.isArray(next.enabledModules) && !next.enabledModules.includes('location')) next.enabledModules = [...next.enabledModules, 'location']
+        if (version < 29 && Array.isArray(next.enabledModules)) {
+          next.enabledModules = next.enabledModules.filter((id) => id !== 'knowledgeBase' && id !== 'storyOutline')
+          if (!next.enabledModules.includes('speech')) next.enabledModules.push('speech')
+        }
+        if (version < 30) {
+          const legacySampling = (next.promptPresets?.find((preset) => preset.id === next.activePromptPresetId) as { sampling?: unknown } | undefined)?.sampling
+          next.aiApiConfigs = normalizeAiApiConfigs(next.aiApiConfigs, {
+            aiProvider: next.aiProvider ?? 'deepseek', apiKey: next.apiKey ?? '', baseUrl: next.baseUrl ?? '', model: next.model ?? '', utilityModel: next.utilityModel ?? '',
+          }, legacySampling)
+          next.aiApiFailoverOrder = next.aiApiConfigs.map((config) => config.id)
+        }
         next.uiTheme = normalizeUiTheme(next.uiTheme)
         next.promptModules = normalizePromptModules(next.promptModules, next.globalSystemPrompt)
         const normalizedPresets = normalizePromptPresets(next.promptPresets, next.promptModules)
@@ -202,6 +213,12 @@ export const useSettingsStore = create<SettingsState>()(
         if (!normalizedPresets.some((preset) => preset.id === next.activePromptPresetId)) {
           next.activePromptPresetId = normalizedPresets.find((preset) => !preset.systemDefault)?.id ?? SYSTEM_DEFAULT_PROMPT_PRESET_ID
         }
+        next.aiApiConfigs = normalizeAiApiConfigs(next.aiApiConfigs, {
+          aiProvider: next.aiProvider ?? 'deepseek', apiKey: next.apiKey ?? '', baseUrl: next.baseUrl ?? '', model: next.model ?? '', utilityModel: next.utilityModel ?? '',
+        })
+        const orderedIds = Array.isArray(next.aiApiFailoverOrder) ? next.aiApiFailoverOrder.filter((id): id is string => typeof id === 'string' && next.aiApiConfigs!.some((config) => config.id === id)) : []
+        next.aiApiFailoverOrder = [...orderedIds, ...next.aiApiConfigs.map((config) => config.id).filter((id) => !orderedIds.includes(id))]
+        Object.assign(next, legacyFieldsForApiConfig(next.aiApiConfigs[0]))
         return next
       },
     },

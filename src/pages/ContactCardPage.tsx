@@ -173,6 +173,7 @@ export function ContactCardPage() {
   const adminEnabled = useSettingsStore((s) => s.adminModeEnabled)
   const moodEnabled = true
   const careerEnabled = useModuleEnabled('career')
+  const speechEnabled = useModuleEnabled('speech')
   const [assigningCareer, setAssigningCareer] = useState(false)
   const [editingRelations, setEditingRelations] = useState(false)
   const [testingSpeechVoice, setTestingSpeechVoice] = useState(false)
@@ -442,10 +443,10 @@ export function ContactCardPage() {
         {relationLinks.length === 0 ? <p className="text-sm text-gray-400">还没有设置与其他联系人的关系</p> : <div className="space-y-1.5">{relationLinks.map((link) => <div key={link.id} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm"><span>{link.name}</span><span className="text-xs text-gray-500">{link.label}</span></div>)}</div>}
       </section>}
 
-      <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
+      {speechEnabled && <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
         <div className="flex items-start justify-between gap-3"><div><h3 className="text-xs font-medium text-[var(--ui-text-3)]">联系人语音</h3><p className="mt-1 text-[11px] leading-relaxed text-[var(--ui-text-3)]">音色只属于这位联系人，不会套用到其他人。</p></div><span className="shrink-0 text-xs text-[var(--ui-text-2)]">{speechProviderName(activeSpeechProvider)}</span></div>
         {activeSpeechProvider === 'none' || !isSpeechProviderReady(settings) ? <button type="button" onClick={() => navigate('/settings/speech-generation')} className="mt-3 w-full rounded-[var(--ui-radius-control)] border border-dashed border-[var(--ui-border)] px-3 py-3 text-sm text-[var(--ui-text-2)]">先配置语音生成服务</button> : <div className="mt-3 space-y-3">{!activeSpeechVoice && <p className="rounded-[var(--ui-radius-control)] bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">暂时没有对号入座。请选择一个音色，否则聊天里生成语音时会提醒回来设置。</p>}<label className="block text-xs text-[var(--ui-text-2)]">音色<select value={activeSpeechVoice?.voiceId ?? ''} onChange={(event) => void saveSpeechVoice(event.target.value)} className="mt-1 w-full rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2.5 text-sm text-[var(--ui-text)]"><option value="" disabled>请选择适合这位联系人的音色</option>{activeSpeechOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select></label>{activeSpeechProvider === 'mimo' && activeSpeechVoice && <label className="block text-xs text-[var(--ui-text-2)]">声音演绎方式<textarea defaultValue={activeSpeechVoice.styleInstruction ?? ''} onBlur={(event) => void saveSpeechStyle(event.target.value)} placeholder="例如：低沉克制、语速稍慢，熟悉后更温柔" rows={2} className="mt-1 w-full resize-none rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] px-3 py-2 text-sm text-[var(--ui-text)] outline-none" /></label>}{activeSpeechVoice && <button type="button" disabled={testingSpeechVoice} onClick={() => void testSpeechVoice()} className="w-full rounded-[var(--ui-radius-control)] bg-[var(--ui-action)] py-2.5 text-sm text-[var(--ui-on-action)] disabled:opacity-50">{testingSpeechVoice ? '生成试听中…' : '试听这位联系人的声音'}</button>}{speechVoiceStatus && <p className="text-xs leading-5 text-[var(--ui-text-2)]">{speechVoiceStatus}</p>}</div>}
-      </section>
+      </section>}
 
       <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-white px-4 py-4 shadow-[var(--ui-shadow)]">
         <div className="mb-2 flex items-center justify-between">

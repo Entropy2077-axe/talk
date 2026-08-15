@@ -51,6 +51,7 @@ export function ChatPage() {
   const locationEnabled = useModuleEnabled('location')
   const shopEnabled = useModuleEnabled('shop')
   const warehouseEnabled = useModuleEnabled('warehouse')
+  const speechEnabled = useModuleEnabled('speech')
   const desktop = Boolean(window.talkDesktop)
   const hiddenTestConversation = isAiTestId(conversationId)
   useEffect(() => {
@@ -107,8 +108,8 @@ export function ChatPage() {
   const messages = messagePage?.items ?? EMPTY_MESSAGES
   const textMessageIdsKey = messages.filter((message) => message.type === 'text').map((message) => message.id).join('|')
   const speechCacheRows = useLiveQuery(
-    () => textMessageIdsKey ? db.speechCache.bulkGet(textMessageIdsKey.split('|')) : [],
-    [textMessageIdsKey],
+    () => speechEnabled && textMessageIdsKey ? db.speechCache.bulkGet(textMessageIdsKey.split('|')) : [],
+    [speechEnabled, textMessageIdsKey],
   ) ?? EMPTY_SPEECH_CACHE_ROWS
   const speechCacheByMessage = useMemo(
     () => new Map(speechCacheRows.filter((row) => !!row).map((row) => [row!.messageId, row!])),
@@ -202,7 +203,7 @@ export function ChatPage() {
   const menuSpeechContact = menuMessage?.role === 'assistant'
     ? (isGroupConv ? (menuMessage.speakerContactId ? memberById.get(menuMessage.speakerContactId) : undefined) : contact ?? undefined)
     : undefined
-  const menuSpeechVoice = contactSpeechVoice(menuSpeechContact, settings.speechProvider)
+  const menuSpeechVoice = speechEnabled ? contactSpeechVoice(menuSpeechContact, settings.speechProvider) : undefined
   const regenerationMessage = regenerationMessageId ? messageById.get(regenerationMessageId) : undefined
   const selectedMessages = useMemo(
     () => messages.filter((message) => selectedMessageIds.includes(message.id)),
@@ -237,6 +238,10 @@ export function ChatPage() {
     if (!conversationId || messages.length === 0) return
     void db.conversations.update(conversationId, { lastReadAt: Date.now() })
   }, [conversationId, messages.length])
+
+  useEffect(() => {
+    if (!speechEnabled) stopSpeechPlayback()
+  }, [speechEnabled])
 
   // useLayoutEffect (not useEffect) so the jump-to-bottom happens before the
   // browser paints — otherwise opening a long conversation briefly flashes
@@ -362,6 +367,7 @@ export function ChatPage() {
   }
 
   async function generateMessageSpeech(message: Message, force = false) {
+    if (!speechEnabled) return
     if (message.type !== 'text' || message.role !== 'assistant') return
     const currentSettings = useSettingsStore.getState()
     if (!isSpeechProviderReady(currentSettings)) {
@@ -394,6 +400,7 @@ export function ChatPage() {
   }
 
   async function generateReplyRoundSpeech(anchor: Message) {
+    if (!speechEnabled) return
     if (!conversationId || anchor.role !== 'assistant') return
     const currentSettings = useSettingsStore.getState()
     if (!isSpeechProviderReady(currentSettings)) {
@@ -787,7 +794,7 @@ export function ChatPage() {
           const previousMessage = messages[index - 1]
           const speechCache = speechCacheByMessage.get(m.id)
           const speechOwner = m.role === 'assistant' ? (isGroupConv ? speaker : contact ?? undefined) : undefined
-          const speechVoice = contactSpeechVoice(speechOwner, settings.speechProvider)
+          const speechVoice = speechEnabled ? contactSpeechVoice(speechOwner, settings.speechProvider) : undefined
           const speechMatchesCurrentSettings = !!speechVoice && speechCache?.signature === speechSignature(m.content, settings, speechVoice)
           const showConversationTime = !previousMessage || m.createdAt - previousMessage.createdAt > 10 * 60 * 1000
           const msgBubble = (
@@ -814,11 +821,11 @@ export function ChatPage() {
               onFinanceClick={selectingMessages ? undefined : handleFinanceCard}
               onInternalTaskUndo={selectingMessages ? undefined : handleInternalTaskUndo}
               onAvatarClick={selectingMessages ? undefined : handleAvatarClick}
-              speechAvailable={m.type === 'text' && !!speechCache && speechMatchesCurrentSettings}
-              speechLoading={generatingSpeechIds.has(m.id)}
-              speechPlaying={speechPlayingId === m.id && speechPlaying}
-              speechDurationMs={speechCache?.durationMs}
-              onSpeechClick={selectingMessages ? undefined : handleSpeechClick}
+              speechAvailable={speechEnabled && m.type === 'text' && !!speechCache && speechMatchesCurrentSettings}
+              speechLoading={speechEnabled && generatingSpeechIds.has(m.id)}
+              speechPlaying={speechEnabled && speechPlayingId === m.id && speechPlaying}
+              speechDurationMs={speechEnabled ? speechCache?.durationMs : undefined}
+              onSpeechClick={speechEnabled && !selectingMessages ? handleSpeechClick : undefined}
               showName={isGroupConv && m.role === 'assistant'}
               />
             </div>
@@ -998,7 +1005,7 @@ export function ChatPage() {
           onClose={() => setMenuMessageId(null)}
           options={[
             { label: '复制', onSelect: () => void copyMessage(menuMessage) },
-            ...(menuMessage.type === 'text' && menuMessage.role === 'assistant'
+            ...(speechEnabled && menuMessage.type === 'text' && menuMessage.role === 'assistant'
               ? !!menuSpeechVoice && speechCacheByMessage.get(menuMessage.id)?.signature === speechSignature(menuMessage.content, settings, menuSpeechVoice)
                 ? [
                     { label: speechPlayingId === menuMessage.id && speechPlaying ? '暂停语音' : '播放语音', onSelect: () => handleSpeechClick(menuMessage) },
@@ -1007,7 +1014,7 @@ export function ChatPage() {
                   ]
                 : [{ label: '生成语音', onSelect: () => void generateMessageSpeech(menuMessage) }]
               : []),
-            ...(menuMessage.role === 'assistant' && menuMessage.type === 'text'
+            ...(speechEnabled && menuMessage.role === 'assistant' && menuMessage.type === 'text'
               ? [{ label: '生成这一轮全部语音', onSelect: () => void generateReplyRoundSpeech(menuMessage) }]
               : []),
             { label: '选择转发截图', onSelect: () => beginMessageSelection(menuMessage.id) },

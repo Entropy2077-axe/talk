@@ -190,8 +190,6 @@ export const PROMPT_MODULE_DEFINITIONS: PromptModuleDefinition[] = [
   ]},
   { id: 'knowledgeBase', name: '资料库联网整理', icon: '🔎', description: '联网结果整理与聊天补全', templates: [template('summary', '搜索结果整理', `把搜索结果整理为简洁、可靠、带来源时间意识的知识摘要。不要编造结果中没有的事实；冲突时明确不确定性。
 {{searchResults}}`, ['searchResults'])] },
-  { id: 'storyOutline', name: '剧情大纲', icon: '🧭', description: '实验性剧情方向规划', templates: [template('generation', '大纲生成', `你是剧情大纲生成器。根据人物、关系、世界书和最近对话提出自然、可选、不强迫角色执行的后续方向，不得把未发生内容写成事实。
-{{storyContext}}`, ['storyContext'])] },
   { id: 'nuwaMode', name: '女娲创建', icon: '🪄', description: '联系人身份和人设生成', templates: [template('persona', '人设生成', `你是角色设定生成器，需要为聊天联系人设计真实可信、内部一致、可长期扮演的人类身份。
 
 {{personaAnswers}}
@@ -302,7 +300,6 @@ const FEATURE_GATED_PROMPT_MODULES = new Set<PromptModuleId>([
   'relationship',
   'worldview',
   'knowledgeBase',
-  'storyOutline',
   'career',
   'shop',
 ])
@@ -317,6 +314,7 @@ export function featureActive(
   moduleId: PromptModuleId,
 ): boolean {
   if (!promptModuleEnabled(settings, moduleId)) return false
+  if (moduleId === 'knowledgeBase') return true
   if (moduleId === 'worldview') return settings.enabledModules.includes('saveLoad') || settings.enabledModules.includes('worldview')
   return !FEATURE_GATED_PROMPT_MODULES.has(moduleId) || settings.enabledModules.includes(moduleId)
 }
