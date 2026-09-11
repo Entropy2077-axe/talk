@@ -281,11 +281,12 @@ export interface Moment {
 
 export type MediaAssetStatus = 'queued' | 'submitting' | 'polling' | 'generating' | 'completed' | 'failed'
 export type MediaAssetPhase = MediaAssetStatus
+export type AiImageAspectRatio = '1:1' | '4:3' | '3:4' | '16:9' | '9:16'
 
 /** Durable image-generation work. Credentials are deliberately never stored here. */
 export interface MediaAsset {
   id: string
-  origin: 'chat' | 'moment'
+  origin: 'chat' | 'chat-illustration' | 'moment'
   originId: string
   conversationId?: string
   turnId?: string
@@ -302,6 +303,9 @@ export interface MediaAsset {
   providerPromptPrefix?: string
   modelId?: string
   size?: string
+  width?: number
+  height?: number
+  aspectRatio?: AiImageAspectRatio
   seed?: number
   predictionId?: string
   remoteUrl?: string
@@ -531,7 +535,7 @@ export interface Message {
   gift?: GiftPayload
   /** Remote stickers are stored on the message instead of being copied into the user's local sticker library. */
   sticker?: { url: string; provider?: StickerProviderId }
-  image?: { assetId?: string; url?: string; caption?: string; photographer?: string; photographerUrl?: string; query?: string; provider?: ImageProviderId | 'pexels' }
+  image?: { assetId?: string; url?: string; caption?: string; photographer?: string; photographerUrl?: string; query?: string; provider?: ImageProviderId | 'pexels'; presentation?: 'sent' | 'illustration' }
   scheduleChange?: ScheduleChangePayload
   internalTask?: InternalTaskMessagePayload
   groupPlanId?: string
@@ -1594,7 +1598,7 @@ export interface ProactiveTopicRecord {
   createdAt: number
 }
 export type AiImageKind = 'selfie' | 'portrait' | 'group' | 'scene' | 'object'
-export interface AiBubbleImage { type: 'image'; query: string; scene?: string; kind?: AiImageKind; participants?: Array<'self' | 'user'>; caption?: string }
+export interface AiBubbleImage { type: 'image'; query: string; scene?: string; kind?: AiImageKind; aspectRatio?: AiImageAspectRatio; participants?: Array<'self' | 'user'>; caption?: string }
 export type AiBubble = AiBubbleText | AiBubbleSticker | AiBubbleImage | AiBubbleLink | AiBubbleScheduleChange | AiBubbleFinance
 
 export interface AiResponse {
@@ -1626,7 +1630,7 @@ export interface GroupAiBubbleSticker {
   thought?: string
   mood?: string
 }
-export interface GroupAiBubbleImage { speakerIndex: number; speakerName?: string; type: 'image'; query: string; scene?: string; kind?: AiImageKind; participantIndexes?: number[]; includeUser?: boolean; caption?: string; thought?: string; mood?: string }
+export interface GroupAiBubbleImage { speakerIndex: number; speakerName?: string; type: 'image'; query: string; scene?: string; kind?: AiImageKind; aspectRatio?: AiImageAspectRatio; participantIndexes?: number[]; includeUser?: boolean; caption?: string; thought?: string; mood?: string }
 /** A speaker can only create a schedule card for themselves. */
 export interface GroupAiBubbleScheduleChange { speakerIndex: number; speakerName?: string; type: 'scheduleChange'; date: string; startHour: number; endHour: number; phoneAccess: 'available' | 'unavailable'; location: string; locationId?: string; activity: string; summary: string; thought?: string; mood?: string }
 export type GroupAiBubble = GroupAiBubbleText | GroupAiBubbleSticker | GroupAiBubbleImage | GroupAiBubbleScheduleChange

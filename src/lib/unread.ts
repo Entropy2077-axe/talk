@@ -8,7 +8,7 @@ import { isAiTestId } from './aiTestIsolation'
 /** Only incoming (assistant) messages count as unread — the user's own sent messages never do, regardless of lastReadAt. */
 export function unreadCountFor(lastReadAt: number | undefined, messages: Message[]): number {
   const since = lastReadAt ?? 0
-  return messages.filter((m) => m.role === 'assistant' && m.createdAt > since).length
+  return messages.filter((m) => m.role === 'assistant' && m.image?.presentation !== 'illustration' && m.createdAt > since).length
 }
 
 interface UnreadCounts {
@@ -38,6 +38,7 @@ function startUnreadTracking() {
     const messagesByConv = new Map<string, Message[]>()
     const lastMessageByConversation = new Map<string, Message>()
     for (const m of messages) {
+      if (m.image?.presentation === 'illustration') continue
       const arr = messagesByConv.get(m.conversationId)
       if (arr) arr.push(m)
       else messagesByConv.set(m.conversationId, [m])

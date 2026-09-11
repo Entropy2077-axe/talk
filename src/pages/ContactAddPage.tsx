@@ -9,7 +9,7 @@ import { AvatarPicker } from '../components/AvatarPicker'
 import { WorldbookEntrySelector } from '../components/WorldbookEntrySelector'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { useModuleEnabled } from '../features'
-import { chatCompletion, chatCompletionText } from '../lib/deepseek'
+import { chatCompletion } from '../lib/deepseek'
 import { AVATAR_EMOJIS } from '../lib/avatarEmojis'
 import { pickRandomTrait } from '../lib/randomTraits'
 import { initialWarmthForBase } from '../lib/relationship'
@@ -32,16 +32,10 @@ import {
   type PersonaGenerationResult,
 } from '../lib/prompt'
 import {
-  NUWA_FIELD_LABELS,
-  NUWA_FORM_JSON_SCHEMA,
-  NUWA_FORM_KEYS,
-  hasNuwaFormFields,
-  localNuwaFormatIssues,
   nuwaFormOutputProtocol,
-  parseNuwaReview,
-  parseNuwaStructuredResult,
   preserveFilledNuwaFields,
   submitNuwaFormTool,
+  validateNuwaCompletion,
   type NuwaStructuredResult,
 } from '../lib/nuwaPersona'
 
@@ -221,45 +215,6 @@ export function ContactAddPage() {
     }
   }
 
-  async function reviewNuwaFormResponse(raw: string) {
-    const localIssues = localNuwaFormatIssues(raw)
-    const parsed = parseNuwaStructuredResult(raw)
-    const currentValues = currentNuwaFormValues()
-    if (parsed) {
-      const stillEmpty = NUWA_FORM_KEYS.filter((key) => !parsed[key].trim())
-      if (stillEmpty.length) localIssues.push(`以下字段仍未补全：${stillEmpty.map((key) => NUWA_FIELD_LABELS[key]).join('、')}`)
-      const overwritten = NUWA_FORM_KEYS.filter((key) => currentValues[key] && parsed[key] !== currentValues[key])
-      if (overwritten.length) localIssues.push(`以下已填字段被改写：${overwritten.map((key) => NUWA_FIELD_LABELS[key]).join('、')}`)
-    }
-    if (parsed && !hasNuwaFormFields(parsed) && !structuredNuwaPersonaText()) localIssues.push('角色说明包含可提取信息，但所有表单字段均为空，只填写了 otherSetting')
-    const reviewRaw = await chatCompletionText({
-      apiKey: settings.apiKey,
-      baseUrl: settings.baseUrl,
-      model: settings.utilityModel || settings.model,
-      messages: [
-        { role: 'system', content: `你是多功能模型中的严格格式审查器。只审查候选输出，不负责改写内容。
-必须只返回合法 JSON：{"valid":true,"issues":[]}。
-判定为不合格的情况包括：不是纯 JSON 对象；缺少固定字段；字段不是字符串；出现额外字段；任意表单字段仍为空；初稿建议中可明确提取的信息没有进入对应表单字段、却只堆在 otherSetting；补全结果改写了用户已经填写的身份、关系、事实、边界或其他字段。
-issues 要用简短中文列出具体错误。` },
-        { role: 'user', content: `模式：只补全空字段
-固定结构：${NUWA_FORM_JSON_SCHEMA}
-初稿建议：${extra.trim() || '（未填写）'}
-当前表单：${currentNuwaPersonaText() || '（未填写）'}
-候选输出：${raw}` },
-      ],
-      jsonMode: true,
-      thinking: 'disabled',
-      purpose: 'persona',
-      temperature: 0,
-      maxTokens: 500,
-    })
-    const review = parseNuwaReview(reviewRaw)
-    const issues = Array.from(new Set([...localIssues, ...(review?.issues ?? [])]))
-    if (!review) issues.push('多功能模型没有返回有效的审查结果')
-    if (review && !review.valid && issues.length === 0) issues.push('多功能模型判定格式不合格')
-    return { valid: !!parsed && localIssues.length === 0 && review?.valid === true, issues, result: parsed }
-  }
-
   async function generateReviewedNuwaPolish(prompt: string, temperature: number, maxTokens: number) {
     let rejection = ''
     let lastIssues: string[] = []
@@ -290,10 +245,10 @@ issues 要用简短中文列出具体错误。` },
       // User-entered fields are not model-editable.  This also covers models
       // that paraphrase otherSetting even though they were instructed not to.
       const raw = preserveFilledNuwaFields(candidate, currentNuwaFormValues())
-      const review = await reviewNuwaFormResponse(raw)
-      if (review.valid && review.result) return review.result
-      lastIssues = review.issues
-      rejection = review.issues.map((issue, index) => `${index + 1}. ${issue}`).join('\n') || '格式不符合固定表单协议'
+      const validation = validateNuwaCompletion(raw)
+      if (validation.issues.length === 0 && validation.result) return validation.result
+      lastIssues = validation.issues
+      rejection = validation.issues.map((issue, index) => `${index + 1}. ${issue}`).join('\n') || '没有返回可读取的角色表单'
     }
     throw new Error(`连续 3 次未通过表单校验：${lastIssues.join('；') || '格式不合格'}`)
   }

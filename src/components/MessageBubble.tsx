@@ -43,6 +43,12 @@ interface MessageBubbleProps {
   showName?: boolean
 }
 
+function assetAspectRatio(asset: { size?: string; width?: number; height?: number } | null | undefined): string | undefined {
+  if (asset?.width && asset.height) return `${asset.width} / ${asset.height}`
+  const [width, height] = asset?.size?.split('*').map(Number) ?? []
+  return width > 0 && height > 0 ? `${width} / ${height}` : undefined
+}
+
 export const MessageBubble = memo(function MessageBubble({
   message,
   contactName,
@@ -87,6 +93,28 @@ export const MessageBubble = memo(function MessageBubble({
     [message.mentions, memberById],
   )
   const contactRecommendation = recommendationFromMessage(message)
+  const imageAspectRatio = assetAspectRatio(imageAsset)
+  if (message.type === 'image' && message.image?.presentation === 'illustration') {
+    const imageUrl = imageAsset?.status === 'completed' ? imageAsset.dataUrl || imageAsset.remoteUrl : message.image.url
+    return (
+      <div
+        ref={(el) => registerRef?.(message.id, el)}
+        data-message-id={message.id}
+        {...(selecting ? {} : longPress)}
+        onClick={selecting ? () => onSelect?.(message.id) : undefined}
+        className={`relative px-4 py-3 ${selecting ? 'cursor-pointer pl-12' : ''} ${selected ? 'bg-gray-200' : highlighted ? 'bg-yellow-50' : ''}`}
+      >
+        {selecting && <span className={`absolute left-4 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border text-[12px] ${selected ? 'border-[var(--ui-info)] bg-[var(--ui-info)] text-white' : 'border-gray-300 bg-white text-transparent'}`}><Check size={13}/></span>}
+        <div data-ui-scope="special" className="mx-auto w-full max-w-[520px] overflow-hidden rounded-2xl border border-[var(--ui-border)] bg-white shadow-sm">
+          <div className="flex items-center gap-1.5 border-b border-gray-100 px-3.5 py-2 text-[11px] text-gray-400"><UiIcon name="image" size={13}/><span>本轮配图</span></div>
+          {message.image.assetId && (imageAsset === null || (imageAsset && imageAsset.status !== 'completed' && imageAsset.status !== 'failed')) && <div style={{ aspectRatio: imageAspectRatio ?? '4 / 3' }} className="flex flex-col items-center justify-center gap-2 bg-gray-100 text-xs text-gray-400"><span className="h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-[var(--ui-special)]"/><span>正在描绘这一刻…</span></div>}
+          {imageAsset?.status === 'failed' && <div className="flex min-h-44 flex-col items-center justify-center gap-2 bg-gray-50 px-5 text-center"><UiIcon name="image" size={26}/><p className="text-xs text-red-500">{imageAsset.error || '本轮配图生成失败'}</p><button type="button" onClick={(event) => { event.stopPropagation(); void retryMediaAsset(imageAsset.id) }} className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs text-white">重新生成</button></div>}
+          {imageUrl && <img src={imageUrl} alt="本轮对话配图" className="max-h-[420px] w-full object-cover"/>}
+          {message.image.caption && <p className="px-3.5 py-3 text-[12.5px] leading-relaxed text-gray-600">{message.image.caption}</p>}
+        </div>
+      </div>
+    )
+  }
   if (message.type === 'locationEvent') {
     return (
       <div ref={(el) => registerRef?.(message.id, el)} data-message-id={message.id} className="px-4 py-2 text-center">
@@ -237,9 +265,10 @@ export const MessageBubble = memo(function MessageBubble({
             </div>
           )}
           {message.type === 'image' && message.image && <div data-ui-scope="special" className="w-[240px] overflow-hidden rounded-xl bg-white">
-            {message.image.assetId && (imageAsset === null || (imageAsset && imageAsset.status !== 'completed' && imageAsset.status !== 'failed')) ? <div className="flex aspect-[4/3] flex-col items-center justify-center gap-2 bg-gray-100 text-xs text-gray-400"><span className="h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-[var(--ui-special)]"/><span>图片生成中…</span></div> : null}
+            {message.image.assetId && (imageAsset === null || (imageAsset && imageAsset.status !== 'completed' && imageAsset.status !== 'failed')) ? <div style={{ aspectRatio: imageAspectRatio ?? '4 / 3' }} className="flex flex-col items-center justify-center gap-2 bg-gray-100 text-xs text-gray-400"><span className="h-6 w-6 animate-spin rounded-full border-2 border-gray-300 border-t-[var(--ui-special)]"/><span>图片生成中…</span></div> : null}
             {imageAsset?.status === 'failed' ? <div className="flex min-h-36 flex-col items-center justify-center gap-2 bg-gray-50 px-4 text-center"><UiIcon name="image" size={24}/><p className="text-xs text-red-500">{imageAsset.error || '图片生成失败'}</p><button type="button" onClick={() => void retryMediaAsset(imageAsset.id)} className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs text-white">重新生成</button></div> : null}
             {(imageAsset?.status === 'completed' ? imageAsset.dataUrl || imageAsset.remoteUrl : message.image.url) && <img src={imageAsset?.status === 'completed' ? imageAsset.dataUrl || imageAsset.remoteUrl : message.image.url} alt="聊天图片" className="max-h-72 w-full object-cover"/>}
+            {message.image.caption && <p className="px-3 py-2 text-[12px] leading-relaxed text-gray-600">{message.image.caption}</p>}
             {message.image.photographer&&<p className="px-3 pb-2 pt-1 text-[10px] text-gray-300">Photo: {message.image.photographer}</p>}
           </div>}
           {['transfer','redPacket','loanRequest','loanResult','repayment'].includes(message.type) && message.finance && (

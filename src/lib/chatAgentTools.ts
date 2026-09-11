@@ -62,12 +62,14 @@ export function privateChatTools(opts: Pick<AgentToolOptions, 'stickerNames' | '
       : { type: 'string', enum: opts.stickerNames, description: '必须逐字选择一个本地表情名。' },
     ...commonProperties(),
   }, ['name', 'thought', 'mood']))
-  if (opts.imageEnabled) tools.push(fn('send_image', '生成或搜索并发送一张纯图片。只有角色确实决定发图时调用；图片本身不带配文，因此必须在同一轮另外调用 send_text 自然说话。', {
-    query: { type: 'string', description: '完整英文画面提示，清楚描述主体、场景、动作、构图、光线、颜色和氛围。' },
+  if (opts.imageEnabled) tools.push(fn('send_image', '生成或搜索并发送一张纯图片。用户明确索要自拍、照片或合照时必须调用。图片本身不带聊天正文，因此必须在同一轮另外调用 send_text 自然说话。', {
+    query: { type: 'string', description: '完整英文纯视觉画面提示，只描述现实场景；禁止聊天、消息、手机或屏幕、UI、文字、字幕、气泡、拼贴和分屏。自拍时人物看向镜头且拍摄设备不可见。' },
+    caption: { type: 'string', description: '简短自然的中文图片说明，解释照片拍了什么。' },
     kind: { type: 'string', enum: ['selfie', 'portrait', 'scene', 'object'] },
+    aspectRatio: { type: 'string', enum: ['1:1', '4:3', '3:4', '16:9', '9:16'], description: '按动作和环境选择画面比例；普通自拍优先竖图，不要默认方图。' },
     participants: { type: 'array', items: { type: 'string', enum: ['self', 'user'] } },
     ...commonProperties(),
-  }, ['query', 'kind', 'participants', 'thought', 'mood']))
+  }, ['query', 'caption', 'kind', 'aspectRatio', 'participants', 'thought', 'mood']))
   if (opts.knowledgeEnabled) tools.push(fn('search_knowledge', '查询角色当前确实不懂、但回答用户前必须弄清楚的新词、作品或事实。查询后系统会把结果交回角色重新回答。', {
     query: { type: 'string', description: '简短、可搜索的查询词。' },
   }, ['query']))
@@ -126,14 +128,16 @@ export function privateTurnToolDefinition(opts: Pick<AgentToolOptions, 'stickerN
         properties: {
           type: {
             type: 'string', enum: eventTypes,
-            description: '事件类型及必填字段：text→content；sticker→name；image→query/kind/participants；schedule→date/startHour/endHour/locationId/activity/phoneAccess/summary；activity_now→locationId/activity/durationMinutes/phoneAccess，可选 delayMinutes（0-720，半小时后出发填30）；contact_recommendation→candidateName/relationToRecommender/recommendationReason/shortDescription/gender/ageRange/occupation/hobbies/personalityClues；transfer→amount/note；red_packet→amount/blessing；loan_request→amount/reason；loan_decision→loanId/decision/amount；gift_purchase→amount/name/icon/description。',
+            description: '事件类型及必填字段：text→content；sticker→name；image→query/kind/aspectRatio/participants；schedule→date/startHour/endHour/locationId/activity/phoneAccess/summary；activity_now→locationId/activity/durationMinutes/phoneAccess，可选 delayMinutes（0-720，半小时后出发填30）；contact_recommendation→candidateName/relationToRecommender/recommendationReason/shortDescription/gender/ageRange/occupation/hobbies/personalityClues；transfer→amount/note；red_packet→amount/blessing；loan_request→amount/reason；loan_decision→loanId/decision/amount；gift_purchase→amount/name/icon/description。',
           },
           content: { type: 'string', description: 'type=text 时的自然聊天正文。' },
           name: opts.stickerSearchEnabled
             ? { type: 'string', description: 'type=sticker 时的简短具体搜索词，优先英文；也可使用已知本地表情名。' }
             : { type: 'string', enum: opts.stickerNames.length ? opts.stickerNames : [''] },
-          query: { type: 'string', description: 'type=image 时的完整英文画面提示。' },
+          query: { type: 'string', description: 'type=image 时的完整英文纯视觉画面提示；不得包含聊天界面、屏幕、文字、气泡、拼贴或分屏。' },
+          caption: { type: 'string', description: 'type=image 时的简短中文图片说明。' },
           kind: { type: 'string', enum: ['selfie', 'portrait', 'scene', 'object'] },
+          aspectRatio: { type: 'string', enum: ['1:1', '4:3', '3:4', '16:9', '9:16'] },
           participants: { type: 'array', items: { type: 'string', enum: ['self', 'user'] } },
           date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
           startHour: { type: 'integer', minimum: 0, maximum: 23 },
@@ -197,7 +201,8 @@ export function parsePrivateToolCalls(calls: ChatToolCall[]): ParsedAiTurn {
       const name = text(args.name, 100); if (name) bubbles.push({ type: 'sticker', name })
     } else if (call.function.name === 'send_image') {
       const query = text(args.query, 2_000)
-      if (query) bubbles.push({ type: 'image', query, kind: ['selfie','portrait','scene','object'].includes(String(args.kind)) ? args.kind as 'selfie'|'portrait'|'scene'|'object' : undefined, participants: Array.isArray(args.participants) ? args.participants.filter((value): value is 'self'|'user' => value === 'self' || value === 'user') : undefined })
+      const caption = text(args.caption, 120)
+      if (query) bubbles.push({ type: 'image', query, ...(caption ? { caption } : {}), kind: ['selfie','portrait','scene','object'].includes(String(args.kind)) ? args.kind as 'selfie'|'portrait'|'scene'|'object' : undefined, aspectRatio: ['1:1','4:3','3:4','16:9','9:16'].includes(String(args.aspectRatio)) ? args.aspectRatio as '1:1'|'4:3'|'3:4'|'16:9'|'9:16' : undefined, participants: Array.isArray(args.participants) ? args.participants.filter((value): value is 'self'|'user' => value === 'self' || value === 'user') : undefined })
     } else if (call.function.name === 'search_knowledge') {
       const query = text(args.query, 120); if (query && knowledgeQueries.length < 2) knowledgeQueries.push(query)
     } else if (call.function.name === 'create_schedule') {
@@ -293,13 +298,19 @@ function textOnlyTurnTool(): ChatToolDefinition {
   }, ['events', 'thought', 'mood', 'knowledgeQueries'])
 }
 
-function actionDecisionTool(locationIds: string[]): ChatToolDefinition {
+function actionDecisionTool(opts: Pick<AgentToolOptions, 'locationIds' | 'imageEnabled' | 'stickerNames' | 'stickerSearchEnabled' | 'scheduleEnabled'>): ChatToolDefinition {
+  const eventTypes = [
+    ...(opts.stickerNames.length || opts.stickerSearchEnabled ? ['sticker'] : []),
+    ...(opts.imageEnabled ? ['image'] : []),
+    ...(opts.scheduleEnabled && opts.locationIds.length ? ['schedule', 'activity_now'] : []),
+    'contact_recommendation', 'transfer', 'red_packet', 'loan_request', 'loan_decision', 'gift_purchase',
+  ]
   return fn('decide_turn_actions', '只决定本轮是否需要执行结构化行动，绝不生成用户可见正文。若无需行动，decided=false、events=[]，并简短说明原因。若需要行动，decided=true，并只填已经明确成立的事件。', {
     decided: { type: 'boolean' }, reason: { type: 'string', description: '说明为何执行或不执行行动，仅供系统调试。' },
     events: { type: 'array', maxItems: 6, items: { type: 'object', additionalProperties: false, properties: {
-      type: { type: 'string', enum: ['sticker', 'image', 'schedule', 'activity_now', 'contact_recommendation', 'transfer', 'red_packet', 'loan_request', 'loan_decision', 'gift_purchase'] },
-      name: { type: 'string' }, query: { type: 'string' }, kind: { type: 'string', enum: ['selfie', 'portrait', 'scene', 'object'] }, participants: { type: 'array', items: { type: 'string', enum: ['self', 'user'] } },
-      date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' }, startHour: { type: 'integer', minimum: 0, maximum: 23 }, endHour: { type: 'integer', minimum: 1, maximum: 24 }, locationId: { type: 'string', enum: locationIds.length ? locationIds : [''] }, activity: { type: 'string' }, durationMinutes: { type: 'integer', minimum: 5, maximum: 480 }, delayMinutes: { type: 'integer', minimum: 0, maximum: 720 }, phoneAccess: { type: 'string', enum: ['available', 'unavailable'] }, summary: { type: 'string' },
+      type: { type: 'string', enum: eventTypes },
+      name: { type: 'string' }, query: { type: 'string', description: 'image 的英文纯视觉提示；禁止屏幕、聊天框、UI、文字和拼贴。' }, caption: { type: 'string', description: 'image 的中文图片说明。' }, kind: { type: 'string', enum: ['selfie', 'portrait', 'scene', 'object'] }, aspectRatio: { type: 'string', enum: ['1:1', '4:3', '3:4', '16:9', '9:16'] }, participants: { type: 'array', items: { type: 'string', enum: ['self', 'user'] } },
+      date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' }, startHour: { type: 'integer', minimum: 0, maximum: 23 }, endHour: { type: 'integer', minimum: 1, maximum: 24 }, locationId: { type: 'string', enum: opts.locationIds.length ? opts.locationIds : [''] }, activity: { type: 'string' }, durationMinutes: { type: 'integer', minimum: 5, maximum: 480 }, delayMinutes: { type: 'integer', minimum: 0, maximum: 720 }, phoneAccess: { type: 'string', enum: ['available', 'unavailable'] }, summary: { type: 'string' },
       amount: { type: 'integer', minimum: 1 }, note: { type: 'string' }, blessing: { type: 'string' }, reason: { type: 'string' }, loanId: { type: 'string' }, decision: { type: 'string', enum: ['accept', 'reject'] }, icon: { type: 'string' }, description: { type: 'string' },
       candidateName: { type: 'string' }, relationToRecommender: { type: 'string' }, recommendationReason: { type: 'string' }, shortDescription: { type: 'string' }, gender: { type: 'string' }, ageRange: { type: 'string' }, occupation: { type: 'string' }, hobbies: { type: 'array', maxItems: 6, items: { type: 'string' } }, personalityClues: { type: 'array', maxItems: 6, items: { type: 'string' } },
     }, required: ['type'] } },
@@ -332,7 +343,7 @@ export async function generatePrivateTextTurn(opts: AgentToolOptions): Promise<{
 export async function decidePrivateTurnActions(opts: AgentToolOptions): Promise<PrivateActionDecision> {
   const response = await chatCompletion({
     apiKey: opts.apiKey, baseUrl: opts.baseUrl, model: opts.utilityModel || opts.model, messages: opts.messages,
-    tools: [actionDecisionTool(opts.locationIds)], toolChoice: { type: 'function', function: { name: 'decide_turn_actions' } }, signal: opts.signal,
+    tools: [actionDecisionTool(opts)], toolChoice: { type: 'function', function: { name: 'decide_turn_actions' } }, signal: opts.signal,
     purpose: opts.purpose, automatic: opts.automatic, thinking: 'disabled', temperature: 0, maxTokens: 900,
     trace: { ...opts.trace, stage: 'tool_call' },
   })
@@ -547,7 +558,7 @@ export function parseGroupToolCalls(calls: ChatToolCall[], speakerCount: number,
     const common = { speakerIndex, thought, mood: normalizeMood(textualMood) }
     if (call.function.name === 'send_text') { const content = text(args.content, 2_000); if (content) bubbles.push({ ...common, type: 'text', content }) }
     else if (call.function.name === 'send_sticker') { const name = text(args.name, 100); if (name) bubbles.push({ ...common, type: 'sticker', name }) }
-    else if (call.function.name === 'send_image') { const query = text(args.query, 2_000); if (query) bubbles.push({ ...common, type: 'image', query, kind: ['selfie','portrait','group','scene','object'].includes(String(args.kind)) ? args.kind as any : undefined, participantIndexes: Array.isArray(args.participantIndexes) ? Array.from(new Set(args.participantIndexes.map(Number).filter((index) => Number.isInteger(index) && index >= 1 && index <= memberCount))) : [speakerIndex], includeUser: args.includeUser === true }) }
+    else if (call.function.name === 'send_image') { const query = text(args.query, 2_000), caption = text(args.caption, 120); if (query) bubbles.push({ ...common, type: 'image', query, ...(caption ? { caption } : {}), kind: ['selfie','portrait','group','scene','object'].includes(String(args.kind)) ? args.kind as any : undefined, aspectRatio: ['1:1','4:3','3:4','16:9','9:16'].includes(String(args.aspectRatio)) ? args.aspectRatio as any : undefined, participantIndexes: Array.isArray(args.participantIndexes) ? Array.from(new Set(args.participantIndexes.map(Number).filter((index) => Number.isInteger(index) && index >= 1 && index <= memberCount))) : [speakerIndex], includeUser: args.includeUser === true }) }
     else if (call.function.name === 'create_schedule') {
       const privateParsed = parsePrivateToolCalls([{ ...call, function: { ...call.function, arguments: JSON.stringify({ ...args, speakerIndex: undefined }) } }])
       const schedule = privateParsed.bubbles.find((bubble) => bubble.type === 'scheduleChange')

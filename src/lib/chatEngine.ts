@@ -35,7 +35,7 @@ import { canUsePlayerHome, ensureLocationsInitialized, reassignUnknownContactLoc
 import { evaluateDirectSpecialTask, runActionCommittee, type ActionCommitteeDebug } from './actionCommittee'
 import type { CreateSpecialTaskResult } from './agentTasks'
 import { createScheduleInternalTask } from './internalTasks'
-import { createMediaAsset, startMediaAsset } from './imageAssets'
+import { createConversationIllustration, createMediaAsset, detectExplicitImageRequest, startMediaAsset } from './imageAssets'
 import { buildDirectOutputInstruction, parseDirectOutputReview } from './directOutput'
 import { decidePrivateTurnActions, generatePrivateAgentTurn, generatePrivateTextTurn, mergePrivateTurnActions, planPrivateActionPlacements } from './chatAgentTools'
 import { traceTurnEvent } from './deepseek'
@@ -355,7 +355,13 @@ export async function regenerateAiTurn(
     .equals(conversationId)
     .filter((message) => message.debugAiTurnId === aiTurnId)
     .toArray()
-  if (turnMessages.length > 0) await db.messages.bulkDelete(turnMessages.map((message) => message.id))
+  if (turnMessages.length > 0) {
+    await db.transaction('rw', db.messages, db.mediaAssets, async () => {
+      await db.messages.bulkDelete(turnMessages.map((message) => message.id))
+      const assetIds = turnMessages.map((message) => message.image?.assetId).filter((id): id is string => !!id)
+      if (assetIds.length) await db.mediaAssets.bulkDelete(assetIds)
+    })
+  }
   await db.aiTurns.delete(aiTurnId)
   await db.conversations.update(conversationId, { updatedAt: Date.now() })
 
@@ -394,7 +400,10 @@ async function runAiTurn(
   try {
     const directOutput = isModuleEnabled('directOutput')
     const history = await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt')
-    const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
+    // System-presented turn illustrations are derived output, not something
+    // either participant said or sent. Never feed them back into the model.
+    const conversationalHistory = history.filter((message) => message.image?.presentation !== 'illustration')
+    const recentHistory = conversationalHistory.slice(-CONTEXT_WINDOW_SIZE)
     const replyTimeContext = buildReplyTimeContext(now, offlineFrom)
     const messageTimeline = buildRecentMessageTimeline(recentHistory)
     let absenceContext = replyTimeContext
@@ -570,7 +579,11 @@ async function runAiTurn(
       }
       const baseMessages = chatMessages.slice(0, -1)
       const textMessages = [...baseMessages, { role: 'system' as const, content: `【最终时间核对】${replyTimeContext}\n本轮只通过 submit_turn 生成用户可见的自然聊天正文。不得生成、提及或决定任何工具、地点、日程、图片、资金或其他行动；这些由独立模型处理。` }]
-      const actionMessages = [...baseMessages, { role: 'system' as const, content: `【当前事实】${replyTimeContext}\n你是本轮唯一的世界状态决策者。只调用 decide_turn_actions，绝不生成用户可见正文。必须在 decided=false 与 decided=true 之间作出明确决定；false 时 events 必须为空并说明原因，true 时只填已由用户请求和当前事实充分支持的工具事件。${recommendationConstraint}${locationActionContext ? `\n${locationActionContext}` : ''}` }]
+      const explicitImageKind = isImageProviderReady(settings) ? detectExplicitImageRequest(_triggeringUserText) : null
+      const explicitImageConstraint = explicitImageKind
+        ? `\n【明确图片请求，不能漏】用户明确要求角色发送${explicitImageKind === 'selfie' ? '自拍' : '照片'}。本轮必须 decided=true，events 必须包含 type=image、kind=${explicitImageKind}、participants=["self"]，并按动作和环境选择 aspectRatio；普通自拍优先 3:4 或 9:16，禁止习惯性选择 1:1。图片 query 只能描述真实画面，不得包含手机、屏幕、聊天框、UI、文字、字幕、拼贴或分屏。自动氛围配图不能代替这个发送图片动作。`
+        : ''
+      const actionMessages = [...baseMessages, { role: 'system' as const, content: `【当前事实】${replyTimeContext}\n你是本轮唯一的世界状态决策者。只调用 decide_turn_actions，绝不生成用户可见正文。必须在 decided=false 与 decided=true 之间作出明确决定；false 时 events 必须为空并说明原因，true 时只填已由用户请求和当前事实充分支持的工具事件。${recommendationConstraint}${locationActionContext ? `\n${locationActionContext}` : ''}${explicitImageConstraint}` }]
       const [textGenerated, actionDecision] = await Promise.all([
         generatePrivateTextTurn({ ...common, messages: textMessages, trace: { turnId: streamId, stage: 'original_generation', conversationId } }),
         decidePrivateTurnActions({ ...common, messages: actionMessages, trace: { turnId: streamId, stage: 'tool_call', conversationId } }),
@@ -798,6 +811,7 @@ async function runAiTurn(
       now,
       directOutput,
       internalTask,
+      situationText,
     )
     console.info(`[chat-perf] first-bubble-ready=${Math.round(performance.now() - turnStartedAt)}ms contact=${displayName(contact)}`)
   } catch (err) {
@@ -826,6 +840,7 @@ function revealBubbles(
   turnNow = Date.now(),
   directOutput = false,
   internalTask?: InternalTask,
+  illustrationContext = '',
   onFirstBubble?: () => void,
 ): void {
   revealSequentially({
@@ -936,10 +951,10 @@ function revealBubbles(
               origin: 'chat', originId: messageId, conversationId, turnId: streamId,
               ownerContactIds: participants.includes('self') ? [contact.id] : [],
               includeUser: participants.includes('user'), scene: bubble.query,
-              kind, settings,
+              kind, aspectRatio: kind === 'selfie' && (!bubble.aspectRatio || bubble.aspectRatio === '1:1') ? '3:4' : bubble.aspectRatio ?? (kind === 'portrait' ? '3:4' : kind === 'scene' ? '4:3' : '1:1'), settings,
             })
             imageAssetId = asset.id
-            imagePayload = { assetId: asset.id, query: bubble.query, provider: asset.provider }
+            imagePayload = { assetId: asset.id, query: bubble.query, caption: bubble.caption, provider: asset.provider, presentation: 'sent' }
           } catch (error) { console.warn('[media] 创建图片任务失败', error); imageFailed = true }
         }
       }
@@ -1008,7 +1023,7 @@ function revealBubbles(
         })
       }
 
-          if (i === bubbles.length - 1) {
+      if (i === bubbles.length - 1) {
         if (internalTask) {
           const taskCreatedAt = await nextMessageTimestamp(conversationId, messageCreatedAt + 1)
           const taskMessage: Message = {
@@ -1019,6 +1034,33 @@ function revealBubbles(
           }
           await db.messages.add(taskMessage)
           await db.conversations.update(conversationId, { updatedAt: taskCreatedAt })
+        }
+        const requestedImageKind = isImageProviderReady(settings) ? detectExplicitImageRequest(_triggeringUserText) : null
+        const turnAlreadyHasImage = bubbles.some((item) => item.type === 'image')
+        const shouldCreateRequestedImage = !!requestedImageKind && !turnAlreadyHasImage
+        const shouldCreateIllustration = !requestedImageKind && !turnAlreadyHasImage && isModuleEnabled('conversationIllustration') && isImageProviderReady(settings)
+        if (shouldCreateRequestedImage || shouldCreateIllustration) {
+          const illustrationCreatedAt = await nextMessageTimestamp(conversationId)
+          const replyText = bubbles.map((item) => item.type === 'text' ? item.content : item.type === 'scheduleChange' ? item.summary : '').filter(Boolean).join('\n')
+          try {
+            await createConversationIllustration({
+              conversationId,
+              turnId: aiTurnId,
+              ownerContactIds: [contact.id],
+              participantNames: [displayName(contact)],
+              latestUserText: _triggeringUserText,
+              replyText,
+              mood: turnMood,
+              context: illustrationContext,
+              settings,
+              createdAt: illustrationCreatedAt,
+              presentation: shouldCreateRequestedImage ? 'sent' : 'illustration',
+              requestedKind: requestedImageKind ?? undefined,
+              speakerContactId: shouldCreateRequestedImage ? contact.id : undefined,
+            })
+          } catch (error) {
+            console.warn('[media] 创建本轮对话配图失败', error)
+          }
         }
         useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined })
         const memoryUpdate = directOutput ? null : await maybeUpdateMemory(contact.id, conversationId, settings)

@@ -59,7 +59,7 @@ function immediateLocationInstruction(request?: ImmediateLocationRequest) {
   return `\n【即时地点行动，不能漏】用户正在要求相关联系人立刻前往“${request.locationName}”（${request.locationId}）。角色可以按人设明确拒绝；但只要角色在可见回复中同意、表示正在动身，或实际开始该活动，就必须由该角色调用 start_activity_now，locationId 必须是 ${request.locationId}。绝不能只发“我去/我马上过去”之类文字而不调用行动工具。`
 }
 import { realisticReplyDelayMs } from './replyTiming'
-import { createMediaAsset, startMediaAsset } from './imageAssets'
+import { createConversationIllustration, createMediaAsset, detectExplicitImageRequest, startMediaAsset } from './imageAssets'
 import { generateGroupAgentTurn, type GroupImmediateActivityAction } from './chatAgentTools'
 import { createScheduleInternalTask } from './internalTasks'
 import { traceTurnEvent } from './deepseek'
@@ -378,7 +378,13 @@ export async function regenerateGroupAiTurn(
     .equals(conversationId)
     .filter((message) => message.debugAiTurnId === aiTurnId)
     .toArray()
-  if (turnMessages.length > 0) await db.messages.bulkDelete(turnMessages.map((message) => message.id))
+  if (turnMessages.length > 0) {
+    await db.transaction('rw', db.messages, db.mediaAssets, async () => {
+      await db.messages.bulkDelete(turnMessages.map((message) => message.id))
+      const assetIds = turnMessages.map((message) => message.image?.assetId).filter((id): id is string => !!id)
+      if (assetIds.length) await db.mediaAssets.bulkDelete(assetIds)
+    })
+  }
   await db.aiTurns.delete(aiTurnId)
   await db.conversations.update(conversationId, { updatedAt: Date.now() })
 
@@ -427,7 +433,8 @@ async function runGroupAiTurn(
 
     const contactById = new Map(members.map((c) => [c.id, c]))
 
-    const history = await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt')
+    const history = (await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt'))
+      .filter((message) => message.image?.presentation !== 'illustration')
     const messageById = new Map(history.map((m) => [m.id, m]))
     const latestUserMessage = [...history].reverse().find((m) => m.role === 'user')
     const preferredSpeakerIds = new Set(latestUserMessage?.mentions ?? [])
@@ -450,6 +457,10 @@ async function runGroupAiTurn(
     const aiRelationshipText = featureActive(settings, 'relationship') ? await aiRelationshipPrompt(members) : ''
     const remoteStickerSearchEnabled = isStickerProviderReady(settings)
     const imageGenerationEnabled = isImageProviderReady(settings)
+    const explicitImageKind = imageGenerationEnabled ? detectExplicitImageRequest(latestUserMessage?.content ?? '') : null
+    const explicitImageInstruction = explicitImageKind
+      ? `\n【明确图片请求，不能漏】用户明确要求被点名或最合适的成员发送${explicitImageKind === 'selfie' ? '自拍' : '照片'}。必须由该成员调用 send_image，kind=${explicitImageKind}，participantIndexes 只包含拍照者，includeUser=false，并按动作和环境选择 aspectRatio；普通自拍优先 3:4 或 9:16，禁止习惯性选择 1:1。query 只描述真实画面，禁止手机、屏幕、聊天框、UI、文字、字幕、拼贴或分屏。自动氛围配图不能代替这个动作。`
+      : ''
     const location = group.kind === 'location' && group.locationId ? await db.locations.get(group.locationId) : undefined
     const allLocations = isModuleEnabled('location') ? await db.locations.toArray() : []
     const leafLocations = allLocations.filter((candidate) => !allLocations.some((child) => child.parentId === candidate.id))
@@ -522,7 +533,7 @@ async function runGroupAiTurn(
     } else {
       const generated = await generateGroupAgentTurn({
         apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, utilityModel: settings.utilityModel,
-        messages: [...chatMessages, { role: 'system', content: `本轮必须通过提供的函数发送群聊消息或执行行动。消息总量由工具执行层硬性校验，不得少于或超过指定范围。成员始终可以自然互相接话，但不要机械轮流。send_image 只发送纯图片，发图的同一位联系人必须同时调用 send_text 自然说话；create_schedule 也不能单独作为回复。表情包可以单独发送。每条消息都必须填写该发言人的真实想法和简短中文文字心情；心情禁止使用 emoji。严格选择正确的 speakerIndex。${locationToolContext}${immediateActionContext}` }],
+        messages: [...chatMessages, { role: 'system', content: `本轮必须通过提供的函数发送群聊消息或执行行动。消息总量由工具执行层硬性校验，不得少于或超过指定范围。成员始终可以自然互相接话，但不要机械轮流。send_image 只发送纯图片，发图的同一位联系人必须同时调用 send_text 自然说话；create_schedule 也不能单独作为回复。表情包可以单独发送。每条消息都必须填写该发言人的真实想法和简短中文文字心情；心情禁止使用 emoji。严格选择正确的 speakerIndex。${locationToolContext}${immediateActionContext}${explicitImageInstruction}` }],
         signal: controller.signal, purpose: 'chat', trace: { turnId: streamId, stage: 'original_generation', conversationId },
         stickerNames: stickers.map((sticker) => sticker.name), stickerSearchEnabled: remoteStickerSearchEnabled,
         imageEnabled: imageGenerationEnabled || !!settings.pexelsApiKey, knowledgeEnabled: featureActive(settings, 'knowledgeBase'),
@@ -691,7 +702,7 @@ async function runGroupAiTurn(
     for (const plan of createdPlans) await db.messages.add(planCardMessage(plan))
     void updateGroupMemoryAndVibe({ group, aiTurnId, settings, turnSummary, directOutput })
     console.info(`[group-perf] 模型与自检完成=${Math.round(performance.now() - turnStartedAt)}ms 群=${group.name}`)
-    revealGroupBubbles(conversationId, group, members, speakers, bubbles, streamId, settings, stickers, aiTurnId, turnSummary, turnStartedAt, directOutput)
+    revealGroupBubbles(conversationId, group, members, speakers, bubbles, streamId, settings, stickers, aiTurnId, turnSummary, turnStartedAt, directOutput, latestUserMessage?.content, location?.name)
   } catch (err) {
     if (!turns.isCurrent(conversationId, streamId)) return
     if (err instanceof DOMException && err.name === 'AbortError') return
@@ -716,6 +727,8 @@ function revealGroupBubbles(
   turnSummary: string,
   turnStartedAt = performance.now(),
   directOutput = false,
+  latestUserText = '',
+  locationName = '',
   onFirstBubble?: () => void,
 ): void {
   revealSequentially({
@@ -774,9 +787,9 @@ function revealGroupBubbles(
               .filter((id): id is string => !!id)
             if (participantIds.length === 0 && kind !== 'scene' && kind !== 'object') participantIds = speaker ? [speaker.id] : []
             participantIds = selectGroupImageParticipantIds(participantIds, speaker?.id)
-            const asset = await createMediaAsset({ origin: 'chat', originId: messageId, conversationId, turnId: streamId, ownerContactIds: participantIds, includeUser: bubble.includeUser, scene: bubble.query, kind, settings })
+            const asset = await createMediaAsset({ origin: 'chat', originId: messageId, conversationId, turnId: streamId, ownerContactIds: participantIds, includeUser: bubble.includeUser, scene: bubble.query, kind, aspectRatio: kind === 'selfie' && (!bubble.aspectRatio || bubble.aspectRatio === '1:1') ? '3:4' : bubble.aspectRatio ?? (kind === 'portrait' ? '3:4' : kind === 'group' || kind === 'scene' ? '4:3' : '1:1'), settings })
             imageAssetId = asset.id
-            imagePayload = { assetId: asset.id, query: bubble.query, provider: asset.provider }
+            imagePayload = { assetId: asset.id, query: bubble.query, caption: bubble.caption, provider: asset.provider, presentation: 'sent' }
           } catch (error) { console.warn('[media] 创建群聊图片任务失败', error); imageFailed = true }
         }
       }
@@ -822,7 +835,34 @@ function revealGroupBubbles(
         })
       }
 
-          if (i === bubbles.length - 1) {
+      if (i === bubbles.length - 1) {
+        const requestedImageKind = isImageProviderReady(settings) ? detectExplicitImageRequest(latestUserText) : null
+        const turnAlreadyHasImage = bubbles.some((item) => item.type === 'image')
+        const shouldCreateRequestedImage = !!requestedImageKind && !turnAlreadyHasImage
+        const shouldCreateIllustration = !requestedImageKind && !turnAlreadyHasImage && isModuleEnabled('conversationIllustration') && isImageProviderReady(settings)
+        if (shouldCreateRequestedImage || shouldCreateIllustration) {
+          const illustrationCreatedAt = await nextMessageTimestamp(conversationId)
+          const replyText = [turnSummary, ...bubbles.map((item) => item.type === 'text' ? item.content : item.type === 'scheduleChange' ? item.summary : '')].filter(Boolean).join('\n')
+          const requestedSpeaker = speakers[0]
+          try {
+            await createConversationIllustration({
+              conversationId,
+              turnId: aiTurnId,
+              ownerContactIds: shouldCreateRequestedImage && requestedSpeaker ? [requestedSpeaker.id] : speakers.map((contact) => contact.id),
+              participantNames: shouldCreateRequestedImage && requestedSpeaker ? [displayName(requestedSpeaker)] : speakers.map(displayName),
+              latestUserText,
+              replyText,
+              context: [`Group chat: ${group.name}`, locationName ? `Current location: ${locationName}` : ''].filter(Boolean).join('\n'),
+              settings,
+              createdAt: illustrationCreatedAt,
+              presentation: shouldCreateRequestedImage ? 'sent' : 'illustration',
+              requestedKind: requestedImageKind ?? undefined,
+              speakerContactId: shouldCreateRequestedImage ? requestedSpeaker?.id : undefined,
+            })
+          } catch (error) {
+            console.warn('[media] 创建本轮群聊配图失败', error)
+          }
+        }
         useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined })
         if (!directOutput) void maybeUpdateGroupMemory(group.id, conversationId, members, settings)
 

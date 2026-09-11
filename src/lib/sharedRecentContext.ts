@@ -50,7 +50,7 @@ export async function recentSharedOriginalContext(
   )
   const conversationById = new Map(conversations.map((conversation) => [conversation.id, conversation]))
   const messages = (await db.messages.where('createdAt').aboveOrEqual(since).sortBy('createdAt'))
-    .filter((message) => conversationIds.has(message.conversationId) && !message.pending)
+    .filter((message) => conversationIds.has(message.conversationId) && !message.pending && message.image?.presentation !== 'illustration')
     .slice(-maxMessages)
   const rows: Array<{ at: number; text: string }> = messages.map((message) => {
     const conversation = conversationById.get(message.conversationId)!

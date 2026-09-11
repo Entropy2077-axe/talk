@@ -11,6 +11,7 @@ export function ImageProviderListPage() {
   const navigate = useNavigate()
   const imageProvider = useSettingsStore((state) => state.imageProvider)
   const imageProviders = useSettingsStore((state) => state.imageProviders)
+  const enabledModules = useSettingsStore((state) => state.enabledModules)
   const setSettings = useSettingsStore((state) => state.setSettings)
   const ready = isImageProviderReady({ imageProvider, imageProviders })
 
@@ -27,7 +28,7 @@ export function ImageProviderListPage() {
               </p>
             </div>
             {imageProvider !== 'none' && (
-              <button type="button" onClick={() => setSettings({ imageProvider: 'none' })} className="rounded-lg bg-gray-100 px-3 py-2 text-xs text-gray-600">
+              <button type="button" onClick={() => setSettings({ imageProvider: 'none', enabledModules: enabledModules.filter((id) => id !== 'conversationIllustration') })} className="rounded-lg bg-gray-100 px-3 py-2 text-xs text-gray-600">
                 关闭
               </button>
             )}

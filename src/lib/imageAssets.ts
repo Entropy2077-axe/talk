@@ -2,18 +2,20 @@ import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { useChatUiStore } from '../store/useChatUiStore'
-import type { AiImageKind, AppSettings, Contact, MediaAsset } from '../types'
+import type { AiImageAspectRatio, AiImageKind, AppSettings, Contact, MediaAsset, Message } from '../types'
 import { chatCompletionText } from './deepseek'
 import { traceTurnEvent } from './deepseek'
 import { appFetch } from './appFetch'
 import { generateRemoteImage } from './remoteMedia'
+import { parseJsonLoose } from './aiProtocol'
+import { atlasImageModelPreset } from './mediaProviders'
 
 const active = new Set<string>()
 const identityWork = new Map<string, Promise<string>>()
 
 const STYLE_PROMPTS = {
-  'asian-realistic': 'authentic contemporary Asian people, realistic casual smartphone photography, natural skin texture, ordinary natural lighting, candid social-media composition',
-  'european-realistic': 'authentic contemporary European people, realistic casual smartphone photography, natural skin texture, ordinary natural lighting, candid social-media composition',
+  'asian-realistic': 'authentic contemporary Asian people, realistic casual personal photography, natural skin texture, ordinary natural lighting, candid everyday composition',
+  'european-realistic': 'authentic contemporary European people, realistic casual personal photography, natural skin texture, ordinary natural lighting, candid everyday composition',
   anime: 'high-quality modern 2D anime illustration, clean expressive line art, soft cel shading, consistent character design',
 } as const
 
@@ -118,6 +120,7 @@ export function composeImagePrompt(input: {
   userIdentity?: string
   provider?: AppSettings['imageProvider']
   stylePrompt?: string
+  aspectRatio?: AiImageAspectRatio
 }): string {
   const { scene, kind, contacts, includeUser, settings } = input
   const style = (input.provider ?? settings.imageProvider) === 'atlas'
@@ -131,8 +134,9 @@ export function composeImagePrompt(input: {
   const countRule = people.length
     ? `Show exactly ${people.length} distinct ${people.length === 1 ? 'person' : 'people'}. Preserve each identity, do not blend faces, duplicate people, swap features, or add extra people.`
     : 'No people in the image unless an incidental distant figure is essential to the scene.'
-  const kindRule = kind === 'selfie' ? 'casual handheld selfie composition' : kind === 'portrait' ? 'natural portrait composition' : kind === 'group' ? 'balanced group photo composition with each person clearly distinguishable' : kind === 'object' ? 'object-focused composition' : 'environment-focused composition'
-  return [style, kindRule, `Image request from the JSON query (follow this request faithfully):\n${scene}`, labels, countRule, 'Choose scene-appropriate clothing and natural poses. Correct anatomy and hands. No watermark, captions, UI, or unrelated text.'].filter(Boolean).join('\n')
+  const kindRule = kind === 'selfie' ? 'natural selfie-style viewpoint with framing wide enough to preserve the requested pose, ongoing action, clothing, and surrounding environment; the photographing equipment stays outside the frame' : kind === 'portrait' ? 'person-centered environmental photograph with body language, ongoing action, and surrounding context clearly visible' : kind === 'group' ? 'balanced group photo composition with each person clearly distinguishable' : kind === 'object' ? 'object-focused composition' : 'environment-focused composition'
+  const ratioRule = input.aspectRatio ? `Compose specifically for a ${input.aspectRatio} aspect ratio; use the extra frame area for meaningful action and environment.` : ''
+  return [style, kindRule, ratioRule, `Visual scene to render faithfully:\n${scene}`, labels, countRule, 'Choose scene-appropriate clothing and natural poses. Correct anatomy and hands. The result is one uninterrupted real-world scene: no visible phones or screens, no chat elements, no interface, no panels, no collage, no symbols, no watermark, and no readable text of any kind.'].filter(Boolean).join('\n')
 }
 
 export interface CreateMediaAssetInput {
@@ -146,11 +150,196 @@ export interface CreateMediaAssetInput {
   kind?: AiImageKind
   settings: AppSettings
   size?: string
+  width?: number
+  height?: number
+  aspectRatio?: AiImageAspectRatio
+}
+
+export interface CreateConversationIllustrationInput {
+  conversationId: string
+  turnId: string
+  ownerContactIds: string[]
+  participantNames: string[]
+  latestUserText?: string
+  replyText: string
+  mood?: string
+  context?: string
+  settings: AppSettings
+  createdAt: number
+  presentation?: 'illustration' | 'sent'
+  requestedKind?: AiImageKind
+  speakerContactId?: string
+}
+
+interface ConversationImagePlan {
+  prompt: string
+  caption: string
+  kind: AiImageKind
+  includeUser: boolean
+  aspectRatio: AiImageAspectRatio
+}
+
+const IMAGE_KIND_VALUES: AiImageKind[] = ['selfie', 'portrait', 'group', 'scene', 'object']
+const IMAGE_ASPECT_RATIO_VALUES: AiImageAspectRatio[] = ['1:1', '4:3', '3:4', '16:9', '9:16']
+
+/** Recognises direct requests that must produce a real chat image event. */
+export function detectExplicitImageRequest(value: string): AiImageKind | null {
+  const text = value.trim()
+  if (!text) return null
+  if (/(?:拍|发|来|给|看|想看|看看).{0,10}(?:自拍|自拍照)|(?:自拍|自拍照).{0,10}(?:拍|发|来|给|看|看看)/.test(text)) return 'selfie'
+  if (/(?:拍|发|来|给我|让我看|看看).{0,10}(?:照片|相片|合照|近照|张照)|(?:照片|相片|合照|近照).{0,10}(?:拍|发|来|给我|看看)/.test(text)) return 'portrait'
+  return null
+}
+
+export function buildConversationIllustrationDirectorPrompt(input: Pick<CreateConversationIllustrationInput, 'participantNames' | 'latestUserText' | 'replyText' | 'mood' | 'context' | 'presentation' | 'requestedKind'>): string {
+  const names = input.participantNames.filter(Boolean).join(', ') || 'the conversation participants'
+  const requested = input.presentation === 'sent'
+  return [
+    '你是影视分镜师。根据下方素材规划一张真实世界中的独立画面，而不是把素材本身画进图片。只输出 JSON：{"prompt":"...","caption":"...","kind":"selfie|portrait|group|scene|object","includeUser":false,"aspectRatio":"1:1|4:3|3:4|16:9|9:16"}。',
+    'prompt 必须是 60-180 个英文单词的纯视觉场景描述，只写镜头实际看得到的人物、环境、动作、构图、光线与情绪。严禁出现或提及聊天、消息、对白、手机屏幕、聊天框、UI、文字、字幕、标牌、拼贴、分屏、信息图；严禁复制素材里的任何句子或词语。将交流的含义转译成一个自然瞬间。',
+    '用户指定的动作、姿势、地点、服装、道具和镜头范围具有最高视觉优先级，必须逐项写入 prompt。不得把有动作或环境的要求简化成正对镜头的头像、证件照、棚拍半身像或空背景肖像；人物身份描述只用于保持长相，不能取代事件内容。',
+    'caption 必须是 15-50 个汉字的自然中文，说明这张图表现了什么和它对应的情绪，不要使用“模型、提示词、本轮配图”等系统术语。',
+    '只有素材明确说明人物处于同一地点时，才可让远程人物与用户同框；否则 includeUser=false。',
+    'aspectRatio 必须按内容选择：动作明显、全身或日常自拍优先 3:4；需要大量纵向环境时选 9:16；多人或横向环境优先 4:3 或 16:9。只有中心对称、物品特写等确实适合方图的内容才选 1:1，普通自拍禁止默认选 1:1。',
+    requested
+      ? `这是用户明确索要的真实照片。必须准确落实用户想看的内容；kind=${input.requestedKind ?? 'portrait'}。若为自拍，只采用自拍视角，不强制人物正面站定或占满画面；动作和背景必须保留，拍摄设备不可见，画面中不得出现任何屏幕。`
+      : '这是氛围配图：选取交流背后最有画面感的现实瞬间，不要表现人物正在聊天或查看消息。',
+    `可用角色：${names}`,
+    input.context?.trim() ? `情境素材：${input.context.trim().slice(0, 1_200)}` : '',
+    input.latestUserText?.trim() ? `用户原话（只理解含义，不得复制进英文画面）：${input.latestUserText.trim().slice(0, 700)}` : '',
+    input.replyText.trim() ? `角色回应（只理解含义，不得复制进英文画面）：${input.replyText.trim().slice(0, 1_400)}` : '',
+    input.mood?.trim() ? `情绪：${input.mood.trim().slice(0, 80)}` : '',
+  ].filter(Boolean).join('\n\n')
+}
+
+function fallbackConversationImagePlan(input: CreateConversationIllustrationInput): ConversationImagePlan {
+  const requested = input.presentation === 'sent'
+  const kind = input.requestedKind ?? (input.ownerContactIds.length > 1 ? 'group' : requested ? 'selfie' : 'portrait')
+  return {
+    prompt: requested
+      ? 'A spontaneous vertical everyday photo of the established character naturally engaged in an ongoing activity, expressive body language, clothing and hands clearly visible, with meaningful room around the subject showing a lived-in environment, realistic ambient light, off-center candid framing, coherent anatomy and a believable sense of place.'
+      : 'A natural environmental photograph of the established character engaged in an ordinary ongoing activity, expressive body language and hands clearly visible, with the surrounding location carrying the emotional atmosphere of the moment, realistic ambient light, layered depth, off-center cinematic framing and coherent anatomy.',
+    caption: requested ? '这是对方按你的要求拍下的此刻模样。' : '画面记录了角色此刻的状态，也承接了刚才交流的情绪。',
+    kind,
+    includeUser: false,
+    aspectRatio: kind === 'selfie' || kind === 'portrait' ? '3:4' : kind === 'group' || kind === 'scene' ? '4:3' : '1:1',
+  }
+}
+
+async function planConversationImage(input: CreateConversationIllustrationInput): Promise<ConversationImagePlan> {
+  const fallback = fallbackConversationImagePlan(input)
+  if (!input.settings.apiKey.trim()) return fallback
+  try {
+    const raw = await chatCompletionText({
+      apiKey: input.settings.apiKey,
+      baseUrl: input.settings.baseUrl,
+      model: input.settings.utilityModel || input.settings.model,
+      provider: input.settings.aiProvider,
+      purpose: 'other',
+      automatic: true,
+      thinking: 'disabled',
+      temperature: 0.25,
+      maxTokens: 700,
+      jsonMode: true,
+      trace: { turnId: input.turnId, conversationId: input.conversationId, stage: 'image_generation' },
+      messages: [{ role: 'system', content: buildConversationIllustrationDirectorPrompt(input) }],
+    })
+    const parsed = parseJsonLoose<Partial<ConversationImagePlan>>(raw)
+    const prompt = typeof parsed?.prompt === 'string' ? parsed.prompt.trim().slice(0, 1_800) : ''
+    const caption = typeof parsed?.caption === 'string' ? parsed.caption.trim().slice(0, 120) : ''
+    const kind = IMAGE_KIND_VALUES.includes(parsed?.kind as AiImageKind) ? parsed!.kind as AiImageKind : fallback.kind
+    const aspectRatio = IMAGE_ASPECT_RATIO_VALUES.includes(parsed?.aspectRatio as AiImageAspectRatio) ? parsed!.aspectRatio as AiImageAspectRatio : fallback.aspectRatio
+    if (!prompt || !caption) return fallback
+    const finalKind = input.requestedKind ?? kind
+    const finalAspectRatio = finalKind === 'selfie' && aspectRatio === '1:1' ? '3:4' : aspectRatio
+    const faithfulPrompt = input.requestedKind === 'selfie'
+      ? `Selfie-style first-person camera viewpoint. Preserve the requested action, pose, clothing, and environmental background instead of converting the scene into a centered headshot; all photographing equipment remains outside the frame. ${prompt}`
+      : prompt
+    return { prompt: faithfulPrompt, caption, kind: finalKind, includeUser: parsed?.includeUser === true, aspectRatio: finalAspectRatio }
+  } catch {
+    return fallback
+  }
+}
+
+/**
+ * Create the durable, system-presented illustration for one completed chat
+ * turn. A utility model first translates the dialogue into a visual-only
+ * scene; composeImagePrompt() then adds stable faces and provider styling.
+ */
+export async function createConversationIllustration(input: CreateConversationIllustrationInput): Promise<Message | undefined> {
+  if (input.settings.imageProvider === 'none') return undefined
+  const presentation = input.presentation ?? 'illustration'
+  const existing = await db.messages.where('conversationId').equals(input.conversationId)
+    .filter((message) => message.debugAiTurnId === input.turnId && message.image?.presentation === presentation)
+    .first()
+  if (existing) return existing
+
+  const plan = await planConversationImage(input)
+  const messageId = uuid()
+  const asset = await createMediaAsset({
+    origin: presentation === 'illustration' ? 'chat-illustration' : 'chat',
+    originId: messageId,
+    conversationId: input.conversationId,
+    turnId: input.turnId,
+    ownerContactIds: input.ownerContactIds,
+    includeUser: plan.includeUser,
+    scene: plan.prompt,
+    kind: plan.kind,
+    aspectRatio: plan.aspectRatio,
+    settings: input.settings,
+  })
+  const message: Message = {
+    id: messageId,
+    conversationId: input.conversationId,
+    role: 'assistant',
+    type: 'image',
+    content: presentation === 'illustration' ? '[本轮配图]' : '[图片]',
+    image: { assetId: asset.id, query: plan.prompt, caption: plan.caption, provider: asset.provider, presentation },
+    speakerContactId: input.speakerContactId,
+    debugAiTurnId: input.turnId,
+    createdAt: input.createdAt,
+  }
+  try {
+    await db.messages.add(message)
+  } catch (error) {
+    await db.mediaAssets.delete(asset.id)
+    throw error
+  }
+  startMediaAsset(asset.id)
+  return message
+}
+
+function dimensionsForAspectRatio(settings: AppSettings, aspectRatio: AiImageAspectRatio): { size?: string; width?: number; height?: number } {
+  const [ratioWidth, ratioHeight] = aspectRatio.split(':').map(Number)
+  const target = ratioWidth / ratioHeight
+  if (settings.imageProvider === 'atlas') {
+    const preset = atlasImageModelPreset(settings.imageProviders.atlas.model)
+    if (preset?.includeSize === false) return {}
+    const sizes = preset?.sizes.length ? preset.sizes : ['1024*1024', '1536*1024', '1024*1536']
+    const selected = sizes
+      .map((size) => {
+        const [width, height] = size.split('*').map(Number)
+        return { size, distance: Math.abs(Math.log((width / height) / target)) }
+      })
+      .filter((candidate) => Number.isFinite(candidate.distance))
+      .sort((a, b) => a.distance - b.distance)[0]
+    return selected ? { size: selected.size } : {}
+  }
+  if (settings.imageProvider === 'novelai') {
+    if (aspectRatio === '1:1') return { width: 1024, height: 1024 }
+    return target > 1 ? { width: 1216, height: 832 } : { width: 832, height: 1216 }
+  }
+  if (settings.imageProvider === 'comfyui' || settings.imageProvider === 'stable-diffusion') {
+    if (aspectRatio === '1:1') return { width: 768, height: 768 }
+    return target > 1 ? { width: 1024, height: 768 } : { width: 768, height: 1024 }
+  }
+  return {}
 }
 
 export async function createMediaAsset(input: CreateMediaAssetInput): Promise<MediaAsset> {
   if (input.settings.imageProvider === 'none') throw new Error('未启用生图服务')
   const now = Date.now()
+  const dimensions = input.aspectRatio ? dimensionsForAspectRatio(input.settings, input.aspectRatio) : undefined
   const asset: MediaAsset = {
     id: uuid(), origin: input.origin, originId: input.originId, conversationId: input.conversationId, turnId: input.turnId,
     ownerContactIds: input.ownerContactIds.slice(0, 4), includeUser: input.includeUser,
@@ -159,7 +348,10 @@ export async function createMediaAsset(input: CreateMediaAssetInput): Promise<Me
     stylePrompt: input.settings.imageProvider === 'atlas' ? atlasStylePrompt(input.settings) : undefined,
     providerPromptPrefix: input.settings.imageProvider === 'atlas' ? input.settings.imageProviders.atlas.promptPrefix : undefined,
     modelId: input.settings.imageProvider === 'atlas' ? input.settings.imageProviders.atlas.model : undefined,
-    size: input.size || (input.settings.imageProvider === 'atlas' ? input.settings.imageProviders.atlas.size : undefined),
+    size: input.size || dimensions?.size || (input.settings.imageProvider === 'atlas' && !input.aspectRatio ? input.settings.imageProviders.atlas.size : undefined),
+    width: input.width || dimensions?.width,
+    height: input.height || dimensions?.height,
+    aspectRatio: input.aspectRatio,
     attempt: 0, createdAt: now, updatedAt: now,
   }
   await db.mediaAssets.add(asset)
@@ -215,7 +407,7 @@ async function runAsset(assetId: string): Promise<void> {
     const contacts = (await Promise.all(asset.ownerContactIds.map((id) => db.contacts.get(id)))).filter((value): value is Contact => !!value)
     const stableContacts = await Promise.all(contacts.map((contact) => ensureContactVisualIdentity(contact, settings)))
     const user = asset.includeUser ? await ensureUserVisualIdentity(settings) : undefined
-    prompt = composeImagePrompt({ scene: asset.scene, kind: asset.kind, contacts: stableContacts, includeUser: !!asset.includeUser, settings, userIdentity: user?.visualIdentity, provider: asset.provider, stylePrompt: asset.stylePrompt })
+    prompt = composeImagePrompt({ scene: asset.scene, kind: asset.kind, contacts: stableContacts, includeUser: !!asset.includeUser, settings, userIdentity: user?.visualIdentity, provider: asset.provider, stylePrompt: asset.stylePrompt, aspectRatio: asset.aspectRatio })
     if (asset.provider === 'atlas' && asset.providerPromptPrefix?.trim()) prompt = `${asset.providerPromptPrefix.trim()}\n${prompt}`
     const identitySeeds = [...stableContacts.map((contact) => contact.visualSeed!), ...(user ? [user.visualSeed] : [])]
     seed = identitySeeds.length ? combinedSeed(identitySeeds) : Math.floor(Math.random() * 2_147_483_647)
@@ -226,6 +418,18 @@ async function runAsset(assetId: string): Promise<void> {
     if (asset.modelId) imageProviders.atlas.model = asset.modelId
     if (asset.size) imageProviders.atlas.size = asset.size
     imageProviders.atlas.promptPrefix = ''
+  }
+  if (asset.provider === 'novelai' && asset.width && asset.height) {
+    imageProviders.novelai.width = asset.width
+    imageProviders.novelai.height = asset.height
+  }
+  if (asset.provider === 'comfyui' && asset.width && asset.height) {
+    imageProviders.comfyui.width = asset.width
+    imageProviders.comfyui.height = asset.height
+  }
+  if (asset.provider === 'stable-diffusion' && asset.width && asset.height) {
+    imageProviders.stableDiffusion.width = asset.width
+    imageProviders.stableDiffusion.height = asset.height
   }
   const result = await generateRemoteImage({ imageProvider: asset.provider, imageProviders }, prompt, {
     predictionId: asset.predictionId,

@@ -80,6 +80,25 @@ export function parseNuwaStructuredResult(raw: string): NuwaStructuredResult | n
   }
 }
 
+/**
+ * Validate the part of an AI completion that the UI actually needs.
+ *
+ * Providers do not all honour JSON mode and tool schemas in exactly the same
+ * way, so harmless differences such as a fenced object, Chinese field aliases,
+ * arrays for hobbies, or extra explanatory keys must not make character
+ * creation fail.  Parsing normalizes those variants into our canonical form;
+ * only an unreadable response or genuinely empty required values need a retry.
+ */
+export function validateNuwaCompletion(raw: string): { result: NuwaStructuredResult | null; issues: string[] } {
+  const result = parseNuwaStructuredResult(raw)
+  if (!result) return { result: null, issues: ['输出中没有可读取的角色表单'] }
+  const empty = NUWA_FORM_KEYS.filter((key) => !result[key].trim())
+  return {
+    result,
+    issues: empty.length ? [`以下内容仍未补全：${empty.map((key) => NUWA_FIELD_LABELS[key]).join('、')}`] : [],
+  }
+}
+
 /** The model may paraphrase a field despite the instruction not to.  The UI
  * owns user-entered values, so restore them before review or application;
  * completion is allowed to contribute only to genuinely empty fields. */

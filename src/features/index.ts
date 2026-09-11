@@ -12,6 +12,7 @@ import { saveLoadModule } from './saveLoad'
 import { realisticRepliesModule } from './realisticReplies'
 import { locationModule } from './location'
 import { directOutputModule } from './directOutput'
+import { conversationIllustrationModule } from './conversationIllustration'
 import type { FeatureModule, ParentModule } from './types'
 
 // ---- parent modules (accordion groups in the UI) ----
@@ -57,6 +58,7 @@ export const ALL_MODULES: FeatureModule[] = [
   realisticRepliesModule,
   locationModule,
   directOutputModule,
+  conversationIllustrationModule,
 ]
 
 /** Every registered module, including foundations that have no switch. */
@@ -150,5 +152,5 @@ export function getEnabledDiscoverEntries(state: ModuleState = useSettingsStore.
 
 /** Every module is on by default except opt-in background/debug modules. */
 export const DEFAULT_ENABLED_MODULES: string[] = ALL_MODULES
-  .filter((m) => m.id !== 'proactiveChat' && m.id !== 'mindReading' && m.id !== 'realisticReplies' && m.id !== 'directOutput')
+  .filter((m) => m.id !== 'proactiveChat' && m.id !== 'mindReading' && m.id !== 'realisticReplies' && m.id !== 'directOutput' && m.id !== 'conversationIllustration')
   .map((m) => m.id)

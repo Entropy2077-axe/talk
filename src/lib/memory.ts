@@ -426,7 +426,8 @@ export async function maybeUpdateMemory(
     const contact = await db.contacts.get(contactId)
     if (!contact) return null
 
-    const allMessages = await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt')
+    const allMessages = (await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt'))
+      .filter((message) => message.image?.presentation !== 'illustration')
     const cursor = contact.memoryMessageCursor ?? 0
     const newMessages = allMessages.slice(cursor)
     if (newMessages.length < MEMORY_UPDATE_INTERVAL) return null
@@ -826,7 +827,8 @@ export async function maybeUpdateGroupMemory(
     const group = await db.groups.get(groupId)
     if (!group) return
 
-    const allMessages = await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt')
+    const allMessages = (await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt'))
+      .filter((message) => message.image?.presentation !== 'illustration')
     const cursor = group.memoryMessageCursor ?? 0
     const newMessages = allMessages.slice(cursor)
     if (newMessages.length < MEMORY_UPDATE_INTERVAL) return

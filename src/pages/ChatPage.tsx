@@ -342,7 +342,7 @@ export function ChatPage() {
   }
 
   function feedbackContactFor(message: Message): Contact | undefined {
-    if (message.role !== 'assistant') return undefined
+    if (message.role !== 'assistant' || message.image?.presentation === 'illustration') return undefined
     if (isGroupConv) return message.speakerContactId ? memberById.get(message.speakerContactId) : undefined
     return contact ?? undefined
   }
@@ -1027,7 +1027,7 @@ export function ChatPage() {
                   { label: '以后别这样说', onSelect: () => void sendFeedback(menuMessage, 'avoid') },
                 ]
               : []),
-            ...(isGroupConv ? [{ label: '回复', onSelect: () => setReplyToId(menuMessage.id) }] : []),
+            ...(isGroupConv && menuMessage.image?.presentation !== 'illustration' ? [{ label: '回复', onSelect: () => setReplyToId(menuMessage.id) }] : []),
             { label: '删除这条消息', onSelect: () => void deleteMessage(menuMessage), danger: true },
           ]}
         />
