@@ -163,7 +163,7 @@ test('settings page exports a complete Talk backup json', async ({ page }) => {
   )
 })
 
-test('desktop settings sidebar exposes the experience mode switch', async ({ page }) => {
+test('desktop settings sidebar exposes top-level tools and the experience mode switch', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(window, 'talkDesktop', {
       configurable: true,
@@ -178,6 +178,9 @@ test('desktop settings sidebar exposes the experience mode switch', async ({ pag
   })
   await page.setViewportSize({ width: 1280, height: 800 })
   await page.goto('/#/settings')
+
+  await expect(page.locator('.desktop-sidebar').getByRole('button', { name: /LLM 设置/ })).toBeVisible()
+  await expect(page.locator('.desktop-sidebar').getByRole('button', { name: /绘图工具/ })).toBeVisible()
 
   const entry = page.locator('.desktop-sidebar').getByRole('button', { name: /体验模式/ })
   await expect(entry).toBeVisible()

@@ -57,7 +57,7 @@ async function generatePlanAftermath(plan: GroupPlan, group: Group, settings: Ap
     }) ?? ''
     const raw = await chatCompletion({
       apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.utilityModel, jsonMode: true, maxTokens: 600, purpose: 'moments',
-      messages: [{ role: 'system', content: `${editable}\n\n固定输出协议：只输出JSON {"groupMessage":"...","moments":[{"contactId":"participant id","content":"public moment"}]}` }, { role: 'user', content: 'Generate aftermath.' }],
+      messages: [{ role: 'system', content: `${editable}\n\n【硬约束】计划已经完成，只能描述计划资料中确实存在的活动和参与者。朋友圈是面向不特定好友的公开自述，不能写成对用户、主人或某位参与者的私聊，不能要求特定对象回复。\n固定输出协议：只输出JSON {"groupMessage":"...","moments":[{"contactId":"participant id","content":"public moment"}]}` }, { role: 'user', content: 'Generate aftermath.' }],
     })
     const parsed = JSON.parse(raw) as { groupMessage?: unknown; moments?: Array<{ contactId?: unknown; content?: unknown }> }
     if (typeof parsed.groupMessage === 'string' && parsed.groupMessage.trim()) {
@@ -67,9 +67,10 @@ async function generatePlanAftermath(plan: GroupPlan, group: Group, settings: Ap
       const contactId = typeof moment.contactId === 'string' ? moment.contactId : ''
       const content = typeof moment.content === 'string' ? moment.content.trim().slice(0, 220) : ''
       if (!plan.participantContactIds.includes(contactId) || !content) continue
-      if (!await canPublishNovelMoment(contactId, content)) continue
+      const topicKey = `共同计划-${plan.title}`
+      if (!await canPublishNovelMoment(contactId, content, Date.now(), topicKey)) continue
       const momentId = uuid()
-      await db.moments.add({ id: momentId, contactId, content, createdAt: Date.now() })
+      await db.moments.add({ id: momentId, contactId, content, createdAt: Date.now(), topicKey, timeFrame: 'past', factBasis: `已完成群计划：${plan.title}；${plan.summary}`.slice(0, 160) })
       await recordSocialEvent({ type: 'moment_posted', actorId: contactId, relatedContactIds: plan.participantContactIds, groupId: group.id, conversationId: plan.sourceConversationId, momentId, summary: `${contacts.find((contact) => contact.id === contactId)?.name || '成员'}分享了“${plan.title}”后的动态`, importance: 2 })
     }
   } catch {

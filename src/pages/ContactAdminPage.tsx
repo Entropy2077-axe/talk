@@ -3,6 +3,16 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { useParams } from "react-router-dom";
 import { TopBar } from "../components/TopBar";
 import { ToggleSwitch } from "../components/ToggleSwitch";
+import {
+  MemoryEditor,
+  MoodEditor,
+  RelationEditor,
+  ScheduleEditors,
+  SocialEventEditor,
+  TransactionEditor,
+  WalletEditor,
+  WorldbookBindingEditor,
+} from "../components/ContactAdminStructuredEditors";
 import { db } from "../db/db";
 import {
   PROMPT_MODULE_DEFINITIONS,
@@ -22,11 +32,15 @@ import type {
   Contact,
   ContactMemory,
   ContactRelationLink,
+  LocationNode,
   PromptModuleId,
   PromptModuleSettings,
+  ScheduleBlock,
+  ScheduleOverride,
   SocialEvent,
   WalletAccount,
   WalletTransaction,
+  WorldbookEntry,
 } from "../types";
 import { regenerateContactVisualIdentity } from "../lib/imageAssets";
 
@@ -40,21 +54,9 @@ const EMPTY_MEMORIES: ContactMemory[] = [];
 const EMPTY_RELATIONS: ContactRelationLink[] = [];
 const EMPTY_SOCIAL_EVENTS: SocialEvent[] = [];
 const EMPTY_TRANSACTIONS: WalletTransaction[] = [];
-const pretty = (value: unknown) => JSON.stringify(value ?? null, null, 2);
-
-function parseArray<T>(label: string, text: string): T[] {
-  const parsed: unknown = JSON.parse(text);
-  if (!Array.isArray(parsed)) throw new Error(`${label}必须是 JSON 数组`);
-  return parsed as T[];
-}
-
-function parseObject<T>(label: string, text: string): T | null {
-  const parsed: unknown = JSON.parse(text);
-  if (parsed === null) return null;
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-    throw new Error(`${label}必须是 JSON 对象或 null`);
-  return parsed as T;
-}
+const EMPTY_CONTACTS: Contact[] = [];
+const EMPTY_LOCATIONS: LocationNode[] = [];
+const EMPTY_WORLD_ENTRIES: WorldbookEntry[] = [];
 
 function Field({
   label,
@@ -187,21 +189,25 @@ export function ContactAdminPage() {
           : EMPTY_TRANSACTIONS,
       [contactId],
     ) ?? EMPTY_TRANSACTIONS;
+  const allContacts = useLiveQuery(() => db.contacts.toArray(), []) ?? EMPTY_CONTACTS;
+  const locations = useLiveQuery(() => db.locations.toArray(), []) ?? EMPTY_LOCATIONS;
+  const worldbookEntries = useLiveQuery(() => db.worldbookEntries.toArray(), []) ?? EMPTY_WORLD_ENTRIES;
 
   const [draft, setDraft] = useState<Contact | null>(null);
   const [promptDraft, setPromptDraft] = useState<PromptModuleSettings | null>(
     null,
   );
-  const [moodJson, setMoodJson] = useState("null");
-  const [scheduleJson, setScheduleJson] = useState("[]");
-  const [scheduleOverrideJson, setScheduleOverrideJson] = useState("[]");
-  const [memoryJson, setMemoryJson] = useState("[]");
-  const [relationJson, setRelationJson] = useState("[]");
-  const [socialJson, setSocialJson] = useState("[]");
-  const [walletJson, setWalletJson] = useState("null");
-  const [transactionJson, setTransactionJson] = useState("[]");
+  const [moodDraft, setMoodDraft] = useState<Contact["mood"]>();
+  const [scheduleDraft, setScheduleDraft] = useState<ScheduleBlock[]>([]);
+  const [scheduleOverrideDraft, setScheduleOverrideDraft] = useState<ScheduleOverride[]>([]);
+  const [memoryDraft, setMemoryDraft] = useState<ContactMemory[]>([]);
+  const [relationDraft, setRelationDraft] = useState<ContactRelationLink[]>([]);
+  const [socialDraft, setSocialDraft] = useState<SocialEvent[]>([]);
+  const [walletDraft, setWalletDraft] = useState<WalletAccount | null>(null);
+  const [transactionDraft, setTransactionDraft] = useState<WalletTransaction[]>([]);
   const [status, setStatus] = useState("");
   const [aiInstruction, setAiInstruction] = useState("");
+  const [visualInstruction, setVisualInstruction] = useState("");
   const [aiBusy, setAiBusy] = useState(false);
   const [suggestion, setSuggestion] = useState<ContactAdminSuggestion | null>(
     null,
@@ -214,29 +220,29 @@ export function ContactAdminPage() {
     setPromptDraft(
       clonePromptModules(promptModulesForContact(contact, settings)),
     );
-    setMoodJson(pretty(contact.mood));
-    setScheduleJson(pretty(contact.schedule ?? []));
-    setScheduleOverrideJson(pretty(contact.scheduleOverrides ?? []));
+    setMoodDraft(contact.mood ? structuredClone(contact.mood) : undefined);
+    setScheduleDraft(structuredClone(contact.schedule ?? []));
+    setScheduleOverrideDraft(structuredClone(contact.scheduleOverrides ?? []));
     setInitializedId(contact.id);
   }, [contact, initializedId, settings]);
   useEffect(() => {
     if (contact && initializedId === contact.id)
-      setMemoryJson(pretty(memories));
+      setMemoryDraft(structuredClone(memories));
   }, [contact, initializedId, memories]);
   useEffect(() => {
     if (contact && initializedId === contact.id)
-      setRelationJson(pretty(relations));
+      setRelationDraft(structuredClone(relations));
   }, [contact, initializedId, relations]);
   useEffect(() => {
     if (contact && initializedId === contact.id)
-      setSocialJson(pretty(socialEvents));
+      setSocialDraft(structuredClone(socialEvents));
   }, [contact, initializedId, socialEvents]);
   useEffect(() => {
-    if (contact && initializedId === contact.id) setWalletJson(pretty(wallet));
+    if (contact && initializedId === contact.id) setWalletDraft(wallet ? structuredClone(wallet) : null);
   }, [contact, initializedId, wallet]);
   useEffect(() => {
     if (contact && initializedId === contact.id)
-      setTransactionJson(pretty(transactions));
+      setTransactionDraft(structuredClone(transactions));
   }, [contact, initializedId, transactions]);
 
   const definitions = useMemo(
@@ -272,30 +278,19 @@ export function ContactAdminPage() {
       if (!nickname) throw new Error("网名不能为空");
       const normalizedPromptDraft = normalizePromptModules(promptDraft);
       validatePromptModules(normalizedPromptDraft);
-      const nextMemories = parseArray<ContactMemory>("AI记忆", memoryJson).map(
-        (row) => ({ ...row, contactId }),
-      );
-      const mood = parseObject<NonNullable<Contact["mood"]>>(
-        "当前心情",
-        moodJson,
-      );
-      const schedule = parseArray<NonNullable<Contact["schedule"]>[number]>(
-        "固定日程",
-        scheduleJson,
-      );
-      const scheduleOverrides = parseArray<
-        NonNullable<Contact["scheduleOverrides"]>[number]
-      >("特殊日程", scheduleOverrideJson);
-      const nextRelations = parseArray<ContactRelationLink>(
-        "AI关系",
-        relationJson,
-      );
-      const nextSocial = parseArray<SocialEvent>("社交动态", socialJson);
-      const nextWallet = parseObject<WalletAccount>("钱包", walletJson);
-      const nextTransactions = parseArray<WalletTransaction>(
-        "交易记录",
-        transactionJson,
-      );
+      const nextMemories = memoryDraft.map((row) => ({ ...row, contactId }));
+      const nextRelations = relationDraft;
+      const nextSocial = socialDraft;
+      const nextWallet = walletDraft;
+      const nextTransactions = transactionDraft;
+      if (moodDraft && (!moodDraft.text.trim() || !Number.isFinite(moodDraft.expiresAt))) throw new Error("请完整填写当前心情");
+      if (scheduleDraft.some((item) => !item.activity.trim() || !Number.isInteger(item.startHour) || !Number.isInteger(item.endHour) || item.startHour === item.endHour)) throw new Error("请检查固定日程的活动和时间");
+      if (scheduleOverrideDraft.some((item) => !item.date || !item.activity.trim() || !item.summary.trim() || item.startHour === item.endHour)) throw new Error("请检查特殊日程的日期、内容和时间");
+      if (nextMemories.some((item) => !item.content.trim())) throw new Error("记忆内容不能为空");
+      if (nextRelations.some((item) => !item.fromContactId || !item.toContactId || !item.label.trim())) throw new Error("请完整填写 AI 关系");
+      if (nextSocial.some((item) => !item.summary.trim() || !Number.isFinite(item.createdAt))) throw new Error("请完整填写社交动态");
+      if (nextWallet && !Number.isFinite(nextWallet.balance)) throw new Error("钱包余额必须是有效数字");
+      if (nextTransactions.some((item) => !Number.isFinite(item.amount) || item.amount < 0 || !Number.isFinite(item.createdAt))) throw new Error("请检查交易金额和时间");
 
       await db.transaction(
         "rw",
@@ -316,9 +311,9 @@ export function ContactAdminPage() {
             nickname,
             id: contact.id,
             createdAt: contact.createdAt,
-            mood: mood ?? undefined,
-            schedule,
-            scheduleOverrides,
+            mood: moodDraft,
+            schedule: scheduleDraft,
+            scheduleOverrides: scheduleOverrideDraft,
             promptModulesSnapshot: clonePromptModules(normalizedPromptDraft),
             promptPresetSourceName: "联系人单独修改",
             promptSnapshotUpdatedAt: Date.now(),
@@ -429,11 +424,11 @@ export function ContactAdminPage() {
       id: draft.id,
       createdAt: draft.createdAt,
     });
-    if ("mood" in safePatch) setMoodJson(pretty(safePatch.mood));
+    if ("mood" in safePatch) setMoodDraft(safePatch.mood ? structuredClone(safePatch.mood) : undefined);
     if ("schedule" in safePatch)
-      setScheduleJson(pretty(safePatch.schedule ?? []));
+      setScheduleDraft(structuredClone(safePatch.schedule ?? []));
     if ("scheduleOverrides" in safePatch)
-      setScheduleOverrideJson(pretty(safePatch.scheduleOverrides ?? []));
+      setScheduleOverrideDraft(structuredClone(safePatch.scheduleOverrides ?? []));
     if (suggestion.promptModulePatches) {
       const next = clonePromptModules(promptDraft);
       for (const [moduleId, patch] of Object.entries(
@@ -516,9 +511,15 @@ export function ContactAdminPage() {
               <p className="text-sm font-medium text-[var(--ui-special-ink)]">
                 {suggestion.summary}
               </p>
-              <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-[10px] text-gray-600">
-                {pretty(suggestion)}
-              </pre>
+              <p className="mt-2 text-[11px] leading-5 text-gray-600">
+                {Object.keys(suggestion.contactPatch ?? {}).length > 0
+                  ? `人物资料：${Object.keys(suggestion.contactPatch ?? {}).join("、")}`
+                  : "人物资料：无修改"}
+                <br />
+                {Object.keys(suggestion.promptModulePatches ?? {}).length > 0
+                  ? `提示词模块：${Object.keys(suggestion.promptModulePatches ?? {}).join("、")}`
+                  : "提示词模块：无修改"}
+              </p>
               <div className="mt-2 flex gap-2">
                 <button
                   onClick={() => setSuggestion(null)}
@@ -607,9 +608,16 @@ export function ContactAdminPage() {
             rows={4}
             note="稳定外貌描述；不要包含临时服装、动作、背景或画风。"
           />
+          <Area
+            label="这次希望 AI 怎么修改外貌"
+            value={visualInstruction}
+            onChange={setVisualInstruction}
+            rows={3}
+            note="例如：改成齐肩黑发、灰蓝色眼睛，保留原来的脸型和身材。每次生成都以这里的要求为准。"
+          />
           <button
             type="button"
-            disabled={aiBusy || !settings.apiKey}
+            disabled={aiBusy || !settings.apiKey || !visualInstruction.trim()}
             onClick={async () => {
               if (
                 draft.visualIdentity &&
@@ -621,8 +629,10 @@ export function ContactAdminPage() {
                 const value = await regenerateContactVisualIdentity(
                   draft,
                   settings,
+                  visualInstruction,
                 );
                 patchDraft({ visualIdentity: value });
+                setVisualInstruction("");
                 setStatus("已生成新的标准长相，请保存全部修改。");
               } catch (error) {
                 setStatus(
@@ -634,7 +644,7 @@ export function ContactAdminPage() {
             }}
             className="w-full rounded-lg bg-gray-100 py-2 text-xs text-gray-600 disabled:opacity-40"
           >
-            AI重新生成外貌描述
+            {aiBusy ? "正在生成外貌描述…" : "按要求重新生成外貌描述"}
           </button>
         </section>
 
@@ -643,11 +653,13 @@ export function ContactAdminPage() {
             关系、状态与生活
           </h2>
           <div className="grid grid-cols-2 gap-3">
-            <Field
-              label="当前位置ID"
-              value={draft.currentLocationId ?? ""}
-              onChange={(value) => patchDraft({ currentLocationId: value })}
-            />
+            <label className="block">
+              <span className="mb-1 block text-xs text-gray-500">当前位置</span>
+              <select value={draft.currentLocationId ?? ""} onChange={(event) => patchDraft({ currentLocationId: event.target.value || undefined, locationSource: 'manual', locationUpdatedAt: Date.now() })} className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm">
+                <option value="">未指定</option>
+                {locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
+              </select>
+            </label>
             <Field
               label="当前活动"
               value={draft.currentActivity ?? ""}
@@ -659,39 +671,9 @@ export function ContactAdminPage() {
             value={draft.relationshipDynamic}
             onChange={(value) => patchDraft({ relationshipDynamic: value })}
           />
-          <Area
-            label="当前心情 JSON"
-            value={moodJson}
-            onChange={setMoodJson}
-            rows={4}
-            mono
-          />
-          <Area
-            label="固定日程 JSON"
-            value={scheduleJson}
-            onChange={setScheduleJson}
-            rows={10}
-            mono
-          />
-          <Area
-            label="特殊日程 JSON"
-            value={scheduleOverrideJson}
-            onChange={setScheduleOverrideJson}
-            rows={8}
-            mono
-          />
-          <Area
-            label="世界书条目ID（每行一个）"
-            value={(draft.worldbookEntryIds ?? []).join("\n")}
-            onChange={(value) =>
-              patchDraft({
-                worldbookEntryIds: value
-                  .split("\n")
-                  .map((line) => line.trim())
-                  .filter(Boolean),
-              })
-            }
-          />
+          <div><h3 className="mb-2 text-xs font-medium text-gray-700">当前心情</h3><MoodEditor value={moodDraft} onChange={setMoodDraft} /></div>
+          <ScheduleEditors schedule={scheduleDraft} onScheduleChange={setScheduleDraft} overrides={scheduleOverrideDraft} onOverridesChange={setScheduleOverrideDraft} locations={locations} />
+          <div><h3 className="mb-2 text-xs font-medium text-gray-700">绑定世界书条目</h3><WorldbookBindingEditor entries={worldbookEntries} selectedIds={draft.worldbookEntryIds ?? []} onChange={(worldbookEntryIds) => patchDraft({ worldbookEntryIds })} /></div>
         </section>
 
         <section className="mt-3 bg-white px-4 py-4">
@@ -771,45 +753,19 @@ export function ContactAdminPage() {
         </section>
 
         <section className="mt-3 space-y-4 bg-white px-4 py-4">
-          <h2 className="text-sm font-medium text-gray-900">真实后台数据</h2>
+          <h2 className="text-sm font-medium text-gray-900">记忆与社交数据</h2>
           <p className="text-[11px] leading-relaxed text-amber-600">
-            人物过去、离线生活、关系事件和未完结话题现在统一保存在记忆中。
+            这些内容会影响 AI 对过去、关系和近期事件的判断。每项均可展开编辑，不需要接触 JSON。
           </p>
-          <Area
-            label="AI 结构化记忆"
-            value={memoryJson}
-            onChange={setMemoryJson}
-            rows={16}
-            mono
-          />
-          <Area
-            label="AI 之间的关系"
-            value={relationJson}
-            onChange={setRelationJson}
-            rows={12}
-            mono
-          />
-          <Area
-            label="最近社交动态"
-            value={socialJson}
-            onChange={setSocialJson}
-            rows={12}
-            mono
-          />
-          <Area
-            label="联系人钱包"
-            value={walletJson}
-            onChange={setWalletJson}
-            rows={6}
-            mono
-          />
-          <Area
-            label="联系人相关交易"
-            value={transactionJson}
-            onChange={setTransactionJson}
-            rows={12}
-            mono
-          />
+          <MemoryEditor value={memoryDraft} onChange={setMemoryDraft} contactId={contact.id} contacts={allContacts} />
+          <RelationEditor value={relationDraft} onChange={setRelationDraft} contactId={contact.id} contacts={allContacts} />
+          <SocialEventEditor value={socialDraft} onChange={setSocialDraft} contactId={contact.id} contacts={allContacts} />
+        </section>
+
+        <section className="mt-3 space-y-4 bg-white px-4 py-4">
+          <h2 className="text-sm font-medium text-gray-900">钱包与交易</h2>
+          <WalletEditor value={walletDraft} onChange={setWalletDraft} contactId={contact.id} />
+          <TransactionEditor value={transactionDraft} onChange={setTransactionDraft} contactId={contact.id} contacts={allContacts} />
         </section>
       </div>
       <div className="absolute inset-x-0 bottom-0 border-t border-[var(--ui-border)] bg-[var(--ui-surface)] px-4 py-3 pb-[calc(.75rem+env(safe-area-inset-bottom))]">

@@ -6,7 +6,9 @@ import { TopBar } from '../components/TopBar'
 import { Avatar } from '../components/Avatar'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { formatCurrency } from '../lib/wallet'
-import { checkForUpdate } from '../lib/updateCheck'
+import { checkForUpdate, type UpdateCheckResult } from '../lib/updateCheck'
+import { InAppUpdate } from '../lib/inAppUpdate'
+import { imageProviderName, isImageProviderReady } from '../lib/mediaProviders'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/db'
 import { claimDailySalaries, localDateKey, USER_WALLET_ID } from '../lib/finance'
@@ -34,7 +36,8 @@ export function MePage() {
   const wallet = useLiveQuery(() => db.walletAccounts.get(USER_WALLET_ID), [])
   const [checking, setChecking] = useState(false)
   const [updateMessage, setUpdateMessage] = useState('')
-  const [updateUrl, setUpdateUrl] = useState('')
+  const [availableUpdate, setAvailableUpdate] = useState<UpdateCheckResult | null>(null)
+  const [downloadId, setDownloadId] = useState<number | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(() =>
     Capacitor.getPlatform() === 'android' ? androidFullscreenActive : Boolean(document.fullscreenElement),
   )
@@ -93,17 +96,41 @@ export function MePage() {
   async function handleCheckUpdate() {
     setChecking(true)
     setUpdateMessage('')
-    setUpdateUrl('')
+    setAvailableUpdate(null)
+    setDownloadId(null)
     try {
       const result = await checkForUpdate()
       if (result.hasUpdate) {
-        setUpdateMessage(`发现新版本 ${result.latestVersion}，点击前往下载`)
-        setUpdateUrl(result.releaseUrl)
+        setUpdateMessage(`发现新版本 ${result.latestVersion}`)
+        setAvailableUpdate(result)
       } else {
         setUpdateMessage('已是最新版本')
       }
     } catch (err) {
       setUpdateMessage(err instanceof Error ? err.message : String(err))
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  async function handleInstallUpdate() {
+    if (!availableUpdate) return
+    if (Capacitor.getPlatform() !== 'android' || !availableUpdate.apkUrl) {
+      window.open(availableUpdate.releaseUrl, '_blank')
+      return
+    }
+    setChecking(true)
+    setUpdateMessage(downloadId === null ? '正在下载 APK…' : '正在打开安装程序…')
+    try {
+      const result = downloadId === null
+        ? await InAppUpdate.downloadAndInstall({ url: availableUpdate.apkUrl, title: `Talk ${availableUpdate.latestVersion}` })
+        : await InAppUpdate.installDownloaded({ downloadId })
+      setDownloadId(result.downloadId)
+      setUpdateMessage(result.status === 'permission-required'
+        ? '请允许安装未知应用，返回后再点一次继续安装'
+        : '安装程序已打开，请确认更新')
+    } catch (error) {
+      setUpdateMessage(error instanceof Error ? error.message : String(error))
     } finally {
       setChecking(false)
     }
@@ -187,6 +214,22 @@ export function MePage() {
       <section className="mx-4 overflow-hidden rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow)]">
         <button
           type="button"
+          onClick={() => navigate('/settings/api-configurations')}
+          className="flex w-full items-center justify-between border-b border-[var(--ui-border-soft)] px-4 py-3.5 text-left active:bg-gray-50"
+        >
+          <span className="text-[15px] text-gray-900">LLM 设置</span>
+          <span className="flex min-w-0 items-center gap-2 text-xs text-gray-400"><span className="max-w-40 truncate">{settings.model || '未选择模型'}</span><span>›</span></span>
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate('/drawing-tool')}
+          className="flex w-full items-center justify-between border-b border-[var(--ui-border-soft)] px-4 py-3.5 text-left active:bg-gray-50"
+        >
+          <span className="text-[15px] text-gray-900">绘图工具</span>
+          <span className="flex min-w-0 items-center gap-2 text-xs text-gray-400"><span className="max-w-40 truncate">{isImageProviderReady(settings) ? imageProviderName(settings.imageProvider) : '配置并测试'}</span><span>›</span></span>
+        </button>
+        <button
+          type="button"
           onClick={() => navigate('/presets')}
           className="flex w-full items-center justify-between border-b border-[var(--ui-border-soft)] px-4 py-3.5 text-left active:bg-gray-50"
         >
@@ -219,13 +262,13 @@ export function MePage() {
         <button onClick={() => navigate('/settings')} className="flex w-full items-center justify-between border-b border-[var(--ui-border-soft)] px-4 py-3.5 text-left active:bg-gray-50"><span className="text-[15px] text-[var(--ui-text)]">通用设置</span><span className="text-[var(--ui-text-3)]">›</span></button>
         <button onClick={() => navigate('/settings/other-interfaces')} className="flex w-full items-center justify-between border-b border-[var(--ui-border-soft)] px-4 py-3.5 text-left active:bg-gray-50"><span className="text-[15px] text-[var(--ui-text)]">其他接口</span><span className="text-[var(--ui-text-3)]">›</span></button>
         <button
-          onClick={updateUrl ? () => window.open(updateUrl, '_blank') : handleCheckUpdate}
+          onClick={availableUpdate ? () => void handleInstallUpdate() : () => void handleCheckUpdate()}
           disabled={checking}
           className="flex w-full items-center justify-between px-4 py-3.5 text-left active:bg-gray-50 disabled:opacity-50"
         >
           <span className="text-[15px] text-gray-900">检查更新</span>
           <span className="text-xs text-gray-400">
-            {checking ? '检查中…' : updateMessage || `当前 v${__APP_VERSION__}`}
+            {checking ? (availableUpdate ? '处理中…' : '检查中…') : updateMessage || `当前 v${__APP_VERSION__}`}
           </span>
         </button>
       </section>

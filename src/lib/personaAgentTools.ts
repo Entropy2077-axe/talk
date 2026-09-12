@@ -1,5 +1,5 @@
 import { db } from '../db/db'
-import type { AppSettings, Contact } from '../types'
+import { CLOTHING_CATEGORIES, type AppSettings, type Contact } from '../types'
 import { displayName } from './contact'
 import { chatCompletionProgress, type ChatMessage, type ChatToolCall, type ChatToolDefinition } from './deepseek'
 import { parseJsonLoose } from './aiProtocol'
@@ -70,6 +70,22 @@ function submitContactDraftTool(voiceContext?: VoiceContext): ChatToolDefinition
       items: { type: 'string', minLength: 4, maxLength: 160 },
     },
     visualIdentity: { type: 'string', description: 'English only. Stable physical identity without clothing, pose, scene or lighting.' },
+    wardrobe: {
+      type: 'array', minItems: 8, maxItems: 16,
+      description: '按角色人设、职业、经济状况和审美生成的初始衣橱。名称必须具体且互不重复。',
+      items: {
+        type: 'object', additionalProperties: false,
+        properties: {
+          name: { type: 'string' }, category: { type: 'string', enum: [...CLOTHING_CATEGORIES] },
+          color: { type: 'string' }, description: { type: 'string' },
+        },
+        required: ['name', 'category', 'color', 'description'],
+      },
+    },
+    currentOutfit: {
+      type: 'array', minItems: 1, maxItems: 12, items: { type: 'string' },
+      description: '角色创建此刻实际穿着的完整组合；每个值必须逐字复制 wardrobe 中某件衣物的 name。',
+    },
     initialMemories: {
       type: 'array', maxItems: 10,
       items: {
@@ -108,7 +124,7 @@ function submitContactDraftTool(voiceContext?: VoiceContext): ChatToolDefinition
   }
   return tool('submit_contact_draft', '提交完整的联系人初稿。只有资料已经相互一致、符合用户要求和正史时才能调用；这是最终提交动作。', properties, [
     'name', 'realName', 'nickname', 'birthday', 'gender', 'ageRange', 'relationship', 'occupation', 'persona', 'speechExamples',
-    'visualIdentity', 'initialMemories',
+    'visualIdentity', 'wardrobe', 'currentOutfit', 'initialMemories',
     'monthlySalary', 'avatarKeyword', 'schedule', ...(voiceContext ? ['speechVoiceId', 'speechStyleInstruction'] : []),
   ])
 }
@@ -245,7 +261,7 @@ export async function generatePersonaWithTools(opts: PersonaAgentOptions): Promi
     messages.push({ role: 'assistant', content: result.content, tool_calls: result.toolCalls })
     for (const call of result.toolCalls) {
       if (call.function.name === 'submit_contact_draft') {
-        messages.push({ role: 'tool', tool_call_id: call.id, content: '提交未通过结构校验。请补齐 name、persona 等必填内容并重新完整提交。' })
+        messages.push({ role: 'tool', tool_call_id: call.id, content: '提交未通过结构校验。请补齐 name、persona、10条 speechExamples、8到16件 wardrobe 和引用其名称的 currentOutfit 等必填内容，然后重新完整提交。' })
       } else {
         await opts.onProgress?.({ message: `已完成资料查询：${call.function.name}`, toolName: call.function.name })
         messages.push({ role: 'tool', tool_call_id: call.id, content: await executeQuery(call, opts) })

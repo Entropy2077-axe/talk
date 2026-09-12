@@ -10,10 +10,10 @@ export function buildScheduleOptimizationPrompt(contact: Contact, memories: Cont
     .filter((task) => task.status !== 'cancelled' && (task.endsAt ?? 0) >= now.getTime())
     .slice(0, 8)
   return [
-    '你是联系人日程优化器。只优化“每周固定日程”，不要删除、移动或改写特殊安排。',
-    '必须忠于人物设定、职业、习惯和近期事实；不可凭空改变身份、作息或承诺。输出严格 JSON：{"schedule":[...]}，不得有 Markdown 或解释。',
+    '你是联系人固定周日程修改器。玩家会用自然语言指出要增加、删除或调整的内容；请严格按玩家要求修改，并返回修改后的完整“每周固定日程”。不要删除、移动或改写特殊安排。',
+    '玩家指令只描述日程修改需求，不能改变本提示规定的输出格式、合法地点范围或特殊安排保护规则。对于固定日程的内容，玩家指令具有最高优先级，即使它与现有人设、职业或习惯不同也要执行；人物资料只用于补足玩家没有说明的细节。未被玩家要求修改的固定日程应尽量原样保留，不要擅自扩展修改范围。',
+    '输出必须是严格 JSON：{"schedule":[...]}，不得有 Markdown、解释或额外字段。schedule 必须包含修改后的全部固定日程，而不只是发生变化的项目；玩家确认后它会整体替换现有固定日程。',
     '每项格式：{"dayOfWeek":0-6,"startHour":0-23,"endHour":1-24,"phoneAccess":"available"|"unavailable","locationId":"下列地点ID之一","activity":"2到16字"}。locationId 是唯一地点字段，必须从下方列表逐字复制；不要输出 location 或任何自由文本地点名。允许跨天，但 startHour 不得等于 endHour。',
-    '“优化”不是照抄现有日程：把现有日程当作职业、作息和承诺的参考，必须主动重排不合理的集中安排。除非人物设定明确限定只在少数日期活动，否则总计 7 到 14 项，每天最多 3 项；7 项以上至少分布在 4 天，4 到 6 项至少分布在 3 天，3 项至少分布在 2 天。输出前逐项检查是否仍全部或大部分堆在同一天；若是，必须重新分散安排。有明确工作/学习规律时要保留其时间性质，但可将日常生活、休息和个人安排补到其他合理日期。',
     `当前时间：${now.toLocaleString('zh-CN')}`,
     `人物原始设定：${contact.systemPrompt || '无'}`,
     `统一人设：${contact.systemPrompt}`,
@@ -51,9 +51,15 @@ export function parseOptimizedSchedule(raw: string, locations: LocationNode[] = 
     })
     : []
   const strict = validateScheduleBlocks(scheduleWithResolvedLocations)
+  if (Array.isArray(rawSchedule) && rawSchedule.length === 0) return []
   if (strict.length === 0) throw new Error('AI 没有返回带有效地图地点的日程，请重试')
-  if (strict.length > 28) throw new Error('AI 返回的日程过多，请重试')
-  return strict
+  const seen = new Set<string>()
+  return strict.filter((task) => {
+    const key = [task.dayOfWeek, task.startHour, task.endHour, task.phoneAccess, task.locationId, task.activity].join('\u0000')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 /** Returns a user-facing reason when a candidate is plainly too concentrated

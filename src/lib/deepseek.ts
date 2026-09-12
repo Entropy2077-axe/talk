@@ -263,18 +263,84 @@ function rawShapeSummary(json: Record<string, any>): Record<string, unknown> {
   }
 }
 
+/**
+ * A few OpenAI-compatible relays return a requested function call as a JSON
+ * string in `message.content` instead of putting it in `message.tool_calls`.
+ * Accept that narrowly-defined compatibility shape only when the caller
+ * actually supplied tools, and only for functions from that allow-list.
+ */
+function serializedToolCalls(content: string, tools?: ChatToolDefinition[]): ChatToolCall[] {
+  if (!content.trim() || !tools?.length) return []
+  const allowedNames = new Set(tools.map((tool) => tool.function.name))
+  let payload: unknown
+  try {
+    const trimmed = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+    payload = JSON.parse(trimmed)
+  } catch {
+    return []
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return []
+  const candidates = (payload as Record<string, unknown>).tool_calls
+  if (!Array.isArray(candidates) || candidates.length === 0) return []
+  return candidates.flatMap((candidate, index): ChatToolCall[] => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return []
+    const record = candidate as Record<string, any>
+    const fn = record.function
+    if (!fn || typeof fn !== 'object' || typeof fn.name !== 'string' || !allowedNames.has(fn.name)) return []
+    const args = typeof fn.arguments === 'string' ? fn.arguments : JSON.stringify(fn.arguments)
+    if (typeof args !== 'string') return []
+    return [{
+      id: typeof record.id === 'string' && record.id ? record.id : `content-tool-${index}`,
+      type: 'function',
+      function: { name: fn.name, arguments: args },
+    }]
+  })
+}
+
+function normalizeToolCallCandidates(candidates: unknown, tools?: ChatToolDefinition[], idPrefix = 'tool'): ChatToolCall[] {
+  if (!Array.isArray(candidates)) return []
+  const allowedNames = tools?.length ? new Set(tools.map((tool) => tool.function.name)) : null
+  return candidates.flatMap((candidate, index): ChatToolCall[] => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return []
+    const record = candidate as Record<string, any>
+    const fn = record.function
+    if (!fn || typeof fn !== 'object' || typeof fn.name !== 'string' || !fn.name.trim()) return []
+    const name = fn.name.trim()
+    if (allowedNames && !allowedNames.has(name)) return []
+    let args: string
+    if (typeof fn.arguments === 'string') args = fn.arguments
+    else {
+      try { args = JSON.stringify(fn.arguments ?? {}) }
+      catch { return [] }
+    }
+    return [{
+      id: typeof record.id === 'string' && record.id ? record.id : `${idPrefix}-${index}`,
+      type: 'function',
+      function: { name, arguments: args },
+    }]
+  })
+}
+
+function normalizeSerializedToolResult(result: ChatCompletionResult, tools?: ChatToolDefinition[]): ChatCompletionResult {
+  const nativeCalls = normalizeToolCallCandidates(result.toolCalls, tools, 'native-tool')
+  if (nativeCalls.length) return { ...result, toolCalls: nativeCalls }
+  const toolCalls = serializedToolCalls(result.content, tools)
+  if (!toolCalls.length) return result.toolCalls?.length ? { ...result, toolCalls: [] } : result
+  return {
+    ...result,
+    content: '',
+    toolCalls,
+    rawShapeSummary: { ...result.rawShapeSummary, serializedToolCallsInContent: true },
+  }
+}
+
 function extractCompletion(json: Record<string, any>, provider: AiProviderId): ChatCompletionResult {
   const choice = Array.isArray(json.choices) ? json.choices[0] : undefined
   const message = choice?.message
-  const toolCalls: ChatToolCall[] = Array.isArray(message?.tool_calls)
-    ? message.tool_calls.flatMap((candidate: unknown) => {
-        if (!candidate || typeof candidate !== 'object') return []
-        const call = candidate as Record<string, any>
-        const fn = call.function
-        if (typeof call.id !== 'string' || !fn || typeof fn !== 'object' || typeof fn.name !== 'string' || typeof fn.arguments !== 'string') return []
-        return [{ id: call.id, type: 'function' as const, function: { name: fn.name, arguments: fn.arguments } }]
-      })
+  const legacyFunctionCall = message?.function_call && typeof message.function_call === 'object'
+    ? [{ type: 'function', function: message.function_call }]
     : []
+  const toolCalls = normalizeToolCallCandidates(Array.isArray(message?.tool_calls) ? message.tool_calls : legacyFunctionCall, undefined, 'response-tool')
   const rawContent = stringAt(message?.content) || stringAt(choice?.text) || stringAt(json.output_text)
   const separated = separateSupplierThinking(rawContent, provider)
   const adapter = AI_PROVIDERS[provider]
@@ -421,7 +487,7 @@ export async function chatCompletion(opts: ChatCompletionOptions): Promise<ChatC
       }
       throw new Error(httpFailureMessage('AI 接口', res.status, json))
     }
-    result = extractCompletion(json, provider)
+    result = normalizeSerializedToolResult(extractCompletion(json, provider), opts.tools)
     if (attempt < maxAttempts - 1 && result.status === 'empty') {
       retryMode = { ...retryMode, disableJson: opts.jsonMode || retryMode.disableJson, emptyRetry: true }
       continue
@@ -516,7 +582,7 @@ export async function chatCompletionProgress(
     // final snapshot so the generation page shows useful progress.
     if (res.ok && res.body) {
       const json = parseJsonText(await res.text(), 'AI 接口') as Record<string, any>
-      const result = extractCompletion(json, provider)
+      const result = normalizeSerializedToolResult(extractCompletion(json, provider), opts.tools)
       await onProgress({ content: result.content, toolCalls: result.toolCalls ?? [] })
       const outputTokens = result.usage?.completionTokens ?? estimateTokens(result.content)
       await recordAiUsage({ purpose, model: opts.model, automatic, success: result.status === 'ok', inputTokens: result.usage?.promptTokens ?? inputTokens, outputTokens, estimated: result.usage?.completionTokens === undefined })
@@ -531,6 +597,11 @@ export async function chatCompletionProgress(
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   const calls = new Map<number, ChatToolCall>()
+  const mergeStreamFragment = (current: string, incoming: string) => {
+    if (!incoming || current.endsWith(incoming)) return current
+    if (incoming.startsWith(current)) return incoming
+    return current + incoming
+  }
   let buffer = ''
   let content = ''
   let finishReason: string | undefined
@@ -555,8 +626,8 @@ export async function chatCompletionProgress(
           const index = Number.isInteger(part?.index) ? Number(part.index) : calls.size
           const current = calls.get(index) ?? { id: '', type: 'function' as const, function: { name: '', arguments: '' } }
           if (typeof part?.id === 'string' && part.id) current.id ||= part.id
-          if (typeof part?.function?.name === 'string') current.function.name += part.function.name
-          if (typeof part?.function?.arguments === 'string') current.function.arguments += part.function.arguments
+          if (typeof part?.function?.name === 'string') current.function.name = mergeStreamFragment(current.function.name, part.function.name)
+          if (typeof part?.function?.arguments === 'string') current.function.arguments = mergeStreamFragment(current.function.arguments, part.function.arguments)
           calls.set(index, current)
         }
         if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason
@@ -570,18 +641,26 @@ export async function chatCompletionProgress(
       } catch {}
     }
   }
-  const toolCalls = Array.from(calls.entries()).sort(([a], [b]) => a - b).map(([, call], index) => ({ ...call, id: call.id || `stream-tool-${index}` }))
+  const toolCalls = normalizeToolCallCandidates(
+    Array.from(calls.entries()).sort(([a], [b]) => a - b).map(([, call], index) => ({ ...call, id: call.id || `stream-tool-${index}` })),
+    opts.tools,
+    'stream-tool',
+  )
   const normalizedFinish = finishReason?.toLowerCase() ?? ''
   const status: ChatCompletionStatus = ['content_filter', 'safety', 'blocked'].includes(normalizedFinish)
     ? 'blocked'
     : ['length', 'max_tokens', 'max_completion_tokens'].includes(normalizedFinish)
       ? 'length'
       : content.trim() || toolCalls.length ? 'ok' : 'empty'
-  const result: ChatCompletionResult = { status, content: content.trim(), finishReason, usage, provider, rawShapeSummary: { streamed: true }, toolCalls }
+  const result = normalizeSerializedToolResult(
+    { status, content: content.trim(), finishReason, usage, provider, rawShapeSummary: { streamed: true }, toolCalls },
+    opts.tools,
+  )
+  if (result.toolCalls?.length && toolCalls.length === 0) await onProgress({ content: result.content, toolCalls: result.toolCalls })
   const recordedInput = usage?.promptTokens ?? inputTokens
   const recordedOutput = usage?.completionTokens ?? estimateTokens(content || toolCalls.map((call) => call.function.arguments).join(''))
   await recordAiUsage({ purpose, model: opts.model, automatic, success: status === 'ok', inputTokens: recordedInput, outputTokens: recordedOutput, estimated: usage?.completionTokens === undefined })
-  await traceAiCall({ purpose, model: opts.model, messages: opts.messages, output: traceableCompletionOutput(result.content, toolCalls), inputTokens: recordedInput, outputTokens: recordedOutput, durationMs: Date.now() - startedAt, diagnostics: { provider, configurationId: opts.configurationId, status, finishReason, streamed: true }, ...opts.trace })
+  await traceAiCall({ purpose, model: opts.model, messages: opts.messages, output: traceableCompletionOutput(result.content, result.toolCalls), inputTokens: recordedInput, outputTokens: recordedOutput, durationMs: Date.now() - startedAt, diagnostics: { provider, configurationId: opts.configurationId, status, finishReason, streamed: true }, ...opts.trace })
   return result
 }
 

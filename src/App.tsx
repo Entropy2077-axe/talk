@@ -54,6 +54,7 @@ const StickerProviderListPage = lazy(() => import('./pages/StickerProviderListPa
 const StickerProviderSettingsPage = lazy(() => import('./pages/StickerProviderSettingsPage').then((m) => ({ default: m.StickerProviderSettingsPage })))
 const ImageProviderListPage = lazy(() => loadImageProviderListPage().then((m) => ({ default: m.ImageProviderListPage })))
 const ImageProviderSettingsPage = lazy(() => loadImageProviderSettingsPage().then((m) => ({ default: m.ImageProviderSettingsPage })))
+const DrawingToolPage = lazy(() => import('./pages/DrawingToolPage').then((m) => ({ default: m.DrawingToolPage })))
 const OtherInterfacesPage = lazy(() => loadOtherInterfacesPage().then((m) => ({ default: m.OtherInterfacesPage })))
 const SpeechProviderListPage = lazy(() => import('./pages/SpeechProviderListPage').then((m) => ({ default: m.SpeechProviderListPage })))
 const SpeechProviderSettingsPage = lazy(() => import('./pages/SpeechProviderSettingsPage').then((m) => ({ default: m.SpeechProviderSettingsPage })))
@@ -265,6 +266,7 @@ function App() {
         <Route path="/experience-mode" element={<ExperienceModePage />} />
         <Route path="/settings/image-generation" element={<ImageProviderListPage />} />
         <Route path="/settings/image-generation/:providerId" element={<ImageProviderSettingsPage />} />
+        <Route path="/drawing-tool" element={<DrawingToolPage />} />
         {speechEnabled && <Route path="/settings/speech-generation" element={<SpeechProviderListPage />} />}
         {speechEnabled && <Route path="/settings/speech-generation/:providerId" element={<SpeechProviderSettingsPage />} />}
         <Route path="/stickers" element={<StickersPage />} />

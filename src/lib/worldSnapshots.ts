@@ -43,6 +43,7 @@ export const CONTACT_STORY_FIELDS = [
   'schedule', 'scheduleOverrides',
   'currentLocationId', 'locationUpdatedAt', 'locationSource',
   'currentTaskId', 'currentTaskKind', 'currentActivity', 'taskUpdatedAt',
+  'wardrobe', 'currentOutfit',
   'worldbookEntryIds', 'experienceCursorAt',
 ] as const satisfies readonly (keyof Contact)[]
 
@@ -91,12 +92,16 @@ export function applyContactStoryState(contact: Contact, state?: Partial<Contact
   const next = clone(contact) as Contact & Record<string, unknown>
   const initialRelationshipBase = contact.initialRelationshipBase || contact.creatorProfile?.relationship || contact.relationshipBase || '朋友'
   const initialSchedule = contact.initialSchedule ? clone(contact.initialSchedule) : contact.schedule ? clone(contact.schedule) : undefined
+  const initialWardrobe = contact.initialWardrobe ? clone(contact.initialWardrobe) : contact.wardrobe ? clone(contact.wardrobe) : undefined
+  const initialOutfit = contact.initialOutfit ? clone(contact.initialOutfit) : contact.currentOutfit ? clone(contact.currentOutfit) : undefined
   const fields: readonly (keyof Contact)[] = isolateEconomy ? [...CONTACT_STORY_FIELDS, ...CONTACT_ECONOMY_FIELDS] : CONTACT_STORY_FIELDS
   for (const key of fields) delete next[key]
   delete next.worldviewId
   const story = sanitizeContactStoryState(state, isolateEconomy)
   if (!story.relationshipBase) story.relationshipBase = initialRelationshipBase
   if (!story.schedule && initialSchedule) story.schedule = initialSchedule
+  if (!story.wardrobe && initialWardrobe) story.wardrobe = initialWardrobe
+  if (!story.currentOutfit && initialOutfit) story.currentOutfit = initialOutfit
   return Object.assign(next, story) as Contact
 }
 
@@ -106,6 +111,8 @@ function contactBase(contact: Contact): Contact {
     ...contact,
     initialRelationshipBase: contact.initialRelationshipBase || contact.creatorProfile?.relationship || contact.relationshipBase || '朋友',
     initialSchedule: contact.initialSchedule ?? (contact.schedule ? clone(contact.schedule) : undefined),
+    initialWardrobe: contact.initialWardrobe ?? (contact.wardrobe ? clone(contact.wardrobe) : undefined),
+    initialOutfit: contact.initialOutfit ?? (contact.currentOutfit ? clone(contact.currentOutfit) : undefined),
   })
 }
 

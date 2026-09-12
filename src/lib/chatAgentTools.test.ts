@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { generateGroupAgentTurn, generatePrivateAgentTurn, mergePrivateTurnActions, parseGroupToolCalls, parsePrivateToolCalls, privateChatTools } from './chatAgentTools'
+import { decidePrivateTurnActions, generateGroupAgentTurn, generatePrivateAgentTurn, groupChatTools, mergePrivateTurnActions, parseGroupToolCalls, parsePrivateToolCalls, privateChatTools } from './chatAgentTools'
 import type { ChatToolCall } from './deepseek'
 
 const call = (name: string, args: Record<string, unknown>, id = name): ChatToolCall => ({
@@ -93,14 +93,33 @@ describe('native chat agent tools', () => {
     expect(parsed.bubbles).toEqual([{ speakerIndex: 2, type: 'text', content: '我也去', thought: '不想错过', mood: '兴奋' }])
   })
 
+  it('exposes an explicit AI location-change tool in group chats', () => {
+    const base = privateChatTools({ stickerNames: [], stickerSearchEnabled: false, imageEnabled: false, knowledgeEnabled: false, scheduleEnabled: true, locationIds: ['cafe-1'] })
+    const tools = groupChatTools(['小林'], ['小林'], base)
+    const names = tools.map((tool) => tool.function.name)
+    expect(names).toContain('change_location')
+    expect(names).not.toContain('start_activity_now')
+  })
+
   it('keeps a group immediate activity with the actor identity', () => {
-    const parsed = parseGroupToolCalls([call('start_activity_now', {
+    const parsed = parseGroupToolCalls([call('change_location', {
       speakerIndex: 2, locationId: 'cafe-1', activity: '做饭', durationMinutes: 60,
       phoneAccess: 'available', thought: '现在就去准备', mood: '积极',
     })], 2)
     expect(parsed.immediateActivities).toEqual([{
       speakerIndex: 2, locationId: 'cafe-1', activity: '做饭', durationMinutes: 60, phoneAccess: 'available',
     }])
+  })
+
+  it('parses complete private and group outfit changes', () => {
+    const items = [
+      { name: '蓝色睡衣', category: '睡衣', color: '蓝色', description: '柔软棉质睡衣' },
+      { name: '白色拖鞋', category: '鞋履', color: '白色', description: '室内拖鞋' },
+    ]
+    expect(parsePrivateToolCalls([call('change_outfit', { items, summary: '换上蓝色睡衣和白色拖鞋', thought: '已经换好了', mood: '放松' })]).outfitChanges)
+      .toEqual([{ items, summary: '换上蓝色睡衣和白色拖鞋' }])
+    expect(parseGroupToolCalls([call('change_outfit', { speakerIndex: 2, items, summary: '换上睡衣', thought: '准备休息', mood: '放松' })], 2).outfitChanges)
+      .toEqual([{ speakerIndex: 2, items, summary: '换上睡衣' }])
   })
 
   it('submits text and a schedule through one forced native turn call', async () => {
@@ -121,6 +140,29 @@ describe('native chat agent tools', () => {
     expect(result.parsed.bubbles.map((bubble) => bubble.type)).toEqual(['text', 'scheduleChange'])
     expect(result.parsed.bubbles.filter((bubble) => bubble.type === 'scheduleChange')).toHaveLength(1)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('accepts a serialized action tool call and defaults omitted immediate phone access safely', async () => {
+    const serialized = {
+      tool_calls: [{
+        id: 'call-serialized', type: 'function', function: {
+          name: 'decide_turn_actions',
+          arguments: JSON.stringify({
+            decided: true, reason: '角色已经同意立即前往',
+            events: [{ type: 'activity_now', locationId: 'cafe-1', activity: '前往咖啡馆', durationMinutes: 60, delayMinutes: 0 }],
+            thought: '现在就出发', mood: '期待', knowledgeQueries: [],
+          }),
+        },
+      }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(serialized) } }],
+    }), { status: 200 })))
+    const result = await decidePrivateTurnActions(agentOptions)
+    expect(result.decided).toBe(true)
+    expect(result.parsed.immediateActivities).toEqual([{
+      locationId: 'cafe-1', activity: '前往咖啡馆', durationMinutes: 60, phoneAccess: 'available',
+    }])
   })
 
   it('keeps multiple natural text bubbles around an action in one request', async () => {
@@ -216,6 +258,17 @@ describe('native chat agent tools', () => {
     }])
   })
 
+  it('keeps a complete immediate location action when a relay omits phoneAccess', () => {
+    const parsed = parsePrivateToolCalls([call('start_activity_now', {
+      locationId: 'cafe-1', activity: '一起独处', durationMinutes: 60,
+      thought: '已经答应并准备过去', mood: '期待',
+    })])
+
+    expect(parsed.immediateActivities).toEqual([{
+      locationId: 'cafe-1', activity: '一起独处', durationMinutes: 60, phoneAccess: 'available',
+    }])
+  })
+
   it('adds group schedule text from the same speaker and creates one card', async () => {
     const schedule = call('create_schedule', { speakerIndex: 2, date: '2026-08-12', startHour: 14, endHour: 16, locationId: 'cafe-1', activity: '见面', phoneAccess: 'available', summary: '下午见面', thought: '愿意赴约', mood: '期待' }, 'group-schedule')
     const reply = call('send_text', { speakerIndex: 2, content: '我来定吧，下午两点见。', thought: '想把时间定下来', mood: '期待' }, 'group-text')
@@ -235,7 +288,7 @@ describe('native chat agent tools', () => {
   })
 
   it('adds group immediate-action text from the same speaker', async () => {
-    const action = call('start_activity_now', { speakerIndex: 2, locationId: 'cafe-1', activity: '做饭', durationMinutes: 60, phoneAccess: 'available', thought: '现在就开始', mood: '积极' }, 'group-activity')
+    const action = call('change_location', { speakerIndex: 2, locationId: 'cafe-1', activity: '做饭', durationMinutes: 60, phoneAccess: 'available', thought: '现在就开始', mood: '积极' }, 'group-activity')
     const reply = call('send_text', { speakerIndex: 2, content: '好，我现在去厨房做饭。', thought: '当下就动身', mood: '积极' }, 'group-activity-text')
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(completion([action]))

@@ -3,10 +3,11 @@ import { isModuleEnabled } from '../features'
 import { parseJsonLoose, parseKnowledgeQueriesField, parseScheduleMarker } from './aiProtocol'
 import { activeUpcomingPlansText } from './memory'
 import { describeCurrentSchedule } from './schedule'
-import type { Contact, GroupAiBubble, GroupAiResponse, GroupSpeakerLimit, PromptModuleSettings } from '../types'
+import type { Contact, GroupAiBubble, GroupAiResponse, GroupSpeakerLimit, OutfitChangeAction, PromptModuleSettings } from '../types'
 import { dynamicRelationScore } from './contactRelations'
 import { normalizeMood } from './mood'
 import { createDefaultPromptModules, featureActive, getPromptTemplate, promptModuleEnabled } from './promptModules'
+import { clothingContextText, parseClothingItems } from './clothing'
 
 /** Group chats can cap how many members answer per turn; see pickSpeakers. */
 const DEFAULT_GROUP_SPEAKER_LIMIT: GroupSpeakerLimit = 3
@@ -137,6 +138,7 @@ function buildGroupPrompt(opts: {
 ${relationshipPromptOn ? `- 你和用户的关系: ${base}${c.relationshipDynamic ? `（${c.relationshipDynamic}）` : ''}。\n` : ''}
 - 人设必须严格遵守: ${c.systemPrompt || '自由发挥成一个普通朋友'}。${featureActive(promptSettings, 'career') && c.occupation ? `职业：${c.occupation}，月薪${c.monthlySalary ?? 0}。` : ''}
 - 当前状态: ${scheduleText || '没有特别安排'}。
+- ${clothingContextText(c).replace(/\n/g, '\n- ')}
 ${memoryPromptOn ? `- 对用户的了解: ${c.memoryFacts || '暂无具体聊天记忆'}。\n- 相处习惯: ${c.memoryStyle || '暂无'}。\n${plansText ? `- 和用户的约定: ${plansText}。\n` : ''}${recentMemoText ? `- 最近记忆碎片:\n${recentMemoText}\n` : ''}` : ''}
 感觉:
 - 用人设中的专属表达方式自然说话；不要机械复读示例或口癖，也不要为了群聊顺滑变成统一口吻。`
@@ -302,6 +304,7 @@ export interface ParsedGroupTurn {
   knowledgeQueries: string[]
   turnSummary: string
   planCandidates: Array<{ title: string; summary: string; participantIndexes: number[]; location?: string }>
+  outfitChanges: Array<OutfitChangeAction & { speakerIndex: number }>
 }
 
 export interface ParsedGroupRawDraft extends ParsedGroupTurn {
@@ -329,6 +332,7 @@ export function parseGroupRawDraft(
     knowledgeQueries: [],
     turnSummary: '',
     planCandidates: [],
+    outfitChanges: [],
   }
   if (!raw.trim() || speakers.length === 0) return empty
 
@@ -409,6 +413,7 @@ export function parseGroupRawDraft(
     knowledgeQueries,
     turnSummary,
     planCandidates: [],
+    outfitChanges: [],
   }
 }
 
@@ -418,12 +423,13 @@ export function serializeGroupTurn(parsed: ParsedGroupTurn): string {
     turnSummary: parsed.turnSummary,
     knowledgeQueries: parsed.knowledgeQueries,
     planCandidates: parsed.planCandidates,
+    outfitChanges: parsed.outfitChanges,
   })
 }
 
 export function parseGroupAiResponse(raw: string, speakerCount: number): ParsedGroupTurn {
   const trimmed = raw.trim()
-  if (!trimmed) return { bubbles: [], knowledgeQueries: [], turnSummary: '', planCandidates: [] }
+  if (!trimmed) return { bubbles: [], knowledgeQueries: [], turnSummary: '', planCandidates: [], outfitChanges: [] }
 
   const jsonResult = tryParseGroupJson(trimmed, speakerCount)
   if (jsonResult && jsonResult.bubbles.length > 0) return jsonResult
@@ -433,7 +439,7 @@ export function parseGroupAiResponse(raw: string, speakerCount: number): ParsedG
     .map((line) => line.trim())
     .filter(Boolean)
     .map((content, i) => ({ speakerIndex: (i % speakerCount) + 1, type: 'text' as const, content }))
-  return { bubbles: fallbackBubbles, knowledgeQueries: [], turnSummary: fallbackBubbles.map((b) => b.content).join(' ').slice(0, 160), planCandidates: [] }
+  return { bubbles: fallbackBubbles, knowledgeQueries: [], turnSummary: fallbackBubbles.map((b) => b.content).join(' ').slice(0, 160), planCandidates: [], outfitChanges: [] }
 }
 
 /** Keeps model order, but when trimming a crowded photo always preserves its sender. */
@@ -485,6 +491,12 @@ function tryParseGroupJson(trimmedRaw: string, speakerCount: number): ParsedGrou
         ? [{ title: value.title.trim().slice(0, 80), summary: typeof value.summary === 'string' ? value.summary.trim().slice(0, 180) : value.title.trim(), participantIndexes: Array.from(new Set(participantIndexes)), location: typeof value.location === 'string' ? value.location.trim().slice(0, 80) : undefined }]
         : []
     }).slice(0, 1) : [],
+    outfitChanges: Array.isArray(parsed.outfitChanges) ? parsed.outfitChanges.flatMap((item) => {
+      const speakerIndex = parseSpeakerIndex(item?.speakerIndex)
+      const items = parseClothingItems(item?.items, 12)
+      const summary = typeof item?.summary === 'string' ? item.summary.trim().slice(0, 120) : ''
+      return speakerIndex && speakerIndex <= speakerCount && items.length && summary ? [{ speakerIndex, items, summary }] : []
+    }).slice(0, speakerCount) : [],
   }
 }
 

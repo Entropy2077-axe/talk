@@ -11,6 +11,13 @@ const answers: PersonaAnswers = {
   extra: '',
 }
 const speechExamples = Array.from({ length: 10 }, (_, index) => `[场景${index + 1}] 示例消息${index + 1}`)
+const wardrobe = [
+  { name: '白色T恤', category: '上装', color: '白色', description: '宽松棉质T恤' },
+  { name: '浅蓝牛仔裤', category: '下装', color: '浅蓝', description: '直筒牛仔裤' },
+  { name: '白色运动鞋', category: '鞋履', color: '白色', description: '日常运动鞋' },
+  { name: '灰色针织外套', category: '外套', color: '灰色', description: '轻薄针织外套' },
+]
+const clothing = { wardrobe, currentOutfit: ['白色T恤', '浅蓝牛仔裤', '白色运动鞋'] }
 
 describe('persona initial warmth', () => {
   it('asks the model to decide initial warmth only for Nuwa drafts', () => {
@@ -20,7 +27,7 @@ describe('persona initial warmth', () => {
 
   it('rounds and clamps the model-provided value', () => {
     const parsed = parsePersonaGeneration(JSON.stringify({
-      name: '阿澄', persona: '测试人设', speechExamples, schedule: [], initialWarmth: 128.7,
+      name: '阿澄', persona: '测试人设', speechExamples, schedule: [], ...clothing, initialWarmth: 128.7,
     }))
     expect(parsed?.initialWarmth).toBe(100)
   })
@@ -28,7 +35,7 @@ describe('persona initial warmth', () => {
   it('requires and parses initial memories', () => {
     expect(buildPersonaGenerationPrompt(answers, 'anime', undefined, '世界书中的旧事')).toContain('"initialMemories"')
     const parsed = parsePersonaGeneration(JSON.stringify({
-      name: '林夏', persona: '测试人设', speechExamples, schedule: [],
+      name: '林夏', persona: '测试人设', speechExamples, schedule: [], ...clothing,
       initialMemories: [{ title: '重逢', period: '去年', summary: '与旧友重新取得联系。', relatedContactNames: ['周晴'], importance: 88 }],
     }))
     expect(parsed?.initialMemories).toEqual([{ title: '重逢', period: '去年', summary: '与旧友重新取得联系。', relatedContactNames: ['周晴'], importance: 88 }])
@@ -42,7 +49,7 @@ describe('persona initial warmth', () => {
     expect(prompt).toContain('speechVoiceId')
     expect(prompt).toContain('冰糖｜冰糖 · 中文女声｜female｜zh')
     const parsed = parsePersonaGeneration(JSON.stringify({
-      name: '林夏', persona: '测试人设', speechExamples, schedule: [],
+      name: '林夏', persona: '测试人设', speechExamples, schedule: [], ...clothing,
       speechVoiceId: '冰糖', speechStyleInstruction: '清亮、自然、语速稍慢',
     }))
     expect(parsed?.speechVoiceId).toBe('冰糖')
@@ -55,8 +62,8 @@ describe('persona initial warmth', () => {
     expect(prompt).toContain('聊天感觉基线——低权重')
     expect(prompt).toContain('角色独有的句子节奏')
     expect(prompt).toContain('0到2个自然口癖')
-    expect(parsePersonaGeneration(JSON.stringify({ name: '林夏', persona: '测试人设', speechExamples, schedule: [] }))?.speechExamples).toHaveLength(10)
-    const invalid = diagnosePersonaGeneration(JSON.stringify({ name: '林夏', persona: '测试人设', speechExamples: speechExamples.slice(0, 9), schedule: [] }))
+    expect(parsePersonaGeneration(JSON.stringify({ name: '林夏', persona: '测试人设', speechExamples, schedule: [], ...clothing }))?.speechExamples).toHaveLength(10)
+    const invalid = diagnosePersonaGeneration(JSON.stringify({ name: '林夏', persona: '测试人设', speechExamples: speechExamples.slice(0, 9), schedule: [], ...clothing }))
     expect(invalid.diagnostics.issues).toEqual(expect.arrayContaining([expect.objectContaining({ field: 'speechExamples' })]))
   })
 })

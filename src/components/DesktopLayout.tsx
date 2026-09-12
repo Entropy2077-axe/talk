@@ -18,6 +18,7 @@ import { isAiTestId } from '../lib/aiTestIsolation'
 import { claimDailySalaries, localDateKey } from '../lib/finance'
 import { formatCurrency } from '../lib/wallet'
 import { checkForUpdate } from '../lib/updateCheck'
+import { imageProviderName, isImageProviderReady } from '../lib/mediaProviders'
 
 const EMPTY: never[] = []
 
@@ -27,7 +28,7 @@ function sectionForPath(path: string): DesktopSection {
   if (path === '/' || path.startsWith('/chat/')) return 'messages'
   if (path.startsWith('/contact') || path.startsWith('/group')) return 'contacts'
   if (path === '/sky-eye') return 'sky-eye'
-  if (path === '/me' || path === '/presets' || path === '/appearance' || path === '/experience-mode' || path.startsWith('/settings') || path.startsWith('/profile') || path.startsWith('/stickers') || path === '/modules' || path.startsWith('/save-load')) return 'settings'
+  if (path === '/me' || path === '/presets' || path === '/appearance' || path === '/experience-mode' || path === '/drawing-tool' || path.startsWith('/settings') || path.startsWith('/profile') || path.startsWith('/stickers') || path === '/modules' || path.startsWith('/save-load')) return 'settings'
   return 'discover'
 }
 
@@ -267,7 +268,9 @@ function SettingsList({ query }: { query: string }) {
   const entries = [
     { group: '体验', to: '/experience-mode', label: '体验模式', note: settings.experienceMode === 'immersive' ? '沉浸模式' : '自由模式', icon: '◈' },
     { group: '体验', to: '/appearance', label: '软件风格', note: `${uiThemeName(settings.uiTheme)} · ${settings.themeMode === 'dark' ? '深色' : '浅色'}`, icon: '◐' },
-    { group: 'AI 与服务', to: '/settings', label: '通用设置', note: '模型、生成与隐私', icon: '⚙' },
+    { group: 'AI 与服务', to: '/settings/api-configurations', label: 'LLM 设置', note: settings.model || '配置聊天与多功能模型', icon: 'AI' },
+    { group: 'AI 与服务', to: '/drawing-tool', label: '绘图工具', note: isImageProviderReady(settings) ? `${imageProviderName(settings.imageProvider)} · 自由提示词测试` : '配置并测试绘图模型', icon: '✎' },
+    { group: 'AI 与服务', to: '/settings', label: '通用设置', note: '聊天体验与本机数据', icon: '⚙' },
     { group: 'AI 与服务', to: '/presets', label: '提示词预设', note: '生成参数与全局提示词', icon: '◌' },
     { group: 'AI 与服务', to: '/settings/other-interfaces', label: '接口服务', note: '图像、语音与联网服务', icon: '◌' },
     { group: '内容与数据', to: '/modules', label: '功能模块', note: '启用或关闭扩展功能', icon: '▦' },

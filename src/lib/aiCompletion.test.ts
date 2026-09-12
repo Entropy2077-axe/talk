@@ -78,6 +78,53 @@ describe('structured chat completion result', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
+  it('normalizes compatible relays that serialize tool_calls into message content', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      choices: [{
+        finish_reason: 'stop',
+        message: { content: JSON.stringify({ tool_calls: [{ id: 'call-content', type: 'function', function: { name: 'send_text', arguments: '{"content":"你好"}' } }] }) },
+      }],
+    }), { status: 200 })))
+
+    const result = await chatCompletion({
+      ...base,
+      tools: [{ type: 'function', function: { name: 'send_text', description: 'send', parameters: { type: 'object' } } }],
+      toolChoice: 'required',
+    })
+
+    expect(result.status).toBe('ok')
+    expect(result.content).toBe('')
+    expect(result.toolCalls?.[0]).toMatchObject({ id: 'call-content', function: { name: 'send_text', arguments: '{"content":"你好"}' } })
+    expect(result.rawShapeSummary).toMatchObject({ serializedToolCallsInContent: true })
+  })
+
+  it('repairs native calls with missing ids and object arguments, while dropping unknown tools', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: [
+        { type: 'function', function: { name: 'send_text', arguments: { content: '你好' } } },
+        { type: 'function', function: { name: 'unknown_tool', arguments: {} } },
+      ] } }],
+    }), { status: 200 })))
+    const result = await chatCompletion({
+      ...base,
+      tools: [{ type: 'function', function: { name: 'send_text', description: 'send', parameters: { type: 'object' } } }],
+      toolChoice: 'required',
+    })
+    expect(result.toolCalls).toEqual([{ id: 'response-tool-0', type: 'function', function: { name: 'send_text', arguments: '{"content":"你好"}' } }])
+  })
+
+  it('accepts the legacy function_call response shape', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ finish_reason: 'function_call', message: { content: null, function_call: { name: 'send_text', arguments: '{"content":"你好"}' } } }],
+    }), { status: 200 })))
+    const result = await chatCompletion({
+      ...base,
+      tools: [{ type: 'function', function: { name: 'send_text', description: 'send', parameters: { type: 'object' } } }],
+      toolChoice: 'required',
+    })
+    expect(result.toolCalls?.[0]).toMatchObject({ function: { name: 'send_text', arguments: '{"content":"你好"}' } })
+  })
+
   it('streams incremental native tool arguments for live generation previews', async () => {
     const sse = [
       'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"submit_contact_draft","arguments":"{\\"name\\":\\"林"}}]}}]}',
@@ -97,6 +144,23 @@ describe('structured chat completion result', () => {
 
     expect(result.toolCalls?.[0].function.arguments).toBe('{"name":"林澄"}')
     expect(snapshots).toEqual(expect.arrayContaining(['{"name":"林', '{"name":"林澄"}']))
+  })
+
+  it('does not duplicate cumulative streaming tool fragments', async () => {
+    const sse = [
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"submit_contact_draft","arguments":"{\\"name\\":\\"林"}}]}}]}',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"submit_contact_draft","arguments":"{\\"name\\":\\"林澄\\"}"}}]},"finish_reason":"tool_calls"}]}',
+      'data: [DONE]',
+      '',
+    ].join('\n')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(sse, { status: 200, headers: { 'content-type': 'text/event-stream' } })))
+    const result = await chatCompletionProgress({
+      ...base,
+      tools: [{ type: 'function', function: { name: 'submit_contact_draft', description: 'submit', parameters: { type: 'object' } } }],
+      toolChoice: 'required', onProgress: () => undefined,
+    })
+    expect(result.toolCalls?.[0].function.name).toBe('submit_contact_draft')
+    expect(result.toolCalls?.[0].function.arguments).toBe('{"name":"林澄"}')
   })
 
   it('formats tool-only replies for the AI trace instead of treating them as empty output', () => {

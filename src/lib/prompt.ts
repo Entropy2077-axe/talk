@@ -1,8 +1,9 @@
 import { validateScheduleBlocks } from './schedule'
 import { extractJsonObject, parseJsonLoose } from './aiProtocol'
 import type { AvatarCategory } from './avatarCategory'
-import type { ContactGenerationValidationDiagnostics, ContactGenerationValidationIssue, PersonaProfile, PromptModuleSettings, ScheduleBlock } from '../types'
+import type { ClothingDraftItem, ContactGenerationValidationDiagnostics, ContactGenerationValidationIssue, PersonaProfile, PromptModuleSettings, ScheduleBlock } from '../types'
 import { createDefaultPromptModules, getPromptTemplate, normalizePromptModules, promptModuleEnabled } from './promptModules'
+import { parseClothingItems } from './clothing'
 
 const GENERATED_SCHEDULE_LOCATION_IDS = new Set([
   'home-living', 'home-kitchen', 'riverside-apartment-101', 'riverside-apartment-201', 'riverside-apartment-302', 'youth-apartment-101', 'youth-apartment-202', 'youth-apartment-301', 'student-dorm-101', 'student-dorm-201', 'student-dorm-302', 'old-residences-101', 'old-residences-202', 'old-residences-302', 'villa-district-101', 'villa-district-201', 'villa-district-302',
@@ -156,6 +157,9 @@ export interface PersonaGenerationResult {
   gender?: string
   ageRange?: string
   occupation?: string
+  wardrobe: ClothingDraftItem[]
+  /** Names copied exactly from wardrobe for the outfit worn at creation. */
+  currentOutfit: string[]
   /** Structured during generation, then merged into the sole persona text. */
   speechExamples?: string[]
   /** Chosen only from the voice candidates injected for this generation. */
@@ -247,6 +251,10 @@ ${speechVoiceContext.options.map((option) => `- ${option.id}｜${option.name}｜
   "persona": "唯一且完整的人设正文。第三人称自然写明身份背景、性格、边界、日常习惯、典型行为反应、说话特点、生活状态和与用户的关系细节。300到600字，要具体真实，不要写成产品说明书",
   "speechExamples": ["[日常闲聊] 实际消息1", "[关心对方] 实际消息2", "[开心分享] 实际消息3", "[生气不满] 实际消息4", "[被人夸奖] 实际消息5", "[发生争执] 实际消息6", "[亲密互动] 实际消息7", "[明确拒绝] 实际消息8", "[低落脆弱] 实际消息9", "[认真讨论] 实际消息10"],
   "visualIdentity": "English only. Stable physical identity: apparent age, face shape, facial features, skin tone, hairstyle, build and distinctive features. Never include clothing, pose, scene, lighting or art style.",
+  "wardrobe": [
+    { "name": "衣物的具体短名称", "category": "上装/下装/连体装/外套/鞋履/内搭/袜子/配饰/睡衣/其他", "color": "主要颜色", "description": "版型、材质和风格细节" }
+  ],
+  "currentOutfit": ["逐字复制 wardrobe 中当前穿着的衣物 name"],
   "initialMemories": [{"title":"记忆标题","period":"人生阶段或大致时间","summary":"已经发生、值得角色长期记住的具体事实","relatedContactNames":["只填写本次输入中明确存在的其他联系人姓名"],"relatedContactIds":[],"importance":85}],
   ${answers.draftMode ? '"initialWarmth": 35,' : ''}
   "monthlySalary": 8000,
@@ -254,7 +262,7 @@ ${speechVoiceContext.options.map((option) => `- ${option.id}｜${option.name}｜
     { "dayOfWeek": 1, "startHour": 9, "endHour": 18, "phoneAccess": "unavailable", "location": "公司", "locationId": "office-floor", "activity": "上班" },
     ${restScheduleExample}
   ]${avatarInstruction}
-	}\nschedule 中 locationId 为必填项，必须逐字填写下列已有具体地点 ID；location 只作为由 ID 派生的显示名，不能杜撰地点或只填“家里”等自由文本。${homeScheduleRule} 可用值：home-living、home-kitchen、riverside-apartment-101、riverside-apartment-201、riverside-apartment-302、youth-apartment-101、youth-apartment-202、youth-apartment-301、student-dorm-101、student-dorm-201、student-dorm-302、old-residences-101、old-residences-202、old-residences-302、villa-district-101、villa-district-201、villa-district-302、school-classroom、school-canteen、school-playground、office-floor、office-lobby、mall-atrium、mall-cafe、mall-shop、hospital-lobby、hospital-clinic、park-lawn、park-riverside、beach-boardwalk、mountain-lookout、farm-field。${answers.draftMode ? '\ninitialWarmth 必须是 -100 到 100 的整数。请根据角色对用户的关系、过去的经历、性格和边界决定创建时的好感度，陌生疏离可为负数，亲密关系应与设定相符。' : ''}`
+	}\nwardrobe 必须按角色人设、职业、年龄、经济状况、审美和生活习惯生成 8 到 16 件可长期使用的具体衣物，不能只写“日常服装”；currentOutfit 必须给出此刻实际穿着的完整组合，且每个名称都逐字存在于 wardrobe。visualIdentity 仍然禁止混入衣物。\nschedule 中 locationId 为必填项，必须逐字填写下列已有具体地点 ID；location 只作为由 ID 派生的显示名，不能杜撰地点或只填“家里”等自由文本。${homeScheduleRule} 可用值：home-living、home-kitchen、riverside-apartment-101、riverside-apartment-201、riverside-apartment-302、youth-apartment-101、youth-apartment-202、youth-apartment-301、student-dorm-101、student-dorm-201、student-dorm-302、old-residences-101、old-residences-202、old-residences-302、villa-district-101、villa-district-201、villa-district-302、school-classroom、school-canteen、school-playground、office-floor、office-lobby、mall-atrium、mall-cafe、mall-shop、hospital-lobby、hospital-clinic、park-lawn、park-riverside、beach-boardwalk、mountain-lookout、farm-field。${answers.draftMode ? '\ninitialWarmth 必须是 -100 到 100 的整数。请根据角色对用户的关系、过去的经历、性格和边界决定创建时的好感度，陌生疏离可为负数，亲密关系应与设定相符。' : ''}`
 }
 
 export function diagnosePersonaGeneration(raw: string): { result: PersonaGenerationResult | null; diagnostics: ContactGenerationValidationDiagnostics } {
@@ -274,6 +282,15 @@ export function diagnosePersonaGeneration(raw: string): { result: PersonaGenerat
         const examples = parsed.speechExamples.filter((item): item is string => typeof item === 'string' && !!item.trim())
         if (examples.length !== 10) issues.push({ code: 'required_field_invalid', field: 'speechExamples', message: `说话示例必须正好10条，实际为${examples.length}条` })
       }
+      const wardrobe = parseClothingItems(parsed.wardrobe, 16)
+      if (!Array.isArray(parsed.wardrobe)) issues.push({ code: 'required_field_missing', field: 'wardrobe', message: '缺少初始衣橱' })
+      else if (wardrobe.length < 4) issues.push({ code: 'required_field_invalid', field: 'wardrobe', message: `初始衣橱至少需要4件有效衣物，实际为${wardrobe.length}件` })
+      const currentOutfit = Array.isArray(parsed.currentOutfit)
+        ? parsed.currentOutfit.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean).slice(0, 12)
+        : []
+      const wardrobeNames = new Set(wardrobe.map((item) => item.name))
+      if (!Array.isArray(parsed.currentOutfit)) issues.push({ code: 'required_field_missing', field: 'currentOutfit', message: '缺少当前穿着' })
+      else if (!currentOutfit.length || currentOutfit.some((name) => !wardrobeNames.has(name))) issues.push({ code: 'required_field_invalid', field: 'currentOutfit', message: '当前穿着必须逐字引用初始衣橱中的名称' })
       if (issues.length) return { result: null, diagnostics: { outputChars: raw.length, jsonState: 'valid', issues } }
       const name = parsed.name as string
       const persona = parsed.persona as string
@@ -299,6 +316,8 @@ export function diagnosePersonaGeneration(raw: string): { result: PersonaGenerat
         ageRange: typeof parsed.ageRange === 'string' ? parsed.ageRange.trim().slice(0, 30) : undefined,
         relationship: typeof parsed.relationship === 'string' ? parsed.relationship.trim().slice(0, 40) : undefined,
         occupation: typeof parsed.occupation === 'string' ? parsed.occupation.trim().slice(0, 60) : undefined,
+        wardrobe,
+        currentOutfit,
         speechExamples: Array.isArray(parsed.speechExamples)
           ? parsed.speechExamples.filter((item): item is string => typeof item === 'string').map((item) => item.trim().slice(0, 160)).filter(Boolean).slice(0, 10)
           : undefined,

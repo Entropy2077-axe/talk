@@ -90,8 +90,13 @@ export async function ensureUserVisualIdentity(settings: AppSettings): Promise<{
   return { visualIdentity, visualSeed }
 }
 
-export async function regenerateContactVisualIdentity(contact: Contact, settings: AppSettings): Promise<string> {
-  return generateIdentity(`Character: ${contact.name}`, fallbackContactIdentity({ ...contact, visualIdentity: undefined }), settings)
+export async function regenerateContactVisualIdentity(contact: Contact, settings: AppSettings, instruction = ''): Promise<string> {
+  const request = instruction.trim()
+  const context = [
+    fallbackContactIdentity({ ...contact, visualIdentity: undefined }),
+    request ? `The user explicitly requests these appearance details or changes; follow them as the highest-priority visual requirements: ${request}` : '',
+  ].filter(Boolean).join('\n')
+  return generateIdentity(`Character: ${contact.name}`, context, settings)
 }
 
 export async function regenerateUserVisualIdentity(settings: AppSettings): Promise<string> {

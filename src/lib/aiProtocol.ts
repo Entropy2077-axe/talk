@@ -1,5 +1,6 @@
-import type { AiBubble, AiResponse } from '../types'
+import type { AiBubble, AiResponse, OutfitChangeAction } from '../types'
 import { normalizeMood } from './mood'
+import { parseClothingItems } from './clothing'
 
 export interface ParsedAiTurn {
   bubbles: AiBubble[]
@@ -7,6 +8,7 @@ export interface ParsedAiTurn {
   mood?: string
   thought?: string
   immediateActivities?: ImmediateActivityAction[]
+  outfitChanges?: OutfitChangeAction[]
 }
 
 export interface ImmediateActivityAction {
@@ -32,6 +34,8 @@ export function parseAiResponse(raw: string): ParsedAiTurn {
       knowledgeQueries: jsonResult.knowledgeQueries,
       mood: jsonResult.mood,
       thought: jsonResult.thought,
+      immediateActivities: jsonResult.immediateActivities,
+      outfitChanges: jsonResult.outfitChanges,
     }
   }
 
@@ -200,6 +204,7 @@ export function serializePrivateTurn(parsed: ParsedAiTurn): string {
     thought: parsed.thought,
     knowledgeQueries: parsed.knowledgeQueries,
     ...(parsed.immediateActivities?.length ? { immediateActivities: parsed.immediateActivities } : {}),
+    ...(parsed.outfitChanges?.length ? { outfitChanges: parsed.outfitChanges } : {}),
   })
 }
 
@@ -233,7 +238,20 @@ function tryParseJson(trimmedRaw: string): ParsedAiTurn | null {
   }
   const mood = typeof parsed.mood === 'string' && parsed.mood.trim() ? normalizeMood(parsed.mood) : undefined
   const thought = typeof parsed.thought === 'string' && parsed.thought.trim() ? parsed.thought.trim().slice(0, 100) : undefined
-  return { bubbles, knowledgeQueries: parseKnowledgeQueriesField(parsed.knowledgeQueries), mood, thought }
+  const outfitChanges = Array.isArray(parsed.outfitChanges) ? parsed.outfitChanges.flatMap((candidate): OutfitChangeAction[] => {
+    if (!candidate || typeof candidate !== 'object') return []
+    const item = candidate as unknown as Record<string, unknown>
+    const items = parseClothingItems(item.items, 12)
+    const summary = typeof item.summary === 'string' ? item.summary.trim().slice(0, 120) : ''
+    return items.length && summary ? [{ items, summary }] : []
+  }).slice(0, 1) : []
+  return {
+    bubbles,
+    knowledgeQueries: parseKnowledgeQueriesField(parsed.knowledgeQueries),
+    mood,
+    thought,
+    outfitChanges: outfitChanges.length ? outfitChanges : undefined,
+  }
 }
 
 function parseTextBubbleContent(m: Record<string, unknown>): string {

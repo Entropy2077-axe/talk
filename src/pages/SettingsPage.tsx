@@ -25,7 +25,6 @@ import { AI_PROVIDERS, AI_PROVIDER_OPTIONS, resolveChatCompletionsUrl, resolveMo
 import { cancelAllContactGenerationTasks, markPersistedContactGenerationTasksPaused } from '../lib/contactGenerationTasks'
 import { Capacitor } from '@capacitor/core'
 import { BackupDirectory } from '../lib/backupDirectory'
-import { legacyFieldsForApiConfig, orderedAiApiConfigs } from '../lib/aiApiConfigs'
 
 export function SettingsPage() {
   const navigate = useNavigate()
@@ -49,13 +48,10 @@ export function SettingsPage() {
     experienceMode,
     topInsetAdjustmentPx,
     automaticAiDailyCap,
-    aiApiConfigs,
-    aiApiFailoverOrder,
     worldEconomyIsolated,
     setSettings,
   } = useSettingsStore()
   const [confirmingWipe, setConfirmingWipe] = useState(false)
-  const [switchingApi, setSwitchingApi] = useState(false)
   const [backupStatus, setBackupStatus] = useState('')
   const [restoringBackup, setRestoringBackup] = useState(false)
   const [backgroundCropSrc, setBackgroundCropSrc] = useState('')
@@ -69,7 +65,6 @@ export function SettingsPage() {
   const [adminBalance, setAdminBalance] = useState('')
   const backupInputRef = useRef<HTMLInputElement | null>(null)
   const backgroundInputRef = useRef<HTMLInputElement | null>(null)
-  const providerLabel = AI_PROVIDERS[aiProvider].label
 
   async function handleWipeContacts() {
     await cancelAllContactGenerationTasks()
@@ -262,16 +257,7 @@ export function SettingsPage() {
 
       <section className="order-0 border-b border-[var(--ui-border-soft)] bg-[var(--ui-surface)] px-4 pb-4 pt-5">
         <p className="text-xs font-medium text-[var(--ui-text-3)]">通用设置</p>
-        <h1 className="mt-1 text-lg font-semibold text-[var(--ui-text)]">管理 AI、聊天体验与本机数据</h1>
-        <div className="mt-4 flex items-center justify-between gap-3 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface-2)] px-3 py-2.5">
-          <div className="min-w-0">
-            <p className="text-xs text-[var(--ui-text-2)]">当前 AI 服务</p>
-            <p className="mt-0.5 truncate text-sm font-medium text-[var(--ui-text)]">{providerLabel} · {model || '尚未选择模型'}</p>
-          </div>
-          <span className={`shrink-0 text-xs ${apiKey ? 'text-[var(--ui-success-ink)]' : 'text-[var(--ui-warning-ink)]'}`}>
-            {apiKey ? '已配置' : '待配置'}
-          </span>
-        </div>
+        <h1 className="mt-1 text-lg font-semibold text-[var(--ui-text)]">管理聊天体验与本机数据</h1>
       </section>
 
       <h2 className="order-5 px-4 pb-1 pt-5 text-xs font-medium text-[var(--ui-text-3)]">AI 与创作</h2>
@@ -433,15 +419,6 @@ export function SettingsPage() {
       </section>
 
       <section className="order-110 mt-3 bg-white px-4 py-3"><h2 className="mb-2 text-xs font-medium text-gray-400">AI 调用预算</h2><p className="mb-2 text-xs text-gray-500">后台自动任务达到上限后会跳过；手动聊天和手动生成不会受限。</p>{usage && <><div className="mb-2 grid grid-cols-2 gap-2 text-xs text-gray-600"><p>今日调用 <b>{usage.today.filter((r) => r.success).length}</b></p><p>近30天 <b>{usage.recent.filter((r) => r.success).length}</b></p><p>今日估算 tokens <b>{usage.today.reduce((n, r) => n + r.inputTokens + r.outputTokens, 0)}</b></p><p>自动调用 <b>{usage.today.filter((r) => r.automatic && r.success).length}</b></p></div><div className="mb-3 flex flex-wrap gap-1">{(['chat','proactive','memory','moments','worldbook','offlineState','persona','quality','other'] as const).map((purpose) => <span key={purpose} className="rounded bg-gray-100 px-1.5 py-1 text-[10px] text-gray-500">{purpose} {usage.today.filter((r) => r.purpose === purpose && r.success).length}</span>)}</div></>}<label className="mb-1 block text-xs text-gray-500">自动任务每日调用上限（0 为不限）</label><input type="number" min="0" value={automaticAiDailyCap} onChange={(e) => setSettings({ automaticAiDailyCap: Math.max(0, Math.floor(Number(e.target.value) || 0)) })} className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"/></section>
-
-      <section className="order-10 mt-3 bg-[var(--ui-surface)]">
-        <button type="button" onClick={() => navigate('/settings/api-configurations')} className="flex w-full items-center gap-3 px-4 py-4 text-left">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gray-100 text-[var(--ui-special-ink)]">AI</div>
-          <div className="min-w-0 flex-1"><p className="text-sm text-gray-900">API 配置</p><p className="mt-0.5 truncate text-xs text-gray-400">{providerLabel} · {model || '未选择模型'}；支持主 API 与备用 API</p></div>
-          <span className="text-lg text-gray-300">›</span>
-        </button>
-        <button type="button" onClick={() => setSwitchingApi(true)} className="mx-4 mb-4 w-[calc(100%-2rem)] rounded-lg bg-gray-100 py-2.5 text-sm text-gray-700">快速切换主 API</button>
-      </section>
 
       <section className="order-10 hidden mt-3 bg-[var(--ui-surface)] px-4 py-3" aria-hidden="true">
         <h2 className="mb-2 text-xs font-medium text-gray-400">AI 供应商与 API 配置</h2>
@@ -801,10 +778,6 @@ export function SettingsPage() {
           }}
         />
       )}
-      {switchingApi && <ActionSheet onClose={() => setSwitchingApi(false)} options={orderedAiApiConfigs({ aiApiConfigs, aiApiFailoverOrder, aiProvider, apiKey, baseUrl, model, utilityModel, promptPresets: [], activePromptPresetId: '' }).map((config) => ({ label: `${config.name} · ${config.model || '未选模型'}`, onSelect: () => {
-        const ordered = [config.id, ...orderedAiApiConfigs({ aiApiConfigs, aiApiFailoverOrder, aiProvider, apiKey, baseUrl, model, utilityModel, promptPresets: [], activePromptPresetId: '' }).filter((item) => item.id !== config.id).map((item) => item.id)]
-        setSettings({ aiApiFailoverOrder: ordered, ...legacyFieldsForApiConfig(config) })
-      } }))} />}
       {modelPicker && (
         <ModelPicker
           title={modelPicker === 'chat' ? '选择聊天模型' : '选择多功能模型'}

@@ -35,6 +35,7 @@ import { synthesizeSpeech } from '../lib/speechSynthesis'
 import { isImageProviderReady, isStickerProviderReady } from '../lib/mediaProviders'
 import { privateTurnToolDefinition } from '../lib/chatAgentTools'
 import { ArrowUpFromLine, ChevronLeft, ChevronRight, ClipboardList, Phone, PhoneOff } from 'lucide-react'
+import { currentOutfitItems } from '../lib/clothing'
 
 const CALENDAR_HOUR_HEIGHT = 22
 
@@ -351,6 +352,7 @@ export function ContactCardPage() {
   const contactNow = Date.now()
   const activePlans = activeUpcomingPlans(contact.upcomingPlans ?? [], new Date(contactNow))
   const hasMemory = contact.memoryFacts || contact.memoryStyle || activePlans.length > 0 || structuredMemories.length > 0 || relationLinks.length > 0
+  const wornItems = currentOutfitItems(contact)
 
   // Admin-mode-only: shows exactly what would be sent as the system prompt
   // right now, for debugging persona/relationship issues. Mirrors
@@ -425,6 +427,16 @@ export function ContactCardPage() {
         <div className="mb-2 flex items-center justify-between"><h3 className="text-xs font-medium text-[var(--ui-text-3)]">关系与资料</h3><button type="button" onClick={() => { setRemarkDraft(contact.remark ?? ''); setEditingRemark(true) }} className="text-xs text-[var(--ui-special-ink)]">修改备注</button></div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-2 border-b border-[var(--ui-border)] pb-3 text-xs text-[var(--ui-text-3)]"><p>性别：{contact.gender || contact.creatorProfile?.gender || '未填写'}</p><p>真名：{contact.realName || contact.name}</p><p>网名：{contact.nickname || contact.name}</p><p>生日：{contact.birthday || '未填写'}</p></div>
         <div className="mt-1"><button type="button" onClick={() => setPickingRelationshipType(true)} className="flex w-full items-center justify-between py-3 text-left active:opacity-70"><span className="text-[15px] text-[var(--ui-text)]">关系定位</span><span className="text-sm text-[var(--ui-text-3)]">{contact.relationshipBase || '未设置'}</span></button>{careerEnabled && <button type="button" onClick={immersiveMode ? undefined : assignCareer} disabled={assigningCareer} className="flex w-full items-center justify-between border-t border-[var(--ui-border)] py-3 text-left disabled:opacity-50"><span className="text-[15px] text-[var(--ui-text)]">职业</span><span className="text-sm text-[var(--ui-text-3)]">{immersiveMode ? contact.occupation || '暂时不了解' : assigningCareer ? '生成中…' : contact.occupation ? `${contact.occupation} · 月薪 ${formatCurrency(contact.monthlySalary ?? 0, settings)}` : '赋予职业'}</span></button>}{!immersiveMode && careerEnabled && <button type="button" onClick={adminEnabled ? async () => { const raw = prompt('设定该AI的钱包余额', String(contactWallet?.balance ?? 0)); if (raw !== null && Number.isFinite(Number(raw)) && Number(raw) >= 0) await setWalletBalance(contact.id, Number(raw)) } : undefined} className="flex w-full items-center justify-between border-t border-[var(--ui-border)] py-3 text-left"><span className="text-[15px] text-[var(--ui-text)]">钱包</span><span className="text-sm text-[var(--ui-text-3)]">{formatCurrency(contactWallet?.balance ?? 0, settings)}{adminEnabled ? ' · 点击设定' : ''}</span></button>}</div>
+      </section>
+
+      <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] px-4 py-4 shadow-[var(--ui-shadow)]">
+        <h3 className="text-xs font-medium text-[var(--ui-text-3)]">衣物</h3>
+        <p className="mt-2 text-sm leading-6 text-[var(--ui-text-2)]">
+          <span className="text-[var(--ui-text-3)]">当前穿着：</span>{contact.currentOutfit?.summary || wornItems.map((item) => item.name).join('、') || '暂未记录'}
+        </p>
+        {(contact.wardrobe?.length ?? 0) > 0 ? <div className="mt-3 flex flex-wrap gap-2">
+          {contact.wardrobe!.map((item) => <span key={item.id} className={`rounded-full px-2.5 py-1 text-xs ${wornItems.some((worn) => worn.id === item.id) ? 'bg-[var(--ui-accent-soft)] text-[var(--ui-action)]' : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-3)]'}`} title={`${item.color} · ${item.description}`}>{item.name}</span>)}
+        </div> : <p className="mt-2 text-xs text-[var(--ui-text-3)]">升级前创建的联系人会在聊天中首次换装时建立衣橱。</p>}
       </section>
 
       <SchedulePlanner contact={contact} settings={settings} memories={structuredMemories} />

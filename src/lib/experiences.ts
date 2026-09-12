@@ -74,13 +74,13 @@ function desiredCount(gap: number) {
   return '2到5段阶段摘要'
 }
 
-async function createMomentFromExperience(contact: Contact, memory: ContactMemory, occurredAt: number, content: string) {
+async function createMomentFromExperience(contact: Contact, memory: ContactMemory, occurredAt: number, content: string, topicKey: string) {
   const recent = await db.moments.where('contactId').equals(contact.id).reverse().sortBy('createdAt')
   if (recent[0] && occurredAt - recent[0].createdAt < 2 * HOUR) return
   const createdAt = occurredAt
-  if (!await canPublishNovelMoment(contact.id, content, createdAt)) return
+  if (!await canPublishNovelMoment(contact.id, content, createdAt, topicKey)) return
   const id = uuid()
-  await db.moments.add({ id, contactId: contact.id, content: content.trim().slice(0, 500), createdAt, sourceExperienceId: memory.id })
+  await db.moments.add({ id, contactId: contact.id, content: content.trim().slice(0, 500), createdAt, sourceExperienceId: memory.id, topicKey, timeFrame: 'past', factBasis: `离线经历：${memory.content.slice(0, 120)}` })
   await db.contacts.update(contact.id, { lastMomentAt: createdAt })
 }
 
@@ -133,7 +133,7 @@ ${worldbook ? `【所属世界正史与创建参考资料】\n${worldbook.slice(
 - 线下互动必须满足地点和日程；不同地点只可能远程联系，且双方手机可用。
 - 不得制造死亡、重伤、结婚、分手、辞职等会改写正史的重大事件。
 - importance为0到100。普通日常通常20到45；稳定改变未来、关系或目标的事件才可能70以上。
-- shareAsMoment只在角色确实愿意分享、内容不私密且距离上次发布合理时为true；大多数经历不发朋友圈。momentContent要符合人设。
+- shareAsMoment只在角色确实愿意分享、内容不私密且距离上次发布合理时为true；大多数经历不发朋友圈。momentContent必须是面向不特定好友的公开自述，不能呼叫用户、主人或其他特定对象，不能索要回复；只能描述本区间内已经发生且通过校验的经历，活动与参与者必须一致。
 - 不要把用户的离线本身写成角色人生事件。
 
 只输出JSON：{"experiences":[{"title":"","summary":"","details":"","offsetStartMinutes":0,"offsetEndMinutes":30,"location":"","activity":"","participantContactIds":[],"interactionMode":"none|remote|physical","importance":30,"visibility":"private|related|public","shareAsMoment":false,"momentContent":""}]}`
@@ -195,7 +195,7 @@ ${worldbook ? `【所属世界正史与创建参考资料】\n${worldbook.slice(
       await db.contactMemories.add(memory)
       for (const participantId of participantIds) await db.contactMemories.add({ ...memory, id: uuid(), contactId: participantId, relatedContactIds: [contact.id, ...participantIds.filter((id) => id !== participantId)] })
       generated.push(memory)
-      if (item.shareAsMoment && item.momentContent?.trim()) await createMomentFromExperience(contact, memory, endedAt, item.momentContent)
+      if (item.shareAsMoment && item.momentContent?.trim()) await createMomentFromExperience(contact, memory, endedAt, item.momentContent, `${String(item.activity || '生活片段').trim()}-${String(item.title || item.summary).trim().slice(0, 40)}`)
     }
   }
   await db.contacts.update(contact.id, { experienceCursorAt: to })

@@ -1,22 +1,13 @@
-/**
- * Checks GitHub Releases for a newer tagged version than what's currently
- * installed. Deliberately NOT a true in-place silent updater — that would
- * need REQUEST_INSTALL_PACKAGES + downloading/triggering the Android
- * installer intent natively, which is a lot of native-side risk for a
- * personal project. What this *does* give "for free": since Android
- * treats installing a new APK with the same package id + signing as an
- * in-place upgrade (not a fresh install), a user tapping through to the
- * GitHub release page and installing the new APK manually keeps all their
- * local data (IndexedDB etc.) intact automatically — same as any normal
- * app update. This just removes the "did I check GitHub for a new
- * version" step.
- */
+/** Finds a newer GitHub Release and its APK asset when one is attached. */
 import { appFetch } from './appFetch'
 
 export interface UpdateCheckResult {
   hasUpdate: boolean
   latestVersion: string
   releaseUrl: string
+  apkUrl?: string
+  apkName?: string
+  apkSize?: number
 }
 
 const REPO = 'Entropy2077-axe/talk'
@@ -45,6 +36,15 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
   const json = await res.json()
   const latestTag = typeof json?.tag_name === 'string' ? json.tag_name : ''
   const releaseUrl = typeof json?.html_url === 'string' ? json.html_url : `https://github.com/${REPO}/releases/latest`
+  const apkAsset = Array.isArray(json?.assets)
+    ? json.assets.find((asset: unknown) => {
+        if (!asset || typeof asset !== 'object') return false
+        const candidate = asset as { name?: unknown; browser_download_url?: unknown }
+        return typeof candidate.name === 'string'
+          && /\.apk$/i.test(candidate.name)
+          && typeof candidate.browser_download_url === 'string'
+      }) as { name?: string; browser_download_url?: string; size?: number } | undefined
+    : undefined
   if (!latestTag) {
     throw new Error('未能获取最新版本信息')
   }
@@ -52,5 +52,8 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
     hasUpdate: isNewer(parseVersion(latestTag), parseVersion(__APP_VERSION__)),
     latestVersion: latestTag,
     releaseUrl,
+    apkUrl: apkAsset?.browser_download_url,
+    apkName: apkAsset?.name,
+    apkSize: typeof apkAsset?.size === 'number' ? apkAsset.size : undefined,
   }
 }

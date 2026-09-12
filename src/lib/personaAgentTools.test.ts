@@ -22,6 +22,13 @@ const draft = {
   speechExamples: Array.from({ length: 10 }, (_, index) => `[场景${index + 1}] 示例消息${index + 1}`),
   personaProfile: { facts: ['设计师'], boundaries: ['尊重隐私'], habits: ['早起'], behaviorAnchors: ['先观察再回应'] },
   initialMemories: [], monthlySalary: 8000, avatarKeyword: 'young asian woman portrait', schedule: [],
+  wardrobe: [
+    { name: '白色T恤', category: '上装', color: '白色', description: '棉质T恤' },
+    { name: '牛仔裤', category: '下装', color: '蓝色', description: '直筒牛仔裤' },
+    { name: '运动鞋', category: '鞋履', color: '白色', description: '日常运动鞋' },
+    { name: '针织外套', category: '外套', color: '灰色', description: '轻薄外套' },
+  ],
+  currentOutfit: ['白色T恤', '牛仔裤', '运动鞋'],
 }
 
 const settings = {

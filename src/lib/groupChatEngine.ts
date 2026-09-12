@@ -32,6 +32,7 @@ import { createGroupPlan, planCardMessage } from './groupPlans'
 import { useChatUiStore } from '../store/useChatUiStore'
 import { retrieveWorldbookContext } from './worldbook'
 import { featureActive, promptModuleEnabled } from './promptModules'
+import { applyOutfitChange } from './clothing'
 
 function groupMessageBounds(level: import('../types').GroupEnergyLevel, speakerCount: number): { min: number; max: number } {
   const speakers = Math.max(1, speakerCount)
@@ -56,7 +57,7 @@ function findImmediateLocationRequest(userText: string, locations: Array<{ id: s
  * character refuses, but an acceptance may no longer be text-only. */
 function immediateLocationInstruction(request?: ImmediateLocationRequest) {
   if (!request) return ''
-  return `\n【即时地点行动，不能漏】用户正在要求相关联系人立刻前往“${request.locationName}”（${request.locationId}）。角色可以按人设明确拒绝；但只要角色在可见回复中同意、表示正在动身，或实际开始该活动，就必须由该角色调用 start_activity_now，locationId 必须是 ${request.locationId}。绝不能只发“我去/我马上过去”之类文字而不调用行动工具。`
+  return `\n【即时地点行动，不能漏】用户正在要求相关联系人立刻前往“${request.locationName}”（${request.locationId}）。角色可以按人设明确拒绝；但只要角色在可见回复中同意、表示正在动身，或实际开始该活动，就必须由该角色调用 change_location，locationId 必须是 ${request.locationId}。绝不能只发“我去/我马上过去”之类文字而不调用行动工具。`
 }
 import { realisticReplyDelayMs } from './replyTiming'
 import { createConversationIllustration, createMediaAsset, detectExplicitImageRequest, startMediaAsset } from './imageAssets'
@@ -464,7 +465,7 @@ async function runGroupAiTurn(
     const location = group.kind === 'location' && group.locationId ? await db.locations.get(group.locationId) : undefined
     const allLocations = isModuleEnabled('location') ? await db.locations.toArray() : []
     const leafLocations = allLocations.filter((candidate) => !allLocations.some((child) => child.parentId === candidate.id))
-    const locationToolContext = leafLocations.length ? `\n可创建日程的合法地点：${leafLocations.map((candidate) => `${candidate.name}(${candidate.id})`).join('、')}` : ''
+    const locationToolContext = leafLocations.length ? `\n可更改当前地点或创建日程的合法地点：${leafLocations.map((candidate) => `${candidate.name}(${candidate.id})`).join('、')}` : ''
     const immediateActionRequest = findImmediateLocationRequest(latestUserMessage?.content ?? '', leafLocations)
     const immediateActionContext = immediateLocationInstruction(immediateActionRequest)
     const promptBuilder = group.kind === 'location' ? buildLocationRawChatPrompt : buildGroupRawChatPrompt
@@ -553,7 +554,7 @@ async function runGroupAiTurn(
     console.log('[group] 审核模型已完成群聊原文审核和JSON翻译，未调用第三个翻译模型')
 
     let finalRaw = jsonRaw
-    let { bubbles, knowledgeQueries, immediateActivities = [], turnSummary, planCandidates } = parsedTurn
+    let { bubbles, knowledgeQueries, immediateActivities = [], outfitChanges, turnSummary, planCandidates } = parsedTurn
     bubbles = ensureGroupImagesHaveText(bubbles)
     const initiallyRequestedKnowledge = [...knowledgeQueries]
     const runLogicReview = (stage: 'first_quality' | 'second_quality') => reviewTurnLogic({
@@ -602,7 +603,7 @@ async function runGroupAiTurn(
         if (enrichedConverted.bubbles.length === 0) throw new Error('知识补全后的审核模型没有产出有效群聊JSON')
         jsonRaw = rawText
         finalRaw = jsonRaw
-        ;({ bubbles, knowledgeQueries, immediateActivities, turnSummary, planCandidates } = enrichedConverted)
+        ;({ bubbles, knowledgeQueries, immediateActivities, outfitChanges, turnSummary, planCandidates } = enrichedConverted)
         bubbles = ensureGroupImagesHaveText(bubbles)
       }
     }
@@ -645,9 +646,17 @@ async function runGroupAiTurn(
       engine.patch(conversationId, { error: '群里这次没有人回复 可以再发一条试试', aiTyping: false, typingLabel: undefined })
       return
     }
+    if (outfitChanges.length > 0) {
+      for (const change of outfitChanges) {
+        const speaker = speakers[change.speakerIndex - 1]
+        if (!speaker) continue
+        const applied = await applyOutfitChange(speaker.id, change, { conversationId, turnId: streamId })
+        if (applied) void traceTurnEvent({ turnId: streamId, conversationId, stage: 'clothing_change', output: `${displayName(speaker)}：${applied.summary}` })
+      }
+    }
     // A location-scene group turn uses the same immediate-action contract as
     // private chat.  Previously the group tool whitelist discarded
-    // start_activity_now, so a contact could say they were heading somewhere
+    // change_location, so a contact could say they were heading somewhere
     // but their runtime position never changed.
     if (!directOutput && isModuleEnabled('location') && immediateActivities.length > 0) {
       const actionNow = Date.now()

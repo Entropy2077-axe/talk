@@ -80,6 +80,15 @@ export interface Contact {
   currentTaskKind?: 'default' | 'special'
   currentActivity?: string
   taskUpdatedAt?: number
+  // ---- clothing ----
+  /** Clothes this character owns in the active story branch. */
+  wardrobe?: ClothingItem[]
+  /** Creation-time wardrobe used when a fresh world/story branch is opened. */
+  initialWardrobe?: ClothingItem[]
+  /** What the character is wearing right now. */
+  currentOutfit?: ContactOutfit
+  /** Creation-time outfit used when a fresh world/story branch is opened. */
+  initialOutfit?: ContactOutfit
   /** Worldbook entries explicitly bound when this contact was created. */
   worldbookEntryIds?: string[]
   /** World that owns this contact in the currently materialized contact set. */
@@ -109,6 +118,35 @@ export interface ContactResidence {
   kind: 'player_home' | 'apartment' | 'dorm' | 'other'
   cohabitsWithUser: boolean
   establishedBy: 'generation' | 'legacy' | 'user' | 'worldbook'
+}
+
+export const CLOTHING_CATEGORIES = ['上装', '下装', '连体装', '外套', '鞋履', '内搭', '袜子', '配饰', '睡衣', '其他'] as const
+export type ClothingCategory = (typeof CLOTHING_CATEGORIES)[number]
+
+export interface ClothingDraftItem {
+  name: string
+  category: ClothingCategory
+  color: string
+  description: string
+}
+
+export interface ClothingItem extends ClothingDraftItem {
+  id: string
+  createdAt: number
+}
+
+export interface ContactOutfit {
+  itemIds: string[]
+  summary: string
+  updatedAt: number
+  sourceConversationId?: string
+  sourceTurnId?: string
+}
+
+export interface OutfitChangeAction {
+  /** Complete outfit after the change, not merely the garments added/removed. */
+  items: ClothingDraftItem[]
+  summary: string
 }
 
 /** A recurring weekly time block — generated at contact creation and editable in administrator tools. */
@@ -271,6 +309,12 @@ export interface Moment {
   contactId: string
   content: string
   createdAt: number
+  /** Model-produced canonical subject used to prevent semantic topic loops. */
+  topicKey?: string
+  /** Whether the post describes a past, current, future, or timeless subject. */
+  timeFrame?: 'past' | 'current' | 'future' | 'timeless'
+  /** Short grounding note naming the schedule, plan, experience, or ordinary observation behind the post. */
+  factBasis?: string
   // ---- optional attached photo (see lib/photoSearch.ts) — not every moment gets one, code decides ----
   imageUrl?: string
   imageAssetId?: string
@@ -1031,7 +1075,7 @@ export interface PromptPreset {
 }
 
 export interface AdminLogRecord { id: string; level: 'log' | 'info' | 'warn' | 'error'; message: string; createdAt: number }
-export type AdminAiTraceStage = 'original_generation' | 'tool_call' | 'review_and_repair' | 'json_translation' | 'image_generation' | 'sticker_lookup' | 'schedule_change' | 'location_change' | 'first_chat' | 'first_quality' | 'second_chat' | 'other' | 'second_quality'
+export type AdminAiTraceStage = 'original_generation' | 'tool_call' | 'review_and_repair' | 'json_translation' | 'image_generation' | 'sticker_lookup' | 'schedule_change' | 'location_change' | 'clothing_change' | 'first_chat' | 'first_quality' | 'second_chat' | 'other' | 'second_quality'
 /** A single timeline includes model calls and deterministic follow-up work. */
 export interface AdminAiTrace { id: string; purpose: AiUsagePurpose; model: string; messages: { role: string; content: string }[]; output?: string; error?: string; inputTokens: number; outputTokens: number; durationMs?: number; createdAt: number; turnId?: string; stage?: AdminAiTraceStage; conversationId?: string; diagnostics?: Record<string, unknown> }
 export interface SaveSlot { id: string; slot: number; name: string; createdAt: number; updatedAt: number; snapshot: unknown }
@@ -1454,6 +1498,8 @@ export interface PersonaCreationRecord {
   speechSamples?: string[]
   mbti?: string
   schedule?: ScheduleBlock[]
+  wardrobe?: ClothingDraftItem[]
+  currentOutfit?: string[]
   avatarKeyword?: string
   monthlySalary?: number
   sharedHistory?: string
@@ -1609,6 +1655,7 @@ export interface AiResponse {
   thought: string
   /** Sibling of `messages`, not a bubble — up to 2 short topics the model wants the knowledge base to look up (see lib/knowledgeBase.ts), e.g. a slang term the user just used that it doesn't recognize. Optional; most turns won't set this. */
   knowledgeQueries?: string[]
+  outfitChanges?: OutfitChangeAction[]
 }
 
 // ---- group chat AI output protocol (see lib/groupChat.ts) ----
@@ -1641,4 +1688,5 @@ export interface GroupAiResponse {
   planCandidates?: { title: string; summary: string; participantIndexes: number[]; location?: string }[]
   memoryCandidates?: { contactName: string; content: string }[]
   knowledgeQueries?: string[]
+  outfitChanges?: Array<OutfitChangeAction & { speakerIndex: number }>
 }

@@ -13,10 +13,11 @@ const COLORS: Record<string, string> = { log: 'text-[var(--ui-text-2)]', info: '
 const PAGE = 50
 const TRACE_PAGE = 20
 const EMPTY_TRACES: AdminAiTrace[] = []
-const STAGE_ORDER: AdminAiTraceStage[] = ['original_generation', 'tool_call', 'review_and_repair', 'image_generation', 'sticker_lookup', 'schedule_change', 'location_change', 'first_chat', 'first_quality', 'second_chat', 'other', 'second_quality']
+const STAGE_ORDER: AdminAiTraceStage[] = ['original_generation', 'tool_call', 'review_and_repair', 'image_generation', 'sticker_lookup', 'schedule_change', 'location_change', 'clothing_change', 'first_chat', 'first_quality', 'second_chat', 'other', 'second_quality']
 const STAGE_LABEL: Record<AdminAiTraceStage, string> = {
   original_generation: '原文生成', tool_call: '工具调用', review_and_repair: '审核及 JSON 修复', json_translation: 'JSON 格式翻译',
   image_generation: '图片生成', sticker_lookup: '表情包获取', schedule_change: '日程变更执行', location_change: '地点变更执行',
+  clothing_change: '衣物变更执行',
   first_chat: '原文生成（旧记录）', first_quality: '审核及修改（旧记录）', second_chat: '二次生成（旧记录）', other: 'JSON 格式翻译（旧记录）', second_quality: '二次审核（旧记录)',
 }
 

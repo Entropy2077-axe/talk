@@ -310,6 +310,8 @@ export function ContactAddPage() {
       gender: record.gender,
       ageRange: record.ageRange,
       occupation: record.occupation,
+      wardrobe: record.wardrobe || [],
+      currentOutfit: record.currentOutfit || [],
     })
     setPersonaPickerOpen(false)
     setCreationPickerOpen(false)

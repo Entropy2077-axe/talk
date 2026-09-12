@@ -1,7 +1,7 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
@@ -11,6 +11,9 @@ const androidDir = join(root, 'android')
 const apkPath = join(androidDir, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk')
 const androidBuildGradlePath = join(androidDir, 'app', 'build.gradle')
 const androidManifestPath = join(androidDir, 'app', 'src', 'main', 'AndroidManifest.xml')
+const androidMainActivityPath = join(androidDir, 'app', 'src', 'main', 'java', 'com', 'talk', 'aichat', 'MainActivity.java')
+const androidPluginSource = join(root, 'scripts', 'native', 'InAppUpdatePlugin.java')
+const androidPluginTarget = join(androidDir, 'app', 'src', 'main', 'java', 'com', 'talk', 'aichat', 'InAppUpdatePlugin.java')
 const defaultJavaHome = 'C:\\Projects\\AndroidStudio\\jbr'
 
 const args = new Set(process.argv.slice(2))
@@ -137,6 +140,30 @@ function ensureAndroidLocalHttpSupport() {
   log('Enabled user-configured LAN HTTP providers for Android.')
 }
 
+function ensureAndroidInAppUpdateSupport() {
+  if (!existsSync(androidPluginSource)) throw new Error(`Missing Android updater source: ${androidPluginSource}`)
+  if (!existsSync(androidMainActivityPath)) throw new Error(`Missing Android MainActivity: ${androidMainActivityPath}`)
+  mkdirSync(dirname(androidPluginTarget), { recursive: true })
+  copyFileSync(androidPluginSource, androidPluginTarget)
+
+  let activity = readFileSync(androidMainActivityPath, 'utf8')
+  if (!activity.includes('registerPlugin(InAppUpdatePlugin.class)')) {
+    if (activity.includes('super.onCreate(savedInstanceState);')) {
+      activity = activity.replace('super.onCreate(savedInstanceState);', 'registerPlugin(InAppUpdatePlugin.class);\n    super.onCreate(savedInstanceState);')
+    } else {
+      activity = activity.replace(/\}\s*$/, `  @Override\n  public void onCreate(android.os.Bundle savedInstanceState) {\n    registerPlugin(InAppUpdatePlugin.class);\n    super.onCreate(savedInstanceState);\n  }\n}\n`)
+    }
+    writeFileSync(androidMainActivityPath, activity, 'utf8')
+  }
+
+  let manifest = readFileSync(androidManifestPath, 'utf8')
+  if (!manifest.includes('android.permission.REQUEST_INSTALL_PACKAGES')) {
+    manifest = manifest.replace('</manifest>', '    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />\n</manifest>')
+    writeFileSync(androidManifestPath, manifest, 'utf8')
+  }
+  log('Installed Android in-app update bridge.')
+}
+
 function readAndroidSdkDir() {
   const localProperties = join(androidDir, 'local.properties')
   if (!existsSync(localProperties)) return undefined
@@ -209,6 +236,7 @@ function main() {
     run(command('npm'), ['run', 'build'])
     run(command('npx'), ['cap', 'sync', 'android'])
     ensureAndroidLocalHttpSupport()
+    ensureAndroidInAppUpdateSupport()
 
     if (!args.has('--skip-apk')) {
       const gradle = process.platform === 'win32' ? 'gradlew.bat' : './gradlew'

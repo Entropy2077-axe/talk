@@ -27,6 +27,25 @@ describe('schedule optimization parsing', () => {
     expect(parseOptimizedSchedule(JSON.stringify([block(1)]), locations)).toHaveLength(1)
   })
 
+  it('accepts an explicitly empty schedule when the player asks to clear it', () => {
+    expect(parseOptimizedSchedule('{"schedule":[]}', locations)).toEqual([])
+  })
+
+  it('allows a detailed schedule with more than 28 valid entries', () => {
+    const detailed = Array.from({ length: 35 }, (_, index) => ({
+      ...block(index % 7),
+      startHour: index % 5,
+      endHour: index % 5 + 1,
+      activity: `安排${index}`,
+    }))
+    expect(parseOptimizedSchedule(JSON.stringify({ schedule: detailed }), locations)).toHaveLength(35)
+  })
+
+  it('removes exact duplicate entries returned by the AI', () => {
+    const repeated = block(1)
+    expect(parseOptimizedSchedule(JSON.stringify({ schedule: [repeated, repeated] }), locations)).toHaveLength(1)
+  })
+
   it('rejects a response that contains no valid schedule blocks', () => {
     expect(() => parseOptimizedSchedule('{"schedule":[{"dayOfWeek":9}]}', locations)).toThrow('没有返回带有效地图地点的日程')
   })

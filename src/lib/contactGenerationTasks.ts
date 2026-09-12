@@ -30,6 +30,7 @@ import { syncContactLocationsAt } from './locations'
 import { activePromptPreset, clonePromptModules } from './promptPresets'
 import { generatePersonaWithTools } from './personaAgentTools'
 import { addContactToWorldSnapshots } from './worldSnapshots'
+import { createInitialClothing } from './clothing'
 
 const ACTIVE_STATUSES: ContactGenerationStatus[] = [
   'preparing', 'retrieving_context', 'extracting_canon', 'generating', 'validating', 'fetching_avatar', 'committing',
@@ -363,7 +364,7 @@ async function preparePersona(task: ContactGenerationTask, settings: AppSettings
       model: settings.utilityModel || settings.model,
       provider: settings.aiProvider,
       messages: [
-        { role: 'system', content: `你是人物资料 JSON 修复器。保留候选内容的已有事实，修复截断、引号、逗号、字段类型和缺失的必要字段。只能输出一个合法 JSON 对象。至少必须包含 name、persona、speechExamples、visualIdentity、gender、ageRange、relationship、occupation、realName、nickname、birthday、initialMemories、monthlySalary、schedule、avatarKeyword${voiceContext ? '、speechVoiceId、speechStyleInstruction；speechVoiceId只能使用：' + voiceContext.options.map((option) => option.id).join('、') : ''}。speechExamples 必须正好10条互不重复的“[场景] 实际消息”；persona 是唯一人设正文，程序会把示例合并进去。不要解释。` },
+        { role: 'system', content: `你是人物资料 JSON 修复器。保留候选内容的已有事实，修复截断、引号、逗号、字段类型和缺失的必要字段。只能输出一个合法 JSON 对象。至少必须包含 name、persona、speechExamples、visualIdentity、wardrobe、currentOutfit、gender、ageRange、relationship、occupation、realName、nickname、birthday、initialMemories、monthlySalary、schedule、avatarKeyword${voiceContext ? '、speechVoiceId、speechStyleInstruction；speechVoiceId只能使用：' + voiceContext.options.map((option) => option.id).join('、') : ''}。speechExamples 必须正好10条互不重复的“[场景] 实际消息”；wardrobe 必须按人设给出8到16件包含 name/category/color/description 的具体衣物，currentOutfit 必须是逐字引用 wardrobe name 的当前完整穿着；persona 是唯一人设正文，程序会把示例合并进去。不要解释。` },
         { role: 'user', content: `待修复候选：\n${raw.slice(0, 16000)}` },
       ],
       jsonMode: true,
@@ -486,6 +487,7 @@ async function commitTask(task: ContactGenerationTask) {
   const generatedSpeechVoices = voiceContext && parsed.speechVoiceId && voiceContext.options.some((option) => option.id === parsed.speechVoiceId)
     ? { [voiceContext.provider]: { voiceId: parsed.speechVoiceId, styleInstruction: parsed.speechStyleInstruction, source: 'ai' as const, assignedAt: now } }
     : undefined
+  const initialClothing = createInitialClothing(parsed.wardrobe, parsed.currentOutfit, now)
 
   try {
   await db.transaction('rw', [db.contacts, db.conversations, db.messages, db.contactRelations, db.contactMemories, db.personaCreationRecords, db.contactGenerationTasks], async () => {
@@ -529,6 +531,10 @@ async function commitTask(task: ContactGenerationTask) {
       schedule: parsed.schedule,
       initialSchedule: parsed.schedule,
       scheduleOverrides: [],
+      wardrobe: initialClothing.wardrobe,
+      initialWardrobe: structuredClone(initialClothing.wardrobe),
+      currentOutfit: initialClothing.outfit,
+      initialOutfit: structuredClone(initialClothing.outfit),
       worldbookEntryIds: boundWorldbookEntryIds,
       experienceCursorAt: now,
       worldviewId: input.worldviewId || useSettingsStore.getState().activeWorldId || useSettingsStore.getState().defaultWorldviewId,
@@ -581,7 +587,8 @@ async function commitTask(task: ContactGenerationTask) {
       gender: input.gender || parsed.gender, ageRange: input.ageRange || parsed.ageRange, relationship, occupation: input.occupation || parsed.occupation,
       initialWarmth: input.relationshipEnabled ? warmth : undefined, hobbies: input.hobbies,
       personaSetting: input.personaSetting || parsed.persona, roleDescription: input.roleDescription || undefined, persona: parsed.persona, visualIdentity: parsed.visualIdentity,
-      schedule: parsed.schedule, avatarKeyword: parsed.avatarKeyword, monthlySalary: parsed.monthlySalary,
+      schedule: parsed.schedule, wardrobe: parsed.wardrobe, currentOutfit: parsed.currentOutfit,
+      avatarKeyword: parsed.avatarKeyword, monthlySalary: parsed.monthlySalary,
       sharedHistory: input.sharedHistory || undefined, createdAt: now,
     })
     await db.contactGenerationTasks.delete(task.id)

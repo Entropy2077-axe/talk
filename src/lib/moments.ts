@@ -4,20 +4,22 @@ import { isAiTestId } from './aiTestIsolation'
 import { parseJsonLoose } from './aiProtocol'
 import { chatCompletionText as chatCompletion } from './deepseek'
 import { momentReactionProbability, uniqueRelationPairs } from './contactRelations'
-import { describeCurrentSchedule, isPhoneAvailable } from './schedule'
+import { describeCurrentSchedule, describeUpcomingScheduleText, isPhoneAvailable } from './schedule'
 import { randomAnimeAvatar, searchPexelsPhoto } from './photoSearch'
 import { createMediaAsset, startMediaAsset } from './imageAssets'
 import { isImageProviderReady } from './mediaProviders'
 import { recordSocialEvent } from './socialEvents'
 import { displayName } from './contact'
 import { retrieveWorldbookContext } from './worldbook'
-import { recentMemoriesText, socialMemoriesText } from './memory'
+import { activeUpcomingPlansText, recentMemoriesText, socialMemoriesText } from './memory'
 import { recentSocialEventsText } from './socialEvents'
 import { recentSharedOriginalContext } from './sharedRecentContext'
 import { parseTurnLogicReview } from './turnLogicReviewer'
 import type { AppSettings, Contact, Moment } from '../types'
 import { featureActive, getPromptTemplate, promptModuleEnabled } from './promptModules'
 import { useSettingsStore } from '../store/useSettingsStore'
+import { describeCurrentTime } from './time'
+import { isLeafLocation, resolveContactRuntimeAt } from './locations'
 
 /** Of the friends who *do* react (relationship allows it and the dice roll passed), this fraction also leave a comment instead of just liking. */
 const COMMENT_SHARE = 0.55
@@ -76,6 +78,12 @@ export function eligiblePosters(contacts: Contact[], now: number): Contact[] {
   )
 }
 
+export function eligiblePostersForRefresh(contacts: Contact[], now: number, forceNew = false): Contact[] {
+  if (!forceNew) return eligiblePosters(contacts, now)
+  const available = contacts.filter((contact) => isPhoneAvailable(contact, new Date(now)))
+  return available.length > 0 ? available : contacts
+}
+
 function normalizeMomentText(value: string): string {
   return value.toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu, '')
 }
@@ -87,9 +95,22 @@ function bigrams(value: string): Set<string> {
 }
 
 /** A deterministic final guard; LLM review is useful but must never be the only duplicate protection. */
-export function momentNoveltyIssue(content: string, history: Pick<Moment, 'content'>[]): string | null {
+function normalizeTopicKey(value: string): string {
+  return normalizeMomentText(value).replace(/^(日常|生活|随手记|心情)/, '')
+}
+
+export function publicMomentSceneIssue(content: string): string | null {
+  const text = content.trim()
+  if (/^@/.test(text)) return '朋友圈正文不能以@某人的方式写成定向消息。'
+  if (/^(?:主人|哥哥|姐姐|弟弟|妹妹|你)[，,：:\s]/.test(text)) return '朋友圈正文像是在直接呼叫某个私聊对象。'
+  if (/(?:等你回来|你快回来|记得回我|回复我|陪我聊|跟我说一声)/.test(text)) return '朋友圈正文要求特定对象回应，属于私聊表达。'
+  return null
+}
+
+export function momentNoveltyIssue(content: string, history: Pick<Moment, 'content' | 'topicKey'>[], topicKey = ''): string | null {
   const normalized = normalizeMomentText(content)
   if (!normalized) return '动态正文为空。'
+  const normalizedTopic = normalizeTopicKey(topicKey)
   for (const item of history) {
     const previous = normalizeMomentText(item.content)
     if (!previous) continue
@@ -99,6 +120,10 @@ export function momentNoveltyIssue(content: string, history: Pick<Moment, 'conte
     const b = bigrams(normalized)
     const common = [...a].filter((part) => b.has(part)).length
     if (Math.min(previous.length, normalized.length) >= 18 && (2 * common) / Math.max(1, a.size + b.size) >= 0.82) return `与近期动态题材和表达高度相似：“${item.content.slice(0, 80)}”`
+    const previousTopic = normalizeTopicKey(item.topicKey || '')
+    if (normalizedTopic && previousTopic && (normalizedTopic === previousTopic || (Math.min(normalizedTopic.length, previousTopic.length) >= 4 && (normalizedTopic.includes(previousTopic) || previousTopic.includes(normalizedTopic))))) {
+      return `与近期动态使用了同一主题“${item.topicKey}”。`
+    }
   }
   return null
 }
@@ -109,12 +134,12 @@ async function recentMomentsFor(contactId: string, now = Date.now()): Promise<Mo
 }
 
 /** Shared guard for every automatic source that writes an AI moment. */
-export async function canPublishNovelMoment(contactId: string, content: string, at = Date.now()): Promise<boolean> {
-  return !momentNoveltyIssue(content, await recentMomentsFor(contactId, at))
+export async function canPublishNovelMoment(contactId: string, content: string, at = Date.now(), topicKey = ''): Promise<boolean> {
+  return !publicMomentSceneIssue(content) && !momentNoveltyIssue(content, await recentMomentsFor(contactId, at), topicKey)
 }
 
 function recentMomentHistoryText(rows: Moment[]): string {
-  return rows.length ? rows.map((item) => `${new Date(item.createdAt).toLocaleString()}：${item.content}`).join('\n') : '（近 14 天没有已发布动态，可自由选择真实、公开的日常题材。）'
+  return rows.length ? rows.map((item) => `${new Date(item.createdAt).toLocaleString()}｜topicKey=${item.topicKey || '旧数据未标注'}：${item.content}`).join('\n') : '（近 14 天没有已发布动态，可自由选择真实、公开的日常题材。）'
 }
 
 /**
@@ -151,7 +176,7 @@ async function planReactors(poster: Contact, contactsById: Map<string, Contact>)
   for (const link of links) {
     const otherId = link.fromContactId === poster.id ? link.toContactId : link.fromContactId
     const other = contactsById.get(otherId)
-    if (other) candidates.push({ contact: other, relationLabel: link.label || '普通朋友', link })
+    if (other && isPhoneAvailable(other, new Date())) candidates.push({ contact: other, relationLabel: link.label || '普通朋友', link })
   }
 
   const plans: ReactorPlan[] = []
@@ -188,7 +213,7 @@ function buildMomentsPrompt(
               .join('\n')
           : '  （这条没有人评论）'
       const scheduleLine = describeCurrentSchedule(e.poster, now)
-      const statusLine = scheduleLine ? `${e.poster.name}${scheduleLine} (内容可以但不强制符合这个状态)\n` : ''
+      const statusLine = scheduleLine ? `${e.poster.name}${scheduleLine}。日程不必成为主题，但正文不得与这个事实矛盾。\n` : ''
       const photoLine = e.willHavePhoto
         ? `这条动态会配一张照片。填写 imageKeyword（具体英文画面描述）、imageKind（selfie/portrait/scene/object）和 includePoster（照片是否出现发布者本人）。只有本人确实入镜时 includePoster 才为 true。\n`
         : ''
@@ -199,12 +224,15 @@ function buildMomentsPrompt(
   const worldviewSection = worldviewText ? `${worldviewText}\n\n` : ''
 
   const editable = getPromptTemplate(settings, 'moments', 'generation', { momentContext: `${worldviewSection}${stickerCommentInstruction(stickerNames)}\n${sections}` }) ?? ''
-  return `${editable}\n\n固定输出协议：只输出JSON {"moments":[{"content":"人物1动态","imageKeyword":"需要配图才填写","imageKind":"selfie|portrait|scene|object","includePoster":true,"comments":["评论者1评论"]}]}。moments及comments必须与输入顺序和数量一致。`
+  return `${editable}\n\n【不可覆盖的朋友圈运行时规则】\n- 正文是发布给不特定好友看的公开自述，不是发给用户、主人、哥哥或其他特定对象的私聊。不得呼叫某人、向某人提问、催促其回复或要求其采取行动；可以在不泄密时用第三人称自然提及他人。\n- 当前事实是硬约束，但不要求正文一定复述日程。没有当前安排时，不得仅凭“学生/职员”等身份编造今天正在上课或上班。\n- 必须区分过去、现在和未来。尚未开始的约定只能写准备或期待；不得写成正在进行或已经完成。引用约定时，活动、参与者和时间状态必须一致。\n- 私聊原文只能帮助理解状态，不能把对话续句、昵称呼唤、秘密或等待回复的话直接变成朋友圈。\n- 每条先选择一个与该人物近期topicKey不同的具体主题；同批人物也尽量不要撞题。topicKey用简短稳定的“领域-事件”概括，不能只写“日常”“心情”。factBasis简述依据；没有具体事件依据时写“普通公开观察”，不得虚构。\n\n固定输出协议：只输出JSON {"moments":[{"content":"人物1动态","topicKey":"领域-具体事件","timeFrame":"past|current|future|timeless","factBasis":"事实依据","imageKeyword":"需要配图才填写","imageKind":"selfie|portrait|scene|object","includePoster":true,"comments":["评论者1评论"]}]}。moments及comments必须与输入顺序和数量一致。`
 }
 
 interface ParsedMoment {
   content: string
   comments: string[]
+  topicKey: string
+  timeFrame: 'past' | 'current' | 'future' | 'timeless'
+  factBasis: string
   imageKeyword: string
   imageKind: import('../types').AiImageKind
   includePoster: boolean
@@ -222,10 +250,19 @@ function parseMomentsResponse(raw: string, expected: number[]): ParsedMoment[] |
     const comments: string[] = Array.isArray(m.comments)
       ? m.comments.filter((c: unknown): c is string => typeof c === 'string' && c.trim().length > 0)
       : []
+    const suppliedTopicKey = typeof m.topicKey === 'string' ? m.topicKey.trim().slice(0, 80) : ''
+    // Keep the feed usable with weaker/older models that occasionally omit a
+    // newly introduced metadata field. The reviewer still sees the content,
+    // while capable models provide the stable semantic key used by the guard.
+    const topicKey = suppliedTopicKey && !/^(日常|生活|心情|随手记)$/.test(suppliedTopicKey)
+      ? suppliedTopicKey
+      : `未分类-${m.content.trim().slice(0, 32)}`
+    const timeFrame = ['past', 'current', 'future', 'timeless'].includes(String(m.timeFrame)) ? m.timeFrame as ParsedMoment['timeFrame'] : 'timeless'
+    const factBasis = typeof m.factBasis === 'string' ? m.factBasis.trim().slice(0, 160) : ''
     const imageKeyword = typeof m.imageKeyword === 'string' ? m.imageKeyword.trim() : ''
     const imageKind = ['selfie', 'portrait', 'scene', 'object'].includes(String(m.imageKind)) ? m.imageKind as import('../types').AiImageKind : 'scene'
     const includePoster = typeof m.includePoster === 'boolean' ? m.includePoster : imageKind === 'selfie' || imageKind === 'portrait'
-    result.push({ content: m.content.trim(), comments, imageKeyword, imageKind, includePoster })
+    result.push({ content: m.content.trim(), comments, topicKey, timeFrame, factBasis, imageKeyword, imageKind, includePoster })
   }
   return result
 }
@@ -234,7 +271,7 @@ function parseMomentsResponse(raw: string, expected: number[]): ParsedMoment[] |
 async function reviewMomentPayload(settings: AppSettings, raw: string, expectedShape: string, personaContext = ''): Promise<string> {
   try {
     const recent = await db.moments.orderBy('createdAt').reverse().limit(18).toArray()
-    const history = recent.map((moment) => moment.content).join('\n').slice(0, 2200)
+    const history = recent.map((moment) => `${moment.contactId}｜topicKey=${moment.topicKey || '旧数据未标注'}｜${moment.content}`).join('\n').slice(0, 2600)
     const editableReview = getPromptTemplate(settings, 'moments', 'review', {
       personaContext: personaContext || '(无)',
       recentMoments: history || '(空)',
@@ -251,7 +288,7 @@ async function reviewMomentPayload(settings: AppSettings, raw: string, expectedS
       purpose: 'quality',
       automatic: true,
       messages: [
-        { role: 'system', content: `${editableReview}\n\n固定输出协议：候选JSON应符合 ${expectedShape}。只输出JSON：{"valid":true,"reason":""}` },
+        { role: 'system', content: `${editableReview}\n\n【不可覆盖的审核规则】逐条核对当前日期星期、日程、地点、未来约定状态和事实依据；把同一主题换说法视为重复。正文若直接呼叫用户/主人/亲属、向特定对象提问、催促回复或像私聊续句，必须判为无效。尚未发生的计划被写成正在发生或已经完成、无日程却凭身份编造今天上课上班、活动或参与者与依据不一致，也必须判为无效。\n固定输出协议：候选JSON应符合 ${expectedShape}。只输出JSON：{"valid":true,"reason":""}` },
         { role: 'user', content: '请审查候选内容。' },
       ],
     })
@@ -279,7 +316,7 @@ async function reviewMomentPayload(settings: AppSettings, raw: string, expectedS
       purpose: 'quality',
       automatic: true,
       messages: [
-        { role: 'system', content: `${editableRepair}\n\n固定输出协议：只输出符合 ${expectedShape} 的JSON。` },
+        { role: 'system', content: `${editableRepair}\n\n【不可覆盖的修复规则】保持当前日期星期、日程、地点和未来约定状态一致；换掉重复topicKey。朋友圈正文必须是面向不特定好友的公开自述，不能直接呼叫用户、主人或亲属，不能索要回复，也不能把尚未发生的计划写成已经发生。\n固定输出协议：只输出符合 ${expectedShape} 的JSON。` },
         { role: 'user', content: '请修复候选内容。' },
       ],
     })
@@ -294,6 +331,18 @@ export interface RefreshMomentsResult {
   message?: string
 }
 
+export interface RefreshMomentsOptions {
+  /** User-triggered refreshes ignore posting cooldown/phone availability so a successful API run always attempts fresh content. */
+  forceNew?: boolean
+}
+
+function runtimeFactsText(contact: Contact, now: Date, locationName = ''): string {
+  const currentSchedule = describeCurrentSchedule(contact, now)
+  const upcomingSchedule = describeUpcomingScheduleText(contact, now, 7)
+  const plans = activeUpcomingPlansText(contact, now)
+  return `【当前事实（硬约束）】\n现在：${describeCurrentTime(now)}\n当前日程：${currentSchedule || '无固定安排；不得凭身份推断今天在上课或上班'}\n当前地点：${locationName || '未明确；不得自行编造具体地点'}\n未来七天日程：\n${upcomingSchedule || '无'}\n【未来约定（未到时间前不得写成已发生）】\n${plans || '无'}\n【素材边界】下方聊天与记忆只用于理解状态。具体事件必须先判断是已发生、正在发生还是未来计划；私聊称呼和对话续句不得直接公开。`
+}
+
 /** Read-only test path: uses the production Moments prompt/parser/reviewer but never writes a Moment or social event. */
 export async function runMomentTestSandbox(contact: Contact, settings: AppSettings, testInstruction: string): Promise<{ raw: string; reviewedRaw: string; parsed: unknown }> {
   if (!settings.apiKey) throw new Error('还没有配置API Key')
@@ -305,7 +354,7 @@ export async function runMomentTestSandbox(contact: Contact, settings: AppSettin
     recentSocialEventsText([contact.id], 3, false),
     recentSharedOriginalContext([contact.id], settings.userNickname, { maxMessages: 45, maxChars: 6_500 }),
   ])
-  const contexts = new Map([[contact.id, [originalContext, privateMemories, socialMemories, events, `【本次测试主题】${testInstruction}`].filter(Boolean).join('\n\n').slice(0, 10_500)]])
+  const contexts = new Map([[contact.id, [runtimeFactsText(contact, new Date()), originalContext, privateMemories, socialMemories, events, `【本次测试主题】${testInstruction}`].filter(Boolean).join('\n\n').slice(0, 10_500)]])
   const worldbookPrompt = featureActive(settings, 'worldview')
     ? (getPromptTemplate(settings, 'worldview', 'momentsRuntime', { worldbookEntries: await retrieveWorldbookContext(`${contact.name} ${contact.systemPrompt} ${contact.memoryFacts} ${testInstruction}`, { worldviewId: settings.activeWorldId || settings.defaultWorldviewId }) }) ?? '')
     : ''
@@ -320,7 +369,7 @@ export async function runMomentTestSandbox(contact: Contact, settings: AppSettin
     automatic: false,
   })
   const personaContext = [worldbookPrompt, `Poster ${contact.name}: ${contact.systemPrompt}`].filter(Boolean).join('\n\n')
-  const reviewedRaw = await reviewMomentPayload(settings, raw, '{"moments":[{"content":"...","imageKeyword":"...","comments":[]}]}', personaContext)
+  const reviewedRaw = await reviewMomentPayload(settings, raw, '{"moments":[{"content":"...","topicKey":"...","timeFrame":"past|current|future|timeless","factBasis":"...","imageKeyword":"...","comments":[]}]}', personaContext)
   return { raw, reviewedRaw, parsed: parseMomentsResponse(reviewedRaw, [0]) }
 }
 
@@ -330,7 +379,7 @@ export async function runMomentTestSandbox(contact: Contact, settings: AppSettin
  * single API call this makes is purely for writing the moment text and
  * comment text for whichever posters/reactors were already chosen.
  */
-export async function refreshMoments(settings: AppSettings): Promise<RefreshMomentsResult> {
+export async function refreshMoments(settings: AppSettings, options: RefreshMomentsOptions = {}): Promise<RefreshMomentsResult> {
   if (!promptModuleEnabled(settings, 'moments')) return { postedCount: 0, message: '朋友圈提示词模块已屏蔽' }
   const startedAt = performance.now()
   const contacts = (await db.contacts.toArray()).filter((item) => !isAiTestId(item.id))
@@ -338,10 +387,13 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
   if (!settings.apiKey) return { postedCount: 0, message: '还没有配置API Key' }
 
   const now = Date.now()
-  const eligible = eligiblePosters(contacts, now)
+  // Manual refresh bypasses the three-hour cooldown. Prefer characters who
+  // can currently use their phone; only fall back to the whole cast when that
+  // is necessary to honor the explicit "refresh means new content" action.
+  const eligible = eligiblePostersForRefresh(contacts, now, options.forceNew)
   if (eligible.length === 0) return { postedCount: 0, message: '大家都刚发过 稍后再刷新试试' }
 
-  const count = pickPosterCount(eligible.length, contacts.length, settings.proactiveMomentsMax)
+  const count = pickPosterCount(eligible.length, contacts.length, Math.max(1, settings.proactiveMomentsMax))
   const shuffled = shuffle(eligible)
   const selectedWorldviewId = settings.activeWorldId || settings.defaultWorldviewId
   const posters = shuffled.slice(0, count)
@@ -353,7 +405,17 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
     entries.push({ poster, commenters, willHavePhoto: Math.random() < MOMENT_PHOTO_PROBABILITY })
   }
 
-  const stickerNames = (await db.stickers.toArray()).map((s) => s.name)
+  const [stickers, locations] = await Promise.all([db.stickers.toArray(), db.locations.toArray()])
+  const stickerNames = stickers.map((s) => s.name)
+  const leafLocationIds = new Set(locations.filter((location) => isLeafLocation(location.id, locations)).map((location) => location.id))
+  const locationNames = new Map(locations.map((location) => [location.id, location.name]))
+  const facts = new Map(contacts.map((contact) => {
+    const runtime = resolveContactRuntimeAt(contact, new Date(now), leafLocationIds)
+    const manualUnavailableNote = options.forceNew && !isPhoneAvailable(contact, new Date(now))
+      ? '【手动补刷】角色当前不便使用手机；只能写最近已经发生的事情或无具体时点的公开感想，不得声称此刻正在操作手机、上网或发圈。'
+      : ''
+    return [contact.id, [runtimeFactsText(contact, new Date(now), locationNames.get(runtime.locationId) || ''), manualUnavailableNote].filter(Boolean).join('\n')] as const
+  }))
   const involved = Array.from(new Set(entries.flatMap((entry) => [entry.poster, ...entry.commenters.map((commenter) => commenter.contact)])))
   const contextRows = await Promise.all(involved.map(async (contact) => {
     const [privateMemories, socialMemories, events, originalContext] = await Promise.all([
@@ -362,7 +424,7 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
       recentSocialEventsText([contact.id], 3, false),
       recentSharedOriginalContext([contact.id], settings.userNickname, { maxMessages: 45, maxChars: 6_500 }),
     ])
-    return [contact.id, [originalContext, privateMemories, socialMemories, events].filter(Boolean).join('\n\n').slice(0, 10_500)] as const
+    return [contact.id, [facts.get(contact.id), originalContext, privateMemories, socialMemories, events].filter(Boolean).join('\n\n').slice(0, 10_500)] as const
   }))
   const contexts = new Map(contextRows)
   const historyRows = new Map(await Promise.all(posters.map(async (contact) => [contact.id, await recentMomentsFor(contact.id, now)] as const)))
@@ -390,8 +452,8 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
   console.info(`[moments-perf] 主模型完成=${Math.round(performance.now() - startedAt)}ms 条数=${entries.length}`)
 
   const expectedCommentCounts = entries.map((e) => e.commenters.filter((c) => c.willComment).length)
-  const personaContext = [momentsWorldbookPrompt, entries.map((entry) => `Poster ${entry.poster.name}: ${entry.poster.systemPrompt}\nCommenters: ${entry.commenters.filter((commenter) => commenter.willComment).map((commenter) => `${commenter.contact.name}: ${commenter.contact.systemPrompt}`).join(' | ') || 'none'}`).join('\n\n')].filter(Boolean).join('\n\n')
-  const reviewedRaw = await reviewMomentPayload(settings, raw, '{"moments":[{"content":"...","imageKeyword":"...","comments":["..."]}]}', personaContext)
+  const personaContext = [momentsWorldbookPrompt, entries.map((entry) => `Poster ${entry.poster.name}: ${entry.poster.systemPrompt}\n${facts.get(entry.poster.id) || ''}\nCommenters: ${entry.commenters.filter((commenter) => commenter.willComment).map((commenter) => `${commenter.contact.name}: ${commenter.contact.systemPrompt}`).join(' | ') || 'none'}`).join('\n\n')].filter(Boolean).join('\n\n')
+  const reviewedRaw = await reviewMomentPayload(settings, raw, '{"moments":[{"content":"...","topicKey":"...","timeFrame":"past|current|future|timeless","factBasis":"...","imageKeyword":"...","comments":["..."]}]}', personaContext)
   console.info(`[moments-perf] 自检完成=${Math.round(performance.now() - startedAt)}ms 条数=${entries.length}`)
   const parsed = parseMomentsResponse(reviewedRaw, expectedCommentCounts)
   if (!parsed) return { postedCount: 0, message: '生成失败 请再刷新试试' }
@@ -400,32 +462,40 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
   // posters and gives the model a concrete correction instead of silently
   // dropping the entire refresh when the contact list is small.
   const finalParsed = [...parsed]
-  let retryIndexes = finalParsed.flatMap((item, index) => momentNoveltyIssue(item.content, historyRows.get(entries[index].poster.id) || []) ? [index] : [])
+  const generationIssue = (item: ParsedMoment, index: number, batch: ParsedMoment[]) => {
+    const sceneIssue = publicMomentSceneIssue(item.content)
+    if (sceneIssue) return sceneIssue
+    const historyIssue = momentNoveltyIssue(item.content, historyRows.get(entries[index].poster.id) || [], item.topicKey)
+    if (historyIssue) return historyIssue
+    const earlierTopic = batch.slice(0, index).find((candidate) => normalizeTopicKey(candidate.topicKey) === normalizeTopicKey(item.topicKey))
+    return earlierTopic ? `与本批较早动态撞题“${item.topicKey}”。` : null
+  }
+  let retryIndexes = finalParsed.flatMap((item, index) => generationIssue(item, index, finalParsed) ? [index] : [])
   for (let attempt = 0; retryIndexes.length > 0 && attempt < 3; attempt++) {
     const retryEntries = retryIndexes.map((index) => entries[index])
     const retryContexts = new Map(contexts)
     for (const index of retryIndexes) {
-      const issue = momentNoveltyIssue(finalParsed[index].content, historyRows.get(entries[index].poster.id) || []) || '本条没有换掉近期重复题材。'
+      const issue = generationIssue(finalParsed[index], index, finalParsed) || '本条没有换掉近期重复题材。'
       retryContexts.set(entries[index].poster.id, `【本次必须纠正】${issue}\n不得改几个字重发旧内容；必须换一个近期未使用的具体题材、场景或情绪落点。\n${contexts.get(entries[index].poster.id) || ''}`.slice(0, 12_000))
     }
     const retryRaw = await chatCompletion({
       apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, jsonMode: true, purpose: 'moments', automatic: true,
       messages: [{ role: 'system', content: buildMomentsPrompt(retryEntries, momentsWorldbookPrompt, stickerNames, retryContexts, settings) }, { role: 'user', content: '请根据【本次必须纠正】重新生成，并在输出前逐项检查。' }],
     })
-    const retryReviewed = await reviewMomentPayload(settings, retryRaw, '{"moments":[{"content":"...","imageKeyword":"...","comments":["..."]}]}', personaContext)
+    const retryReviewed = await reviewMomentPayload(settings, retryRaw, '{"moments":[{"content":"...","topicKey":"...","timeFrame":"past|current|future|timeless","factBasis":"...","imageKeyword":"...","comments":["..."]}]}', personaContext)
     const retryParsed = parseMomentsResponse(retryReviewed, retryEntries.map((entry) => entry.commenters.filter((commenter) => commenter.willComment).length))
     if (!retryParsed) continue
     retryIndexes.forEach((index, retryIndex) => { finalParsed[index] = retryParsed[retryIndex] })
-    retryIndexes = retryIndexes.filter((index) => !!momentNoveltyIssue(finalParsed[index].content, historyRows.get(entries[index].poster.id) || []))
+    retryIndexes = retryIndexes.filter((index) => !!generationIssue(finalParsed[index], index, finalParsed))
   }
 
   let publishedCount = 0
   for (let i = 0; i < entries.length; i++) {
     const { poster, commenters, willHavePhoto } = entries[i]
-    const { content, comments, imageKeyword, imageKind, includePoster } = finalParsed[i]
+    const { content, comments, topicKey, timeFrame, factBasis, imageKeyword, imageKind, includePoster } = finalParsed[i]
     // Never write an exact/high-similarity duplicate even if an upstream
     // model ignored every repair instruction. Other selected posters still publish.
-    if (momentNoveltyIssue(content, historyRows.get(poster.id) || [])) continue
+    if (generationIssue(finalParsed[i], i, finalParsed)) continue
     const momentId = uuid()
 
     let imageUrl: string | undefined
@@ -464,6 +534,9 @@ export async function refreshMoments(settings: AppSettings): Promise<RefreshMome
       contactId: poster.id,
       content,
       createdAt: now + i,
+      topicKey,
+      timeFrame,
+      factBasis,
       imageUrl,
       imageAssetId,
       imagePhotographer,
@@ -532,8 +605,12 @@ export async function regenerateMoment(momentId: string, requirement: string, se
   if (!settings.apiKey) throw new Error('还没有配置 API Key')
   const poster = await db.contacts.get(moment.contactId)
   if (!poster) throw new Error('找不到动态发布者')
+  const locations = await db.locations.toArray()
+  const leafLocationIds = new Set(locations.filter((location) => isLeafLocation(location.id, locations)).map((location) => location.id))
+  const runtime = resolveContactRuntimeAt(poster, new Date(), leafLocationIds)
+  const currentLocationName = locations.find((location) => location.id === runtime.locationId)?.name || ''
   const history = (await recentMomentsFor(poster.id)).filter((item) => item.id !== moment.id)
-  const contexts = new Map([[poster.id, `【用户对本次重生成的要求】${requirement.trim() || '保持人设自然，换一个更合适的公开表达。'}\n【近期本人动态：必须避让】\n${recentMomentHistoryText(history)}`]])
+  const contexts = new Map([[poster.id, `${runtimeFactsText(poster, new Date(), currentLocationName)}\n【用户对本次重生成的要求】${requirement.trim() || '保持人设自然，换一个更合适的公开表达。'}\n【近期本人动态：必须避让】\n${recentMomentHistoryText(history)}`]])
   let parsed: ParsedMoment[] | null = null
   let correction = ''
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -541,9 +618,9 @@ export async function regenerateMoment(momentId: string, requirement: string, se
       apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, jsonMode: true, purpose: 'moments',
       messages: [{ role: 'system', content: buildMomentsPrompt([{ poster, commenters: [], willHavePhoto: false }], '', [], new Map([[poster.id, `${correction}${contexts.get(poster.id)}`]]), settings) }, { role: 'user', content: '请重新生成这条动态。必须优先服从用户要求。' }],
     })
-    const reviewed = await reviewMomentPayload(settings, raw, '{"moments":[{"content":"...","imageKeyword":"...","comments":[]}]}', `Poster ${poster.name}: ${poster.systemPrompt}`)
+    const reviewed = await reviewMomentPayload(settings, raw, '{"moments":[{"content":"...","topicKey":"...","timeFrame":"past|current|future|timeless","factBasis":"...","imageKeyword":"...","comments":[]}]}', `Poster ${poster.name}: ${poster.systemPrompt}\n${runtimeFactsText(poster, new Date(), currentLocationName)}`)
     parsed = parseMomentsResponse(reviewed, [0])
-    const issue = parsed?.[0] ? momentNoveltyIssue(parsed[0].content, history) : '输出格式不正确。'
+    const issue = parsed?.[0] ? publicMomentSceneIssue(parsed[0].content) || momentNoveltyIssue(parsed[0].content, history, parsed[0].topicKey) : '输出格式不正确。'
     if (parsed?.[0] && !issue) break
     correction = `【本次必须纠正】${issue}\n不得改几个字重发旧内容，换一个近期未使用的题材。\n`
     parsed = null
@@ -555,7 +632,7 @@ export async function regenerateMoment(momentId: string, requirement: string, se
     await db.momentLikes.where('momentId').equals(momentId).delete()
     const eventIds = await db.socialEvents.filter((event) => event.momentId === momentId || (!!event.messageId && commentIds.includes(event.messageId))).primaryKeys()
     if (eventIds.length) await db.socialEvents.bulkDelete(eventIds as string[])
-    await db.moments.update(momentId, { content: parsed![0].content, imageUrl: undefined, imagePhotographer: undefined, imagePhotographerUrl: undefined })
+    await db.moments.update(momentId, { content: parsed![0].content, topicKey: parsed![0].topicKey, timeFrame: parsed![0].timeFrame, factBasis: parsed![0].factBasis, imageUrl: undefined, imagePhotographer: undefined, imagePhotographerUrl: undefined })
     await recordSocialEvent({ type: 'moment_posted', actorId: poster.id, relatedContactIds: [poster.id], momentId, summary: `${poster.name}重新发布了一条朋友圈: ${parsed![0].content}`, importance: 1, createdAt: Date.now() })
   })
 }

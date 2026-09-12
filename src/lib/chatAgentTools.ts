@@ -1,4 +1,4 @@
-import type { AiBubble, GroupAiBubble } from '../types'
+import { CLOTHING_CATEGORIES, type AiBubble, type ClothingDraftItem, type GroupAiBubble, type OutfitChangeAction } from '../types'
 import { parseJsonLoose, serializePrivateTurn, type ImmediateActivityAction, type ParsedAiTurn } from './aiProtocol'
 import { normalizeMood } from './mood'
 import type { ChatCompletionOptions, ChatMessage, ChatToolCall, ChatToolDefinition } from './deepseek'
@@ -26,12 +26,30 @@ interface ToolPlan { calls?: Array<{ name?: unknown; arguments?: unknown }> }
 
 const PRIVATE_TURN_TOOL_NAME = 'submit_turn'
 
-const GROUP_ACTION_TOOL_NAMES = new Set(['send_image', 'create_schedule', 'start_activity_now'])
+const GROUP_ACTION_TOOL_NAMES = new Set(['send_image', 'create_schedule', 'start_activity_now', 'change_location', 'change_outfit'])
 
 const text = (value: unknown, max: number) => typeof value === 'string' ? value.trim().slice(0, max) : ''
 const positiveInteger = (value: unknown) => {
   const number = Math.round(Number(value))
   return Number.isFinite(number) && number > 0 ? number : 0
+}
+
+function parseClothingActionItems(value: unknown): ClothingDraftItem[] {
+  if (!Array.isArray(value)) return []
+  const allowed = new Set<string>(CLOTHING_CATEGORIES)
+  const seen = new Set<string>()
+  return value.flatMap((candidate): ClothingDraftItem[] => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return []
+    const item = candidate as Record<string, unknown>
+    const name = text(item.name, 40)
+    const categoryText = text(item.category, 12)
+    const color = text(item.color, 24)
+    const description = text(item.description, 120)
+    const key = `${categoryText}:${name}`.toLocaleLowerCase()
+    if (!name || !allowed.has(categoryText) || !color || !description || seen.has(key)) return []
+    seen.add(key)
+    return [{ name, category: categoryText as ClothingDraftItem['category'], color, description }]
+  }).slice(0, 12)
 }
 
 function commonProperties() {
@@ -50,6 +68,19 @@ function fn(name: string, description: string, properties: Record<string, unknow
       parameters: { type: 'object', properties, required, additionalProperties: false },
     },
   }
+}
+
+const clothingItemsSchema = {
+  type: 'array', minItems: 1, maxItems: 12,
+  description: '换装完成后的全部实际穿着，不是仅列新增或脱下的衣物。',
+  items: {
+    type: 'object', additionalProperties: false,
+    properties: {
+      name: { type: 'string' }, category: { type: 'string', enum: [...CLOTHING_CATEGORIES] },
+      color: { type: 'string' }, description: { type: 'string' },
+    },
+    required: ['name', 'category', 'color', 'description'],
+  },
 }
 
 export function privateChatTools(opts: Pick<AgentToolOptions, 'stickerNames' | 'stickerSearchEnabled' | 'imageEnabled' | 'knowledgeEnabled' | 'scheduleEnabled' | 'locationIds'>): ChatToolDefinition[] {
@@ -89,6 +120,11 @@ export function privateChatTools(opts: Pick<AgentToolOptions, 'stickerNames' | '
     phoneAccess: { type: 'string', enum: ['available', 'unavailable'] },
     ...commonProperties(),
   }, ['locationId', 'activity', 'durationMinutes', 'phoneAccess', 'thought', 'mood']))
+  tools.push(fn('change_outfit', '仅当角色在本轮已经实际穿上、脱下或换好衣物时更新衣物状态。讨论穿搭、询问意见、未来打算、用户单方面要求但角色尚未执行、拒绝或仅描述原有穿着时绝不能调用。', {
+    items: clothingItemsSchema,
+    summary: { type: 'string', description: '换装后的简短完整穿着摘要。' },
+    ...commonProperties(),
+  }, ['items', 'summary', 'thought', 'mood']))
   tools.push(
     fn('recommend_contact', '当你以当前角色的身份，确实想到一位自己认识、尚未与用户建立联系的人，而且此刻自然适合牵线时调用。不要为了活跃气氛、完成任务或仅因工具可用而调用；同一人不要重复推荐。调用后还要用 send_text 自然引出推荐卡。', {
       candidateName: { type: 'string', description: '被推荐人的姓名或常用昵称。必须是当前角色确实认识的人。' },
@@ -117,7 +153,7 @@ export function privateTurnToolDefinition(opts: Pick<AgentToolOptions, 'stickerN
     ...(opts.stickerNames.length || opts.stickerSearchEnabled ? ['sticker'] : []),
     ...(opts.imageEnabled ? ['image'] : []),
     ...(opts.scheduleEnabled && opts.locationIds.length ? ['schedule', 'activity_now'] : []),
-    'contact_recommendation', 'transfer', 'red_packet', 'loan_request', 'loan_decision', 'gift_purchase',
+    'outfit_change', 'contact_recommendation', 'transfer', 'red_packet', 'loan_request', 'loan_decision', 'gift_purchase',
   ]
   return fn(PRIVATE_TURN_TOOL_NAME, '一次提交本轮完整回复。events 按真实发送顺序排列，可以包含任意数量的文字、图片、表情和动作；不要机械地让每张图片固定搭配一句文字。图片和行动不能单独作为回复，但只要求整轮至少有一条自然文字，文字可以位于其前后。', {
     events: {
@@ -128,7 +164,7 @@ export function privateTurnToolDefinition(opts: Pick<AgentToolOptions, 'stickerN
         properties: {
           type: {
             type: 'string', enum: eventTypes,
-            description: '事件类型及必填字段：text→content；sticker→name；image→query/kind/aspectRatio/participants；schedule→date/startHour/endHour/locationId/activity/phoneAccess/summary；activity_now→locationId/activity/durationMinutes/phoneAccess，可选 delayMinutes（0-720，半小时后出发填30）；contact_recommendation→candidateName/relationToRecommender/recommendationReason/shortDescription/gender/ageRange/occupation/hobbies/personalityClues；transfer→amount/note；red_packet→amount/blessing；loan_request→amount/reason；loan_decision→loanId/decision/amount；gift_purchase→amount/name/icon/description。',
+            description: '事件类型及必填字段：text→content；sticker→name；image→query/kind/aspectRatio/participants；schedule→date/startHour/endHour/locationId/activity/phoneAccess/summary；activity_now→locationId/activity/durationMinutes/phoneAccess，可选 delayMinutes（0-720，半小时后出发填30）；outfit_change→items/summary，items必须是更改后的完整穿着；contact_recommendation→candidateName/relationToRecommender/recommendationReason/shortDescription/gender/ageRange/occupation/hobbies/personalityClues；transfer→amount/note；red_packet→amount/blessing；loan_request→amount/reason；loan_decision→loanId/decision/amount；gift_purchase→amount/name/icon/description。',
           },
           content: { type: 'string', description: 'type=text 时的自然聊天正文。' },
           name: opts.stickerSearchEnabled
@@ -165,6 +201,7 @@ export function privateTurnToolDefinition(opts: Pick<AgentToolOptions, 'stickerN
           occupation: { type: 'string' },
           hobbies: { type: 'array', maxItems: 6, items: { type: 'string' } },
           personalityClues: { type: 'array', maxItems: 6, items: { type: 'string' } },
+          items: clothingItemsSchema,
         },
         required: ['type'],
       },
@@ -185,6 +222,7 @@ export function parsePrivateToolCalls(calls: ChatToolCall[]): ParsedAiTurn {
   const bubbles: AiBubble[] = []
   const knowledgeQueries: string[] = []
   const immediateActivities: ImmediateActivityAction[] = []
+  const outfitChanges: OutfitChangeAction[] = []
   const thoughts: string[] = []
   let mood: string | undefined
   for (const call of calls) {
@@ -211,10 +249,18 @@ export function parsePrivateToolCalls(calls: ChatToolCall[]): ParsedAiTurn {
       if (/^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isInteger(startHour) && startHour >= 0 && startHour <= 23 && Number.isInteger(endHour) && endHour >= 1 && endHour <= 24 && startHour !== endHour && locationId && activity && summary && (phoneAccess === 'available' || phoneAccess === 'unavailable')) bubbles.push({ type: 'scheduleChange', date, startHour, endHour, location: locationId, locationId, activity, summary, phoneAccess })
     } else if (call.function.name === 'start_activity_now') {
       const locationId = text(args.locationId, 80), activity = text(args.activity, 16)
-      const durationMinutes = Number(args.durationMinutes), delayMinutes = args.delayMinutes === undefined ? 0 : Number(args.delayMinutes), phoneAccess = args.phoneAccess
+      const durationMinutes = Number(args.durationMinutes), delayMinutes = args.delayMinutes === undefined ? 0 : Number(args.delayMinutes)
+      // Some compatible models omit this optional-looking field even though
+      // the action itself is otherwise complete. Keep the location change and
+      // use the least disruptive default: the contact remains reachable.
+      const phoneAccess = args.phoneAccess === 'unavailable' ? 'unavailable' : 'available'
       if (locationId && activity && Number.isInteger(durationMinutes) && durationMinutes >= 5 && durationMinutes <= 480 && Number.isInteger(delayMinutes) && delayMinutes >= 0 && delayMinutes <= 720 && (phoneAccess === 'available' || phoneAccess === 'unavailable') && immediateActivities.length === 0) {
         immediateActivities.push({ locationId, activity, durationMinutes, ...(delayMinutes ? { delayMinutes } : {}), phoneAccess })
       }
+    } else if (call.function.name === 'change_outfit') {
+      const items = parseClothingActionItems(args.items)
+      const summary = text(args.summary, 120)
+      if (items.length && summary && outfitChanges.length === 0) outfitChanges.push({ items, summary })
     } else if (call.function.name === 'transfer_money') {
       const amount = positiveInteger(args.amount); if (amount) bubbles.push({ type: 'transfer', amount, note: text(args.note, 80) })
     } else if (call.function.name === 'send_red_packet') {
@@ -243,12 +289,12 @@ export function parsePrivateToolCalls(calls: ChatToolCall[]): ParsedAiTurn {
       })
     }
   }
-  return { bubbles, knowledgeQueries, mood, thought: thoughts.join('；').slice(0, 100) || undefined, immediateActivities }
+  return { bubbles, knowledgeQueries, mood, thought: thoughts.join('；').slice(0, 100) || undefined, immediateActivities, outfitChanges }
 }
 
 const PRIVATE_EVENT_TOOL_NAMES: Record<string, string> = {
   text: 'send_text', sticker: 'send_sticker', image: 'send_image', schedule: 'create_schedule',
-  activity_now: 'start_activity_now', transfer: 'transfer_money', red_packet: 'send_red_packet',
+  activity_now: 'start_activity_now', outfit_change: 'change_outfit', transfer: 'transfer_money', red_packet: 'send_red_packet',
   contact_recommendation: 'recommend_contact', loan_request: 'request_loan', loan_decision: 'decide_loan', gift_purchase: 'purchase_gift',
 }
 
@@ -279,8 +325,8 @@ function parsePrivateTurnCall(call: ChatToolCall): ParsedAiTurn {
 
 function privateTurnIsValid(parsed: ParsedAiTurn): boolean {
   if (parsed.knowledgeQueries.length > 0) return true
-  if (parsed.bubbles.length === 0 && !parsed.immediateActivities?.length) return false
-  const requiresText = !!parsed.immediateActivities?.length || parsed.bubbles.some((bubble) =>
+  if (parsed.bubbles.length === 0 && !parsed.immediateActivities?.length && !parsed.outfitChanges?.length) return false
+  const requiresText = !!parsed.immediateActivities?.length || !!parsed.outfitChanges?.length || parsed.bubbles.some((bubble) =>
     ['image', 'link', 'scheduleChange', 'transfer', 'redPacket', 'loanRequest', 'loanDecision', 'giftPurchase'].includes(bubble.type))
   return !requiresText || parsed.bubbles.some((bubble) => bubble.type === 'text')
 }
@@ -303,16 +349,17 @@ function actionDecisionTool(opts: Pick<AgentToolOptions, 'locationIds' | 'imageE
     ...(opts.stickerNames.length || opts.stickerSearchEnabled ? ['sticker'] : []),
     ...(opts.imageEnabled ? ['image'] : []),
     ...(opts.scheduleEnabled && opts.locationIds.length ? ['schedule', 'activity_now'] : []),
-    'contact_recommendation', 'transfer', 'red_packet', 'loan_request', 'loan_decision', 'gift_purchase',
+    'outfit_change', 'contact_recommendation', 'transfer', 'red_packet', 'loan_request', 'loan_decision', 'gift_purchase',
   ]
   return fn('decide_turn_actions', '只决定本轮是否需要执行结构化行动，绝不生成用户可见正文。若无需行动，decided=false、events=[]，并简短说明原因。若需要行动，decided=true，并只填已经明确成立的事件。', {
     decided: { type: 'boolean' }, reason: { type: 'string', description: '说明为何执行或不执行行动，仅供系统调试。' },
     events: { type: 'array', maxItems: 6, items: { type: 'object', additionalProperties: false, properties: {
       type: { type: 'string', enum: eventTypes },
       name: { type: 'string' }, query: { type: 'string', description: 'image 的英文纯视觉提示；禁止屏幕、聊天框、UI、文字和拼贴。' }, caption: { type: 'string', description: 'image 的中文图片说明。' }, kind: { type: 'string', enum: ['selfie', 'portrait', 'scene', 'object'] }, aspectRatio: { type: 'string', enum: ['1:1', '4:3', '3:4', '16:9', '9:16'] }, participants: { type: 'array', items: { type: 'string', enum: ['self', 'user'] } },
-      date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' }, startHour: { type: 'integer', minimum: 0, maximum: 23 }, endHour: { type: 'integer', minimum: 1, maximum: 24 }, locationId: { type: 'string', enum: opts.locationIds.length ? opts.locationIds : [''] }, activity: { type: 'string' }, durationMinutes: { type: 'integer', minimum: 5, maximum: 480 }, delayMinutes: { type: 'integer', minimum: 0, maximum: 720 }, phoneAccess: { type: 'string', enum: ['available', 'unavailable'] }, summary: { type: 'string' },
+      date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' }, startHour: { type: 'integer', minimum: 0, maximum: 23 }, endHour: { type: 'integer', minimum: 1, maximum: 24 }, locationId: { type: 'string', enum: opts.locationIds.length ? opts.locationIds : [''] }, activity: { type: 'string' }, durationMinutes: { type: 'integer', minimum: 5, maximum: 480 }, delayMinutes: { type: 'integer', minimum: 0, maximum: 720 }, phoneAccess: { type: 'string', enum: ['available', 'unavailable'], description: 'schedule 和 activity_now 必须填写；活动期间可正常聊天用 available，睡眠、考试等无法看手机时用 unavailable。' }, summary: { type: 'string' },
       amount: { type: 'integer', minimum: 1 }, note: { type: 'string' }, blessing: { type: 'string' }, reason: { type: 'string' }, loanId: { type: 'string' }, decision: { type: 'string', enum: ['accept', 'reject'] }, icon: { type: 'string' }, description: { type: 'string' },
       candidateName: { type: 'string' }, relationToRecommender: { type: 'string' }, recommendationReason: { type: 'string' }, shortDescription: { type: 'string' }, gender: { type: 'string' }, ageRange: { type: 'string' }, occupation: { type: 'string' }, hobbies: { type: 'array', maxItems: 6, items: { type: 'string' } }, personalityClues: { type: 'array', maxItems: 6, items: { type: 'string' } },
+      items: clothingItemsSchema,
     }, required: ['type'] } },
     thought: { type: 'string' }, mood: { type: 'string' }, knowledgeQueries: { type: 'array', maxItems: 2, items: { type: 'string' } },
   }, ['decided', 'reason', 'events', 'thought', 'mood', 'knowledgeQueries'])
@@ -327,33 +374,52 @@ export interface PrivateActionDecision {
 
 /** Generates user-visible prose only. This can run in parallel with action selection. */
 export async function generatePrivateTextTurn(opts: AgentToolOptions): Promise<{ parsed: ParsedAiTurn; raw: string }> {
-  const response = await chatCompletion({
-    apiKey: opts.apiKey, baseUrl: opts.baseUrl, model: opts.model, messages: opts.messages,
-    tools: [textOnlyTurnTool()], toolChoice: { type: 'function', function: { name: PRIVATE_TURN_TOOL_NAME } }, signal: opts.signal,
-    purpose: opts.purpose, automatic: opts.automatic, thinking: 'disabled', temperature: 0.82, maxTokens: 1_600, trace: opts.trace,
-  })
-  if (response.status !== 'ok') throw new Error('正文模型没有返回有效回复')
-  const call = (response.toolCalls ?? []).find((item) => item.function.name === PRIVATE_TURN_TOOL_NAME)
-  const parsed = call ? parsePrivateTurnCall(call) : { bubbles: [], knowledgeQueries: [] }
-  if (!privateTurnIsValid(parsed) || !parsed.bubbles.every((bubble) => bubble.type === 'text')) throw new Error('正文模型没有提交有效文本事件')
-  return { parsed, raw: serializePrivateTurn(parsed) }
+  const messages = [...opts.messages]
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await chatCompletion({
+      apiKey: opts.apiKey, baseUrl: opts.baseUrl, model: opts.model, messages,
+      tools: [textOnlyTurnTool()], toolChoice: { type: 'function', function: { name: PRIVATE_TURN_TOOL_NAME } }, signal: opts.signal,
+      purpose: opts.purpose, automatic: opts.automatic, thinking: 'disabled', temperature: 0.82, maxTokens: 1_600, trace: opts.trace,
+    })
+    if (response.status !== 'ok') throw new Error('正文模型没有返回有效回复')
+    const nativeCall = (response.toolCalls ?? []).find((item) => item.function.name === PRIVATE_TURN_TOOL_NAME)
+    const contentArgs = parseJsonLoose<Record<string, unknown>>(response.content)
+    const call = nativeCall ?? (contentArgs ? { id: `text-content-${attempt}`, type: 'function' as const, function: { name: PRIVATE_TURN_TOOL_NAME, arguments: JSON.stringify(contentArgs) } } : undefined)
+    const parsed = call ? parsePrivateTurnCall(call) : { bubbles: [], knowledgeQueries: [] }
+    if (privateTurnIsValid(parsed) && parsed.bubbles.every((bubble) => bubble.type === 'text')) return { parsed, raw: serializePrivateTurn(parsed) }
+    messages.push({ role: 'assistant', content: response.content, ...(response.toolCalls?.length ? { tool_calls: response.toolCalls } : {}) })
+    messages.push({ role: 'system', content: '上一次没有提交有效的文本事件。请只重试一次：调用 submit_turn，events 中至少有一条 type=text 且 content 非空，thought 和中文文字 mood 必须非空。' })
+  }
+  throw new Error('正文模型连续两次没有提交有效文本事件')
 }
 
 /** Chooses actions but can never generate user-visible text. */
 export async function decidePrivateTurnActions(opts: AgentToolOptions): Promise<PrivateActionDecision> {
-  const response = await chatCompletion({
-    apiKey: opts.apiKey, baseUrl: opts.baseUrl, model: opts.utilityModel || opts.model, messages: opts.messages,
-    tools: [actionDecisionTool(opts)], toolChoice: { type: 'function', function: { name: 'decide_turn_actions' } }, signal: opts.signal,
-    purpose: opts.purpose, automatic: opts.automatic, thinking: 'disabled', temperature: 0, maxTokens: 900,
-    trace: { ...opts.trace, stage: 'tool_call' },
-  })
-  if (response.status !== 'ok') throw new Error('行动模型没有返回有效决策')
-  const call = (response.toolCalls ?? []).find((item) => item.function.name === 'decide_turn_actions')
-  const args = call ? argumentsObject(call) : null
-  if (!call || !args || typeof args.decided !== 'boolean' || typeof args.reason !== 'string') throw new Error('行动模型缺少 decided 或 reason')
-  const parsed = parsePrivateTurnCall(call)
-  const decided = args.decided === true && (parsed.bubbles.length > 0 || !!parsed.immediateActivities?.length || parsed.knowledgeQueries.length > 0)
-  return { decided, reason: args.reason.trim().slice(0, 240), parsed, raw: JSON.stringify(args) }
+  const messages = [...opts.messages]
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const response = await chatCompletion({
+      apiKey: opts.apiKey, baseUrl: opts.baseUrl, model: opts.utilityModel || opts.model, messages,
+      tools: [actionDecisionTool(opts)], toolChoice: { type: 'function', function: { name: 'decide_turn_actions' } }, signal: opts.signal,
+      purpose: opts.purpose, automatic: opts.automatic, thinking: 'disabled', temperature: 0, maxTokens: 900,
+      trace: { ...opts.trace, stage: 'tool_call' },
+    })
+    if (response.status !== 'ok') throw new Error('行动模型没有返回有效决策')
+    const nativeCall = (response.toolCalls ?? []).find((item) => item.function.name === 'decide_turn_actions')
+    const contentArgs = parseJsonLoose<Record<string, unknown>>(response.content)
+    const call = nativeCall ?? (contentArgs ? { id: `action-content-${attempt}`, type: 'function' as const, function: { name: 'decide_turn_actions', arguments: JSON.stringify(contentArgs) } } : undefined)
+    const args = call ? argumentsObject(call) : null
+    if (call && args && typeof args.decided === 'boolean' && typeof args.reason === 'string') {
+      const parsed = parsePrivateTurnCall(call)
+      const hasAction = parsed.bubbles.length > 0 || !!parsed.immediateActivities?.length || !!parsed.outfitChanges?.length || parsed.knowledgeQueries.length > 0
+      const rawEventCount = Array.isArray(args.events) ? args.events.length : 0
+      const validNoAction = args.decided === false && rawEventCount === 0 && parsed.knowledgeQueries.length === 0
+      const validAction = args.decided === true && hasAction
+      if (validNoAction || validAction) return { decided: validAction, reason: args.reason.trim().slice(0, 240), parsed, raw: JSON.stringify(args) }
+    }
+    messages.push({ role: 'assistant', content: response.content, ...(response.toolCalls?.length ? { tool_calls: response.toolCalls } : {}) })
+    messages.push({ role: 'system', content: '上一次的行动决策参数无效。请只重试一次：decided=false 时 events=[]；decided=true 时每个 event 必须填齐该类型所需字段，thought 和中文文字 mood 必须非空。不要改变原判断。' })
+  }
+  throw new Error('行动模型连续两次返回了无效决策参数')
 }
 
 export async function planPrivateActionPlacements(opts: Pick<AgentToolOptions, 'apiKey' | 'baseUrl' | 'utilityModel' | 'model' | 'signal' | 'purpose' | 'automatic' | 'trace'> & { textRaw: string; actionRaw: string; actionCount: number }): Promise<number[]> {
@@ -387,6 +453,7 @@ export function mergePrivateTurnActions(textTurn: ParsedAiTurn, actionTurn: Pars
     mood: textTurn.mood,
     thought: textTurn.thought,
     immediateActivities: actionTurn.immediateActivities,
+    outfitChanges: actionTurn.outfitChanges,
   }
 }
 
@@ -494,11 +561,16 @@ export async function generatePrivateAgentTurn(opts: AgentToolOptions): Promise<
       thinking: 'disabled', temperature: 0.75, maxTokens: 2200, trace: opts.trace,
     })
     if (response.status !== 'ok') throw new Error('模型没有返回有效的聊天行动')
-    const turnCall = (response.toolCalls ?? []).find((call) => call.function.name === PRIVATE_TURN_TOOL_NAME)
+    const nativeTurnCall = (response.toolCalls ?? []).find((call) => call.function.name === PRIVATE_TURN_TOOL_NAME)
+    const contentArgs = parseJsonLoose<Record<string, unknown>>(response.content)
+    const turnCall = nativeTurnCall ?? (contentArgs ? {
+      id: `private-content-${round}`, type: 'function' as const,
+      function: { name: PRIVATE_TURN_TOOL_NAME, arguments: JSON.stringify(contentArgs) },
+    } : undefined)
     if (turnCall) {
       const parsed = parsePrivateTurnCall(turnCall)
       if (privateTurnIsValid(parsed)) {
-        return { parsed, raw: serializePrivateTurn(parsed), native: true }
+        return { parsed, raw: serializePrivateTurn(parsed), native: !!nativeTurnCall }
       }
     }
     if (response.toolCalls?.length) {
@@ -516,7 +588,7 @@ export async function generatePrivateAgentTurn(opts: AgentToolOptions): Promise<
 }
 
 export function groupChatTools(speakerNames: string[], memberNames: string[], base: ReturnType<typeof privateChatTools>): ChatToolDefinition[] {
-  const allowed = new Set(['send_text', 'send_sticker', 'send_image', 'search_knowledge', 'create_schedule', 'start_activity_now'])
+  const allowed = new Set(['send_text', 'send_sticker', 'send_image', 'search_knowledge', 'create_schedule', 'start_activity_now', 'change_outfit'])
   return base.filter((tool) => allowed.has(tool.function.name)).map((tool) => {
     if (tool.function.name === 'search_knowledge') return tool
     const parameters = tool.function.parameters as { properties: Record<string, unknown>; required: string[] }
@@ -529,7 +601,11 @@ export function groupChatTools(speakerNames: string[], memberNames: string[], ba
       properties.includeUser = { type: 'boolean', description: '画面中是否出现用户本人。' }
       required = required.filter((name) => name !== 'participants').concat(['participantIndexes', 'includeUser'])
     }
-    return fn(tool.function.name, tool.function.description, {
+    const exposedName = tool.function.name === 'start_activity_now' ? 'change_location' : tool.function.name
+    const description = tool.function.name === 'start_activity_now'
+      ? '更改当前发言角色的地点。角色明确决定现在或在很短时间内前往合法地点时调用；无论是响应用户要求还是角色自主离开、回家或前往别处，都必须用此工具落实位置变化，不能只在文字中声称已经移动。delayMinutes 为 0 表示立即移动。拒绝、仅讨论可能性或未来时间不明确时不要调用。调用后必须由同一角色同时发送自然聊天文字。'
+      : tool.function.description
+    return fn(exposedName, description, {
       speakerIndex: { type: 'integer', minimum: 1, maximum: speakerNames.length, description: speakerNames.map((name, index) => `${index + 1}=${name}`).join('，') },
       ...properties,
     }, ['speakerIndex', ...required])
@@ -540,10 +616,15 @@ export interface GroupImmediateActivityAction extends ImmediateActivityAction {
   speakerIndex: number
 }
 
-export function parseGroupToolCalls(calls: ChatToolCall[], speakerCount: number, memberCount = speakerCount): { bubbles: GroupAiBubble[]; knowledgeQueries: string[]; immediateActivities: GroupImmediateActivityAction[]; turnSummary: string; planCandidates: [] } {
+export interface GroupOutfitChangeAction extends OutfitChangeAction {
+  speakerIndex: number
+}
+
+export function parseGroupToolCalls(calls: ChatToolCall[], speakerCount: number, memberCount = speakerCount): { bubbles: GroupAiBubble[]; knowledgeQueries: string[]; immediateActivities: GroupImmediateActivityAction[]; outfitChanges: GroupOutfitChangeAction[]; turnSummary: string; planCandidates: [] } {
   const bubbles: GroupAiBubble[] = []
   const knowledgeQueries: string[] = []
   const immediateActivities: GroupImmediateActivityAction[] = []
+  const outfitChanges: GroupOutfitChangeAction[] = []
   for (const call of calls) {
     const args = argumentsObject(call)
     if (!args) continue
@@ -563,7 +644,7 @@ export function parseGroupToolCalls(calls: ChatToolCall[], speakerCount: number,
       const privateParsed = parsePrivateToolCalls([{ ...call, function: { ...call.function, arguments: JSON.stringify({ ...args, speakerIndex: undefined }) } }])
       const schedule = privateParsed.bubbles.find((bubble) => bubble.type === 'scheduleChange')
       if (schedule?.type === 'scheduleChange') bubbles.push({ ...common, ...schedule })
-    } else if (call.function.name === 'start_activity_now') {
+    } else if (call.function.name === 'start_activity_now' || call.function.name === 'change_location') {
       const locationId = text(args.locationId, 80), activity = text(args.activity, 16)
       const durationMinutes = Number(args.durationMinutes), delayMinutes = args.delayMinutes === undefined ? 0 : Number(args.delayMinutes), phoneAccess = args.phoneAccess
       if (locationId && activity && Number.isInteger(durationMinutes) && durationMinutes >= 5 && durationMinutes <= 480 && Number.isInteger(delayMinutes) && delayMinutes >= 0 && delayMinutes <= 720
@@ -571,9 +652,13 @@ export function parseGroupToolCalls(calls: ChatToolCall[], speakerCount: number,
         && !immediateActivities.some((action) => action.speakerIndex === speakerIndex)) {
         immediateActivities.push({ speakerIndex, locationId, activity, durationMinutes, ...(delayMinutes ? { delayMinutes } : {}), phoneAccess })
       }
+    } else if (call.function.name === 'change_outfit') {
+      const items = parseClothingActionItems(args.items)
+      const summary = text(args.summary, 120)
+      if (items.length && summary && !outfitChanges.some((change) => change.speakerIndex === speakerIndex)) outfitChanges.push({ speakerIndex, items, summary })
     }
   }
-  return { bubbles, knowledgeQueries, immediateActivities, turnSummary: bubbles.map((bubble) => bubble.type === 'text' ? bubble.content : bubble.type).join(' ').slice(0, 160), planCandidates: [] }
+  return { bubbles, knowledgeQueries, immediateActivities, outfitChanges, turnSummary: bubbles.map((bubble) => bubble.type === 'text' ? bubble.content : bubble.type).join(' ').slice(0, 160), planCandidates: [] }
 }
 
 export async function generateGroupAgentTurn(opts: AgentToolOptions & { speakerNames: string[]; memberNames: string[]; messageBounds: { min: number; max: number } }): Promise<{ parsed: ReturnType<typeof parseGroupToolCalls>; raw: string; native: boolean }> {
@@ -592,11 +677,11 @@ export async function generateGroupAgentTurn(opts: AgentToolOptions & { speakerN
       if (parsed.bubbles.length < opts.messageBounds.min || parsed.bubbles.length > opts.messageBounds.max) {
         throw new Error(`群聊消息量不符合${opts.messageBounds.min}-${opts.messageBounds.max}条的硬约束`)
       }
-      return { parsed, raw: JSON.stringify({ messages: parsed.bubbles, immediateActivities: parsed.immediateActivities, turnSummary: parsed.turnSummary, knowledgeQueries: parsed.knowledgeQueries, planCandidates: [] }), native: false }
+      return { parsed, raw: JSON.stringify({ messages: parsed.bubbles, immediateActivities: parsed.immediateActivities, outfitChanges: parsed.outfitChanges, turnSummary: parsed.turnSummary, knowledgeQueries: parsed.knowledgeQueries, planCandidates: [] }), native: false }
     }
     const invalid = nativeCalls.filter((call) => {
       const parsed = parseGroupToolCalls([call], opts.speakerNames.length, opts.memberNames.length)
-      return parsed.bubbles.length === 0 && parsed.knowledgeQueries.length === 0 && parsed.immediateActivities.length === 0
+      return parsed.bubbles.length === 0 && parsed.knowledgeQueries.length === 0 && parsed.immediateActivities.length === 0 && parsed.outfitChanges.length === 0
     })
     accepted.push(...nativeCalls.filter((call) => !invalid.includes(call)))
     if (!invalid.length) {
@@ -622,7 +707,7 @@ export async function generateGroupAgentTurn(opts: AgentToolOptions & { speakerN
   }
   const completed = await completeGroupActionText(opts, tools, accepted, '')
   const parsed = parseGroupToolCalls(completed, opts.speakerNames.length, opts.memberNames.length)
-  if (!parsed.bubbles.length && !parsed.knowledgeQueries.length && !parsed.immediateActivities.length) throw new Error('模型连续返回了无效的群聊工具参数')
+  if (!parsed.bubbles.length && !parsed.knowledgeQueries.length && !parsed.immediateActivities.length && !parsed.outfitChanges.length) throw new Error('模型连续返回了无效的群聊工具参数')
   if (parsed.bubbles.length < opts.messageBounds.min || parsed.bubbles.length > opts.messageBounds.max) throw new Error(`群聊消息量不符合${opts.messageBounds.min}-${opts.messageBounds.max}条的硬约束`)
-  return { parsed, raw: JSON.stringify({ messages: parsed.bubbles, immediateActivities: parsed.immediateActivities, turnSummary: parsed.turnSummary, knowledgeQueries: parsed.knowledgeQueries, planCandidates: [] }), native: true }
+  return { parsed, raw: JSON.stringify({ messages: parsed.bubbles, immediateActivities: parsed.immediateActivities, outfitChanges: parsed.outfitChanges, turnSummary: parsed.turnSummary, knowledgeQueries: parsed.knowledgeQueries, planCandidates: [] }), native: true }
 }

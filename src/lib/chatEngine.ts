@@ -39,6 +39,7 @@ import { createConversationIllustration, createMediaAsset, detectExplicitImageRe
 import { buildDirectOutputInstruction, parseDirectOutputReview } from './directOutput'
 import { decidePrivateTurnActions, generatePrivateAgentTurn, generatePrivateTextTurn, mergePrivateTurnActions, planPrivateActionPlacements } from './chatAgentTools'
 import { traceTurnEvent } from './deepseek'
+import { applyOutfitChange, clothingContextText } from './clothing'
 import type { AiBubble, AppSettings, Contact, InternalTask, Message, MessageType, ScheduleOverride, Sticker } from '../types'
 
 function ensureImageHasText(bubbles: AiBubble[]): AiBubble[] {
@@ -503,7 +504,8 @@ async function runAiTurn(
     )}`
     const userMemoryText = `【你对TA的了解】${contact.memoryFacts || '（刚开始聊）'}`
     const habitText = `【相处习惯】${contact.memoryStyle || '（还没有形成习惯）'}`
-    const situationText = `【当前情境】现在: ${describeCurrentTime(nowDate)}。对方: ${buildUserProfileText(settings)}。${activeMood ? `你的心情: ${activeMood}。` : ''}【日程】${describeCurrentSchedule(contact, nowDate) ? `\n当前: ${describeCurrentSchedule(contact, nowDate)}` : '\n当前: 暂无安排'}${scheduleText ? `\n接下来:\n${scheduleText}` : '\n接下来: 暂无安排'}${memoryPromptOn && activeUpcomingPlansText(contact, nowDate) ? `\n约定: ${activeUpcomingPlansText(contact, nowDate)}` : ''}${recentEventsText ? `\n最近: ${recentEventsText}` : ''}`
+    const clothingText = clothingContextText(contact)
+    const situationText = `【当前情境】现在: ${describeCurrentTime(nowDate)}。对方: ${buildUserProfileText(settings)}。${activeMood ? `你的心情: ${activeMood}。` : ''}【日程】${describeCurrentSchedule(contact, nowDate) ? `\n当前: ${describeCurrentSchedule(contact, nowDate)}` : '\n当前: 暂无安排'}${scheduleText ? `\n接下来:\n${scheduleText}` : '\n接下来: 暂无安排'}${memoryPromptOn && activeUpcomingPlansText(contact, nowDate) ? `\n约定: ${activeUpcomingPlansText(contact, nowDate)}` : ''}${recentEventsText ? `\n最近: ${recentEventsText}` : ''}\n${clothingText}`
     const contextSections = buildRawChatPrompt({
       name: contact.name,
       persona: `${contact.systemPrompt}${runtimeAgeFact}${featureActive(contactPromptSettings, 'career') && contact.occupation ? `\n当前职业：${contact.occupation}，现实月薪：${contact.monthlySalary ?? 0}。工作会真实影响你的作息和日常话题。` : ''}${financeContext}`,
@@ -583,7 +585,7 @@ async function runAiTurn(
       const explicitImageConstraint = explicitImageKind
         ? `\n【明确图片请求，不能漏】用户明确要求角色发送${explicitImageKind === 'selfie' ? '自拍' : '照片'}。本轮必须 decided=true，events 必须包含 type=image、kind=${explicitImageKind}、participants=["self"]，并按动作和环境选择 aspectRatio；普通自拍优先 3:4 或 9:16，禁止习惯性选择 1:1。图片 query 只能描述真实画面，不得包含手机、屏幕、聊天框、UI、文字、字幕、拼贴或分屏。自动氛围配图不能代替这个发送图片动作。`
         : ''
-      const actionMessages = [...baseMessages, { role: 'system' as const, content: `【当前事实】${replyTimeContext}\n你是本轮唯一的世界状态决策者。只调用 decide_turn_actions，绝不生成用户可见正文。必须在 decided=false 与 decided=true 之间作出明确决定；false 时 events 必须为空并说明原因，true 时只填已由用户请求和当前事实充分支持的工具事件。${recommendationConstraint}${locationActionContext ? `\n${locationActionContext}` : ''}${explicitImageConstraint}` }]
+      const actionMessages = [...baseMessages, { role: 'system' as const, content: `【当前事实】${replyTimeContext}\n你是本轮唯一的世界状态决策者。只调用 decide_turn_actions，绝不生成用户可见正文。必须在 decided=false 与 decided=true 之间作出明确决定；false 时 events 必须为空并说明原因，true 时只填已由用户请求和当前事实充分支持的工具事件。衣物发生实际更换、穿上或脱下时必须加入 type=outfit_change，并在 items 中提交更改后的完整穿着；只是讨论、建议、未来打算、描述原有衣服或角色没有执行时绝不能改。${recommendationConstraint}${locationActionContext ? `\n${locationActionContext}` : ''}${explicitImageConstraint}` }]
       const [textGenerated, actionDecision] = await Promise.all([
         generatePrivateTextTurn({ ...common, messages: textMessages, trace: { turnId: streamId, stage: 'original_generation', conversationId } }),
         decidePrivateTurnActions({ ...common, messages: actionMessages, trace: { turnId: streamId, stage: 'tool_call', conversationId } }),
@@ -619,6 +621,7 @@ async function runAiTurn(
     let finalRaw = jsonRaw
     let { bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = parsedTurn
     let immediateActivities = parsedTurn.immediateActivities ?? []
+    let outfitChanges = parsedTurn.outfitChanges ?? []
     bubbles = ensureImageHasText(bubbles)
     const initiallyRequestedKnowledge = [...knowledgeQueries]
     const qualityCheckDebug = {
@@ -671,6 +674,7 @@ async function runAiTurn(
         finalRaw = jsonRaw
         ;({ bubbles, knowledgeQueries, mood: turnMood, thought: turnThought } = converted)
         immediateActivities = converted.immediateActivities ?? []
+        outfitChanges = converted.outfitChanges ?? []
         bubbles = ensureImageHasText(bubbles)
       }
     }
@@ -717,6 +721,11 @@ async function runAiTurn(
     }
     let actionCommittee: (ActionCommitteeDebug & { toolResult?: CreateSpecialTaskResult }) | undefined
     let internalTask: InternalTask | undefined
+    if (!qualityCheckDebug.detectedInvalid && outfitChanges.length > 0) {
+      const applied = await applyOutfitChange(contact.id, outfitChanges[0], { conversationId, turnId: streamId, now })
+      if (applied) void traceTurnEvent({ turnId: streamId, conversationId, stage: 'clothing_change', output: `衣物状态已更新：${applied.summary}` })
+      else console.warn(`[agent] 衣物状态更新失败 contact=${displayName(contact)}`)
+    }
     if (!directOutput && !qualityCheckDebug.detectedInvalid && immediateActivities.length > 0 && isModuleEnabled('location')) {
       const action = immediateActivities[0]
       const location = actionLocations.find((candidate) => candidate.id === action.locationId)
