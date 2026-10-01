@@ -45,7 +45,7 @@ test('world picker stays in place, opens current backups, and batch-deletes only
   await expect(page.getByRole('button', { name: /世界 B.*当前世界/ })).toBeVisible()
 })
 
-test('desktop world editor remains in the settings section', async ({ page }) => {
+test('desktop world editor remains in the discover section', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(window, 'talkDesktop', { configurable: true, value: {
       minimize() {}, toggleMaximize() {}, close() {}, isMaximized: async () => false, onMaximizedChange: () => () => {},
@@ -62,10 +62,10 @@ test('desktop world editor remains in the settings section', async ({ page }) =>
   })
   await page.getByRole('button', { name: /桌面世界/ }).click()
 
-  await page.getByRole('button', { name: '编辑当前世界观' }).click()
+  await page.getByRole('button', { name: '编辑当前世界书' }).click()
   await expect(page).toHaveURL(/#\/library\/world\/[^/]+$/)
-  await expect(page.locator('.desktop-rail-button[title="设置"]')).toHaveClass(/active/)
-  await expect(page.locator('.desktop-sidebar')).toContainText('个人与设置')
+  await expect(page.locator('.desktop-rail-button[title="朋友圈"]')).toHaveClass(/active/)
+  await expect(page.locator('.desktop-sidebar')).toContainText('发现')
 })
 
 for (const viewport of [

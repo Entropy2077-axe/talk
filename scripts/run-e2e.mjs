@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 
-const baseUrl = 'http://127.0.0.1:5173'
+const baseUrl = process.env.TALK_E2E_BASE_URL || 'http://127.0.0.1:5173'
 const isWindows = process.platform === 'win32'
 
 function command(name) {
@@ -36,7 +36,8 @@ function spawnInherited(cmd, args) {
 
 let server
 if (!(await isServerReady())) {
-  server = spawnInherited(command('npm'), ['run', 'dev', '--', '--host', '127.0.0.1'])
+  const target = new URL(baseUrl)
+  server = spawnInherited(command('npm'), ['run', 'dev', '--', '--host', target.hostname, '--port', target.port || '5173', '--strictPort'])
   await waitForServer()
 }
 

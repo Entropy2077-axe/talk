@@ -4,9 +4,9 @@ export function managedBackParent(pathname: string): string | undefined {
   const detail = pathname.match(/^\/save-load\/world\/([^/]+)\/snapshot\/[^/]+$/)
   if (detail) return `/save-load/world/${detail[1]}`
   if (/^\/save-load\/world\/[^/]+$/.test(pathname)) return '/save-load'
-  if (pathname === '/save-load') return '/me'
+  if (pathname === '/save-load') return '/discover'
   const libraryWorld = pathname.match(/^\/library\/world\/([^/]+)$/)
-  if (libraryWorld) return `/library?view=worldview&worldId=${encodeURIComponent(libraryWorld[1])}`
+  if (libraryWorld) return '/save-load'
   return undefined
 }
 

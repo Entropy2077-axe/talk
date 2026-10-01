@@ -36,6 +36,10 @@ export async function recordSocialEvent(opts: {
   // A moment may have been removed while an AI reaction was still being
   // generated. Never recreate derived social data for a deleted post.
   if (opts.momentId && !await db.moments.get(opts.momentId)) return
+  // Regeneration removes the rejected chat messages before requesting a new
+  // turn. Do not let an in-flight group summary recreate context for a
+  // message that no longer exists.
+  if (opts.type === 'group_turn' && opts.messageId && !await db.messages.get(opts.messageId)) return
   const event: SocialEvent = {
     id: uuid(),
     type: opts.type,

@@ -112,10 +112,10 @@ function WorldPickerPage() {
         <div className="bg-[var(--ui-action)] px-4 py-4 text-[var(--ui-on-action)]">
           <div className="flex items-center gap-2"><Sparkles size={18}/><p className="text-sm font-semibold">世界观操作</p></div>
           <p className="ui-font-display mt-1 truncate text-lg font-semibold">{activeWorld?.name || '尚未选择世界'}</p>
-          <p className="mt-1 text-xs opacity-80">世界观由资料库独立管理，读取旧备份不会回滚设定。</p>
+          <p className="mt-1 text-xs opacity-80">在这里管理世界书、切换世界与读取备份。</p>
         </div>
         <div className="grid grid-cols-2 gap-2 p-3">
-          <ActionButton icon={<BookOpen size={18}/>} label="编辑当前世界观" disabled={!activeWorldId || locked} onClick={() => navigate(`/library/world/${activeWorldId}`, { state: { returnTo: '/save-load' } })} />
+          <ActionButton icon={<BookOpen size={18}/>} label="编辑当前世界书" disabled={!activeWorldId || locked} onClick={() => navigate(`/library/world/${activeWorldId}`, { state: { returnTo: '/save-load' } })} />
           <ActionButton icon={<Archive size={18}/>} label="读取备份" disabled={!activeWorldId || locked} onClick={() => navigate(`/save-load/world/${activeWorldId}`)} />
         </div>
         <div className="grid grid-cols-2 gap-2 px-3 pb-3">
@@ -132,7 +132,7 @@ function WorldPickerPage() {
         const current = activeWorldId === world.id
         const loading = busyWorldId === world.id
         const checked = selectedWorldIds.includes(world.id)
-        return <button type="button" key={world.id} disabled={locked || (batch && current)} onClick={() => batch ? setSelectedWorldIds((ids) => checked ? ids.filter((id) => id !== world.id) : [...ids, world.id]) : void enterWorld(world.id)} className={`flex w-full items-center gap-3 rounded-[var(--ui-radius-card)] border bg-[var(--ui-surface)] p-4 text-left shadow-[var(--ui-shadow)] disabled:opacity-60 ${current ? 'border-[var(--ui-action)] ring-2 ring-[var(--ui-accent-soft)]' : 'border-[var(--ui-border)]'}`}>
+        return <article key={world.id}><button type="button" disabled={locked || (batch && current)} onClick={() => batch ? setSelectedWorldIds((ids) => checked ? ids.filter((id) => id !== world.id) : [...ids, world.id]) : void enterWorld(world.id)} className={`flex w-full items-center gap-3 rounded-[var(--ui-radius-card)] border bg-[var(--ui-surface)] p-4 text-left shadow-[var(--ui-shadow)] disabled:opacity-60 ${current ? 'border-[var(--ui-action)] ring-2 ring-[var(--ui-accent-soft)]' : 'border-[var(--ui-border)]'}`}>
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--ui-radius-control)] bg-[var(--ui-accent-soft)] text-[var(--ui-action)]">{loading ? <LoaderCircle size={21} className="animate-spin"/> : <BookOpen size={21}/>}</span>
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-2"><span className="ui-font-display truncate text-base font-medium text-[var(--ui-text)]">{world.name}</span>{current && <span className="shrink-0 rounded-full bg-[var(--ui-accent-soft)] px-2 py-0.5 text-[10px] text-[var(--ui-action)]">当前世界</span>}</span>
@@ -141,6 +141,7 @@ function WorldPickerPage() {
           </span>
           {batch ? checked ? <CheckCircle2 size={21} className="text-[var(--ui-danger)]"/> : <Circle size={21} className="text-[var(--ui-text-3)]"/> : <ChevronRight size={19} className="text-[var(--ui-text-3)]"/>}
         </button>
+        {!batch && <button type="button" disabled={locked} onClick={() => navigate(`/library/world/${world.id}`, { state: { returnTo: '/save-load' } })} className="mt-1 flex min-h-11 w-full items-center justify-center gap-2 rounded-[var(--ui-radius-control)] text-sm text-[var(--ui-action)]"><BookOpen size={16} />编辑世界书</button>}</article>
       })}</div>
       {!cards.length && <p className="rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] py-12 text-center text-sm text-[var(--ui-text-3)]">还没有世界，请先新建一个</p>}
     </div>

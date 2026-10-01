@@ -45,6 +45,13 @@ const GroupAddPage = lazy(() => import('./pages/GroupAddPage').then((m) => ({ de
 const GroupInfoPage = lazy(() => import('./pages/GroupInfoPage').then((m) => ({ default: m.GroupInfoPage })))
 const MomentsPage = lazy(() => loadMomentsPage().then((m) => ({ default: m.MomentsPage })))
 const SettingsPage = lazy(() => loadSettingsPage().then((m) => ({ default: m.SettingsPage })))
+const AiSettingsPage = lazy(() => import('./pages/SettingsCategoryPage').then((m) => ({ default: m.AiSettingsPage })))
+const CreationSettingsPage = lazy(() => import('./pages/SettingsCategoryPage').then((m) => ({ default: m.CreationSettingsPage })))
+const ChatSettingsPage = lazy(() => import('./pages/ChatSettingsPage').then((m) => ({ default: m.ChatSettingsPage })))
+const AiAdvancedSettingsPage = lazy(() => import('./pages/AiAdvancedSettingsPage').then((m) => ({ default: m.AiAdvancedSettingsPage })))
+const DataSettingsPage = lazy(() => import('./pages/DataSettingsPage').then((m) => ({ default: m.DataSettingsPage })))
+const EconomySettingsPage = lazy(() => import('./pages/EconomySettingsPage').then((m) => ({ default: m.EconomySettingsPage })))
+const AdminSettingsPage = lazy(() => import('./pages/AdminSettingsPage').then((m) => ({ default: m.AdminSettingsPage })))
 const ApiConfigurationsPage = lazy(() => import('./pages/ApiConfigurationsPage').then((m) => ({ default: m.ApiConfigurationsPage })))
 const GlobalPromptModulesPage = lazy(() => import('./pages/GlobalPromptModulesPage').then((m) => ({ default: m.GlobalPromptModulesPage })))
 const AppearancePage = lazy(() => import('./pages/AppearancePage').then((m) => ({ default: m.AppearancePage })))
@@ -186,7 +193,10 @@ function App() {
   // based, so without this a contact only appears on the Contacts tab.
   useEffect(() => { if (worldReady) void ensureContactConversations() }, [worldReady])
   useEffect(() => {
-    if (!desktop) return
+    if (!desktop) {
+      const timer = window.setTimeout(() => { void Promise.allSettled([loadChatPage()]) }, 1500)
+      return () => window.clearTimeout(timer)
+    }
     // Warm the routes people open most often after the desktop shell settles.
     // Dynamic imports are cached, so lazy() reuses these exact promises later.
     const timer = window.setTimeout(() => {
@@ -258,6 +268,13 @@ function App() {
         <Route path="/social-inbox" element={<SocialInboxPage />} />
         <Route path="/relationships" element={<RelationshipsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/settings/ai" element={<AiSettingsPage />} />
+        <Route path="/settings/ai/advanced" element={<AiAdvancedSettingsPage />} />
+        <Route path="/settings/chat" element={<ChatSettingsPage />} />
+        <Route path="/settings/creation" element={<CreationSettingsPage />} />
+        <Route path="/settings/data" element={<DataSettingsPage />} />
+        <Route path="/settings/economy" element={<EconomySettingsPage />} />
+        <Route path="/settings/admin" element={<AdminSettingsPage />} />
         <Route path="/settings/api-configurations" element={<ApiConfigurationsPage />} />
         <Route path="/settings/other-interfaces" element={<OtherInterfacesPage />} />
         <Route path="/presets" element={<GlobalPromptModulesPage />} />

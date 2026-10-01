@@ -31,12 +31,14 @@ export function normalizeAiApiConfigs(value: unknown, legacy: Pick<AppSettings, 
   return result.length ? result : [legacyAiApiConfig(legacy, legacySampling)]
 }
 
-export function orderedAiApiConfigs(settings: Pick<AppSettings, 'aiApiConfigs' | 'aiApiFailoverOrder' | 'aiProvider' | 'apiKey' | 'baseUrl' | 'model' | 'utilityModel' | 'promptPresets' | 'activePromptPresetId'>): AiApiConfig[] {
+export function savedAiApiConfigs(settings: Pick<AppSettings, 'aiApiConfigs' | 'aiProvider' | 'apiKey' | 'baseUrl' | 'model' | 'utilityModel' | 'promptPresets' | 'activePromptPresetId'>): AiApiConfig[] {
   const legacySampling = (settings.promptPresets?.find((preset) => preset.id === settings.activePromptPresetId) as { sampling?: unknown } | undefined)?.sampling
-  const configs = normalizeAiApiConfigs(settings.aiApiConfigs, settings, legacySampling)
-  const wanted = Array.isArray(settings.aiApiFailoverOrder) ? settings.aiApiFailoverOrder : []
-  const ordered = wanted.flatMap((id) => configs.filter((config) => config.id === id))
-  return [...ordered, ...configs.filter((config) => !ordered.some((item) => item.id === config.id))]
+  return normalizeAiApiConfigs(settings.aiApiConfigs, settings, legacySampling)
+}
+
+export function activeAiApiConfig(settings: Parameters<typeof savedAiApiConfigs>[0] & Pick<AppSettings, 'activeAiApiConfigId'>): AiApiConfig {
+  const configs = savedAiApiConfigs(settings)
+  return configs.find((config) => config.id === settings.activeAiApiConfigId) ?? configs[0]
 }
 
 export function legacyFieldsForApiConfig(config: AiApiConfig): Pick<AppSettings, 'aiProvider' | 'apiKey' | 'baseUrl' | 'model' | 'utilityModel'> {

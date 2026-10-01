@@ -70,7 +70,7 @@ export function ContactsPage() {
         ))}
 
         {contacts.length === 0 && generationTasks.filter((task) => !['cancelled', 'completed'].includes(task.status)).length === 0 ? (
-          <div className="ui-empty-state"><p className="text-sm text-[var(--ui-text-2)]">还没有联系人</p><p className="mt-1 text-xs">添加一个人物，开始积累聊天、关系和共同经历。</p><button type="button" onClick={() => navigate('/contact/new')} className="ui-primary-action mt-4 px-4 py-2 text-sm">添加联系人</button></div>
+          <p className="py-12 text-center text-sm text-[var(--ui-text-3)]">还没有联系人</p>
         ) : (
           contacts.map((c) => (
             <button

@@ -51,7 +51,7 @@ describe('location map', () => {
 
   it('blocks the complete three-by-three area around another marker', () => {
     const map = createWorldMap('spacing')
-    const locations = [{ id: 'one', name: '地点', kind: 'custom', description: '', access: 'public' as const, sortOrder: 1, createdAt: 1, updatedAt: 1, mapBinding: { x: 10, y: 10, allowedTerrains: ['urban' as const], buildingCategory: 'custom' } }]
+    const locations = [{ id: 'one', name: '地点', kind: 'custom', description: '', sortOrder: 1, createdAt: 1, updatedAt: 1, mapBinding: { x: 10, y: 10, allowedTerrains: ['urban' as const], buildingCategory: 'custom' } }]
     expect(isLocationPlacementAvailable({ x: 11, y: 11 }, locations, map)).toBe(false)
     expect(isLocationPlacementAvailable({ x: 12, y: 10 }, locations, map)).toBe(true)
   })

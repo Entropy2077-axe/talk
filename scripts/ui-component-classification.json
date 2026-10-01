@@ -54,7 +54,16 @@
     "src/pages/StickersPage.tsx",
     "src/pages/WarehousePage.tsx",
     "src/pages/WorkPage.tsx",
-    "src/pages/WorldbookCollectionPage.tsx"
+    "src/pages/WorldbookCollectionPage.tsx",
+    "src/components/ChatComposer.tsx",
+    "src/components/SettingsMenu.tsx",
+    "src/components/FullscreenControl.tsx",
+    "src/pages/ChatSettingsPage.tsx",
+    "src/pages/AiAdvancedSettingsPage.tsx",
+    "src/pages/DataSettingsPage.tsx",
+    "src/pages/EconomySettingsPage.tsx",
+    "src/pages/AdminSettingsPage.tsx",
+    "src/pages/SettingsCategoryPage.tsx"
   ],
   "special": {
     "src/components/ImageCropper.tsx": "图片裁剪画布需要遮罩、缩放和裁剪框视觉",

@@ -163,16 +163,17 @@ export function WorkPage() {
           >
             {loading ? "生成中" : "搜索"}
           </button>
-        </div>
-        <button
+        </div><div className="mx-4 mt-3 flex">        <button
           onClick={() => {
             setQuery("");
             void generate("");
           }}
-          className="mx-4 mt-2 text-xs text-gray-500"
+          disabled={loading}
+          className="ui-secondary-action min-h-11 flex-1 px-4 py-2.5 text-sm disabled:opacity-40"
         >
           随机生成岗位
-        </button>
+        </button></div>
+
         {error && <p className="mx-4 mt-2 text-xs text-red-500">{error}</p>}
         <div className="mx-4 mt-3 space-y-3">
           {jobs.slice(page * 4, page * 4 + 4).map((job) => (

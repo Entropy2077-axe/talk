@@ -140,7 +140,7 @@ async function seedSearchAndGroupFixture(page: Page) {
 }
 
 test('settings page exports a complete Talk backup json', async ({ page }) => {
-  await page.goto('/#/settings')
+  await page.goto('/#/settings/data')
   await seedBackupFixture(page)
   await page.reload()
 
@@ -163,7 +163,7 @@ test('settings page exports a complete Talk backup json', async ({ page }) => {
   )
 })
 
-test('desktop settings sidebar exposes top-level tools and the experience mode switch', async ({ page }) => {
+test('desktop settings sidebar exposes categories and the experience mode switch', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(window, 'talkDesktop', {
       configurable: true,
@@ -179,8 +179,8 @@ test('desktop settings sidebar exposes top-level tools and the experience mode s
   await page.setViewportSize({ width: 1280, height: 800 })
   await page.goto('/#/settings')
 
-  await expect(page.locator('.desktop-sidebar').getByRole('button', { name: /LLM 设置/ })).toBeVisible()
-  await expect(page.locator('.desktop-sidebar').getByRole('button', { name: /绘图工具/ })).toBeVisible()
+  await expect(page.locator('.desktop-sidebar').getByRole('button', { name: /^AI 设置/ })).toBeVisible()
+  await expect(page.locator('.desktop-sidebar').getByRole('button', { name: /^创作与素材/ })).toBeVisible()
 
   const entry = page.locator('.desktop-sidebar').getByRole('button', { name: /体验模式/ })
   await expect(entry).toBeVisible()
@@ -237,7 +237,7 @@ test('desktop contacts live only in the sidebar while the main pane stays contex
 })
 
 test('settings page restores contacts and settings from a backup file', async ({ page }) => {
-  await page.goto('/#/settings')
+  await page.goto('/#/settings/data')
   await seedBackupFixture(page)
   await page.reload()
 
@@ -271,7 +271,8 @@ test('settings page restores contacts and settings from a backup file', async ({
   expect(restored.contacts[0].name).toBe('Backup Alice')
   expect(restored.messages[0].content).toBe('backup hello')
   expect(restored.userNickname).toBe('Backup User')
-  expect(restored.apiKey).toBe('sk-regression-secret')
+  // Backup files omit credentials; restore preserves the device's current key.
+  expect(restored.apiKey).toBe('mutated-secret')
 })
 
 test('discover page does not expose removed todo entry', async ({ page }) => {
@@ -286,10 +287,10 @@ test('discover page does not expose removed todo entry', async ({ page }) => {
 
 
 test('settings page scrolls to bottom revealing backup section and danger zone', async ({ page }) => {
-  await page.goto('/#/settings')
+  await page.goto('/#/settings/data')
   await clearDatabase(page)
 
-  const scrollContainer = page.locator('.overflow-y-auto')
+  const scrollContainer = page.locator('.ui-page-scroll')
   await scrollContainer.last().evaluate((el) => {
     el.scrollTop = el.scrollHeight
   })
@@ -357,7 +358,7 @@ test('messages page empty state keeps bottom nav pinned to viewport bottom', asy
 })
 
 test('settings page backup json does not contain setSettings function field', async ({ page }) => {
-  await page.goto('/#/settings')
+  await page.goto('/#/settings/data')
   await seedBackupFixture(page)
 
   const downloadPromise = page.waitForEvent('download')
@@ -576,7 +577,7 @@ test('admin mode can expand persisted ai trace payload in sky-eye', async ({ pag
 })
 
 test('settings page offers preset background colors and image crop before saving', async ({ page }, testInfo) => {
-  await page.goto('/#/settings')
+  await page.goto('/#/settings/chat')
   await clearDatabase(page)
 
   await page.getByLabel('应用背景色 #edf4ff').click()
@@ -591,15 +592,31 @@ test('settings page offers preset background colors and image crop before saving
   await writeFile(
     imagePath,
     Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAQAAAAGCAIAAADj5ND2AAAAFElEQVR4nGP8z8DwnwEJMDGgAcQBAJvGAwF4F6M8AAAAAElFTkSuQmCC',
+      await page.evaluate(() => {
+        const canvas = document.createElement('canvas')
+        canvas.width = 120
+        canvas.height = 180
+        const context = canvas.getContext('2d')!
+        context.fillStyle = '#edf4ff'
+        context.fillRect(0, 0, canvas.width, canvas.height)
+        return canvas.toDataURL('image/png').split(',')[1]
+      }),
       'base64',
     ),
   )
   await page.locator('input[accept="image/*"]').setInputFiles(imagePath)
   await expect(page.getByText('裁剪聊天背景')).toBeVisible()
   await expect(page.getByTestId('frame-cropper-stage')).toBeVisible()
+  await expect.poll(() => page.getByTestId('frame-cropper-stage').locator('img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0)
   await expect(page.getByTestId('frame-cropper-stage').locator('input[type="range"]')).toHaveCount(0)
-  await expect(page.getByText('拖拽框选区域')).toBeVisible()
+  await expect(page.getByText('拖动裁剪框调整位置，拖动角点调整大小')).toBeVisible()
+  await page.getByRole('button', { name: '确定', exact: true }).click()
+  await expect(page.getByText('裁剪聊天背景')).toHaveCount(0)
+  const saved = await page.evaluate(async () => {
+    const { useSettingsStore } = await import('/src/store/useSettingsStore.ts')
+    return useSettingsStore.getState().chatBackground
+  })
+  expect(saved).toMatch(/^data:image\//)
 })
 
 test('currency icon setting updates wallet formatting globally', async ({ page }) => {
@@ -642,9 +659,10 @@ test('custom traits multiply matching warmth rules with a safe cap', async ({ pa
 })
 
 test('top inset adjustment shortens the shell while keeping its bottom fixed', async ({ page }) => {
-  await page.goto('/#/settings')
+  await page.goto('/#/settings/chat')
   const shell = page.locator('.app-shell')
   const before = await shell.boundingBox()
+  await page.getByText('显示适配', { exact: true }).click()
   await page.getByLabel('顶部显示区域微调').fill('40')
   const after = await shell.boundingBox()
   expect(before && after).toBeTruthy()
@@ -653,7 +671,7 @@ test('top inset adjustment shortens the shell while keeping its bottom fixed', a
 })
 
 test('custom chat page size controls initial and older-message loading', async ({ page }) => {
-  await page.goto('/#/settings')
+  await page.goto('/#/settings/chat')
   await clearDatabase(page)
   await page.getByLabel('每次加载消息条数').selectOption('20')
   await expect(page.getByLabel('每次加载消息条数')).toHaveValue('20')
@@ -683,17 +701,17 @@ test('nuwa mode switches the creator to a free-form AI draft flow', async ({ pag
   })
   await page.reload()
   await page.getByRole('button', { name: '精细创建' }).click()
-  await expect(page.getByText('角色设定', { exact: true })).toBeVisible()
+  await page.locator('summary').filter({ hasText: '详细人物设定' }).click()
+  await page.locator('summary').filter({ hasText: '导入与复用' }).click()
+  await expect(page.locator('summary').filter({ hasText: '详细人物设定' })).toBeVisible()
   await expect(page.getByPlaceholder('例如：慢热、敏感、有主见；完全自由填写')).toBeVisible()
   await expect(page.getByPlaceholder('例如：24岁')).toBeVisible()
-  await expect(page.getByPlaceholder('例如：想要一个嘴硬但很在乎我的雌小鬼恋人，我们小时候就认识。AI会先生成初稿，之后你可以修改。')).toBeVisible()
+  await expect(page.getByPlaceholder('例如：一位慢热的朋友，我们从小就认识。')).toBeVisible()
   await expect(page.getByRole('button', { name: 'AI补全', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '生成初稿', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'AI润色' })).toHaveCount(0)
-  await expect(page.getByLabel('性格特质名称')).toBeVisible()
-  await expect(page.getByLabel('性格特质内容')).toBeVisible()
-  await page.getByRole('button', { name: '展开特质选项' }).click()
-  await expect(page.getByText('系统性格特质')).toBeVisible()
+  await expect(page.getByLabel('其他角色设定')).toBeVisible()
+  await expect(page.getByLabel('共同过往')).toBeVisible()
   await expect(page.getByRole('button', { name: '完全随机寻找' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '18-22' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '恋人', exact: true })).toHaveCount(0)
@@ -708,10 +726,12 @@ test('Nuwa mode exposes an editable AI first-draft workflow', async ({ page }) =
   })
   await page.reload()
   await page.getByRole('button', { name: '精细创建' }).click()
-  await expect(page.getByText('角色设定', { exact: true })).toBeVisible()
+  await page.locator('summary').filter({ hasText: '详细人物设定' }).click()
+  await page.locator('summary').filter({ hasText: '导入与复用' }).click()
+  await expect(page.locator('summary').filter({ hasText: '详细人物设定' })).toBeVisible()
   await expect(page.getByPlaceholder('例如：慢热、敏感、有主见；完全自由填写')).toBeVisible()
   await expect(page.getByPlaceholder('例如：24岁')).toBeVisible()
-  await expect(page.getByPlaceholder('例如：想要一个嘴硬但很在乎我的雌小鬼恋人，我们小时候就认识。AI会先生成初稿，之后你可以修改。')).toBeVisible()
+  await expect(page.getByPlaceholder('例如：一位慢热的朋友，我们从小就认识。')).toBeVisible()
   await expect(page.getByRole('button', { name: '生成AI初稿' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'AI补全', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '生成初稿', exact: true })).toHaveCount(0)
@@ -726,7 +746,7 @@ test('Nuwa AI initial warmth can be edited before contact creation', async ({ pa
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
-        choices: [{ message: { content: JSON.stringify({ name: '初稿角色', realName: '林澄', nickname: '阿澄', birthday: '2002-06-15', gender: '女', ageRange: '24岁', relationship: '朋友', occupation: '设计师', persona: '慢热但真诚的朋友。', personalityTrait: '猫系', mbti: 'INFP', speechSamples: ['你好'], personaProfile: { facts: [], boundaries: [], habits: [], behaviorAnchors: [] }, monthlySalary: 8000, initialWarmth: 42, schedule: [] }) } }],
+        choices: [{ message: { content: JSON.stringify({ name: '初稿角色', realName: '林澄', nickname: '阿澄', birthday: '2002-06-15', gender: '女', ageRange: '24岁', relationship: '朋友', occupation: '设计师', persona: '慢热但真诚的朋友。', visualIdentity: 'A young woman with dark hair and brown eyes.', speechExamples: Array.from({ length: 10 }, (_, index) => `[场景${index + 1}] 这是我的第${index + 1}条实际消息。`), wardrobe: Array.from({ length: 8 }, (_, index) => ({ name: `日常衬衫${index + 1}`, category: '上装', color: '白色', description: '棉质休闲衬衫' })), currentOutfit: ['日常衬衫1'], initialMemories: [], monthlySalary: 8000, initialWarmth: 42, schedule: [] }) } }],
         usage: { prompt_tokens: 100, completion_tokens: 100 },
       }),
     })
@@ -739,6 +759,8 @@ test('Nuwa AI initial warmth can be edited before contact creation', async ({ pa
   })
   await page.reload()
   await page.getByRole('button', { name: '精细创建' }).click()
+  await page.locator('summary').filter({ hasText: '详细人物设定' }).click()
+  await page.locator('summary').filter({ hasText: '导入与复用' }).click()
   await page.getByRole('button', { name: '生成AI初稿' }).click()
   await expect(page).toHaveURL(/#\/contact-generation\/[^/]+$/)
   await expect(page.getByRole('heading', { name: '初稿已完成，待确认' })).toBeVisible({ timeout: 15_000 })
@@ -749,6 +771,7 @@ test('Nuwa AI initial warmth can be edited before contact creation', async ({ pa
 
 test('ordinary contact creation can override the automatic initial warmth', async ({ page }) => {
   await page.goto('/#/contact/new')
+  await page.locator('summary').filter({ hasText: '具体偏好与共同经历' }).click()
   await expect(page.getByText('好感度', { exact: true })).toBeVisible()
   await expect(page.getByText('30', { exact: true })).toBeVisible()
   const warmthSection = page.getByText('好感度', { exact: true }).locator('..').locator('..').locator('..')
@@ -769,6 +792,8 @@ test('saved personas can be deleted without touching creation history', async ({
   })
   await page.reload()
   await page.getByRole('button', { name: '精细创建' }).click()
+  await page.locator('summary').filter({ hasText: '详细人物设定' }).click()
+  await page.locator('summary').filter({ hasText: '导入与复用' }).click()
   await page.getByRole('button', { name: '使用已保存的人设' }).click()
   page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: '删除待删除人设' }).click()
@@ -791,6 +816,8 @@ test('persona creation history can be explicitly deleted', async ({ page }) => {
   })
   await page.reload()
   await page.getByRole('button', { name: '精细创建' }).click()
+  await page.locator('summary').filter({ hasText: '详细人物设定' }).click()
+  await page.locator('summary').filter({ hasText: '导入与复用' }).click()
   await page.getByRole('button', { name: /调用以前创建过的人设/ }).click()
   page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: '删除', exact: true }).click()
@@ -889,7 +916,7 @@ test('contact card opens a personal moments feed and can remove the post complet
   expect(counts).toEqual({ moments: 0, comments: 0, likes: 0, events: 0 })
 })
 
-test('Nuwa AI polishing is reviewed and retries invalid form output', async ({ page }) => {
+test('Nuwa AI polishing validates locally and retries invalid form output', async ({ page }) => {
   type AiRequest = { model?: string; messages?: Array<{ content: string }>; response_format?: unknown }
   const mainRequests: AiRequest[] = []
   const reviewRequests: AiRequest[] = []
@@ -950,7 +977,9 @@ test('Nuwa AI polishing is reviewed and retries invalid form output', async ({ p
   })
   await page.reload()
   await page.getByRole('button', { name: '精细创建' }).click()
-  await page.getByPlaceholder('例如：想要一个嘴硬但很在乎我的雌小鬼恋人，我们小时候就认识。AI会先生成初稿，之后你可以修改。').fill('喜欢我的妹妹')
+  await page.locator('summary').filter({ hasText: '详细人物设定' }).click()
+  await page.locator('summary').filter({ hasText: '导入与复用' }).click()
+  await page.getByPlaceholder('例如：一位慢热的朋友，我们从小就认识。').fill('喜欢我的妹妹')
   await page.getByLabel('性别', { exact: true }).fill('女孩子')
   await page.getByRole('button', { name: 'AI补全', exact: true }).click()
 
@@ -959,15 +988,14 @@ test('Nuwa AI polishing is reviewed and retries invalid form output', async ({ p
   await expect(page.getByLabel('性别', { exact: true })).toHaveValue('女孩子')
   await expect(page.getByLabel('关系定位', { exact: true })).toHaveValue('亲妹妹')
   await expect(page.getByLabel('职业', { exact: true })).toHaveValue('大学生')
-  await expect(page.getByLabel('性格特质名称')).toHaveValue('爱撒娇但很可靠')
-  await expect(page.getByLabel('性格特质内容')).toHaveValue('亲近时爱撒娇，遇到重要事情会主动承担责任。')
-  await expect(page.getByPlaceholder('补充经历、边界、习惯、生活细节、说话方式、关系表现等……')).toHaveValue('她会主动分享生活琐事，也尊重彼此边界。')
+  await expect(page.getByLabel('性格倾向')).toHaveValue('活泼、黏人、坦率')
+  await expect(page.getByLabel('其他角色设定')).toHaveValue('她会主动分享生活琐事，也尊重彼此边界。')
   expect(mainRequests).toHaveLength(2)
-  expect(reviewRequests).toHaveLength(2)
+  expect(reviewRequests).toHaveLength(0)
   expect(mainRequests[0].response_format).toEqual({ type: 'json_object' })
   expect(mainRequests[0].messages?.[0]?.content).toContain('月海城的居民成年后必须登记一种合法职业')
-  expect(reviewRequests[0].model).toBe('nuwa-review-test')
-  expect(mainRequests[1].messages?.[0]?.content).toContain('上一次输出已被多功能模型退回')
+  expect(mainRequests[0].model).toBe('nuwa-main-test')
+  expect(mainRequests[1].messages?.[0]?.content).toContain('上一次输出未通过校验')
   expect(mainRequests[1].messages?.[0]?.content).toContain('仍未补全')
 })
 

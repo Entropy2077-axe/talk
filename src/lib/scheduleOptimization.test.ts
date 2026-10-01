@@ -11,7 +11,7 @@ const block = (dayOfWeek: number, includeLocation = true) => ({
   activity: '上班',
 })
 
-const locations = [{ id: 'office-floor', name: '办公室', description: '', access: 'public' as const, sortOrder: 1, kind: 'room' as const, createdAt: 1, updatedAt: 1 }]
+const locations = [{ id: 'office-floor', name: '办公室', description: '', sortOrder: 1, kind: 'room' as const, createdAt: 1, updatedAt: 1 }]
 
 describe('schedule optimization parsing', () => {
   it('accepts protocol-compliant blocks that only contain a map locationId', () => {

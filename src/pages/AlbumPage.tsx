@@ -1,3 +1,4 @@
+import { TopBar } from '../components/TopBar'
 import { useState } from 'react'
 import { Download, Trash2, X } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -99,4 +100,8 @@ export function AlbumLibraryView() {
       )}
     </>
   )
+}
+
+export function AlbumPage() {
+  return <div className="ui-page"><TopBar title="相册" showBack /><div className="ui-page-scroll px-4 py-4"><AlbumLibraryView /></div></div>
 }

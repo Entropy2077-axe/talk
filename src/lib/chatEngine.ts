@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import Dexie from 'dexie'
 import { v4 as uuid } from 'uuid'
 import { db } from '../db/db'
 import { chatCompletionText as chatCompletion, coalesceConsecutiveRoles, type ChatMessage } from './deepseek'
@@ -72,8 +73,9 @@ export const DEFAULT_RUNTIME_STATE: ConversationRuntimeState = { aiTyping: false
 
 /** Equal IndexedDB index keys have no stable order, so timestamps must be monotonic per conversation. */
 export async function nextMessageTimestamp(conversationId: string, requested = Date.now()): Promise<number> {
-  const rows = await db.messages.where('conversationId').equals(conversationId).toArray()
-  const latest = rows.reduce((value, message) => Math.max(value, message.createdAt), 0)
+  const message = await db.messages.where('[conversationId+createdAt]')
+    .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey], true, true).reverse().first()
+  const latest = message?.createdAt ?? 0
   return Math.max(requested, latest + 1)
 }
 
@@ -285,11 +287,11 @@ export async function sendMessage(
   settings: AppSettings,
   stickers: Sticker[],
   text: string,
-): Promise<void> {
-  if (!text.trim()) return
+): Promise<boolean> {
+  if (!text.trim()) return false
   if (!settings.apiKey) {
-    useChatEngineStore.getState().patch(conversationId, { error: '还没有配置API Key 请先去"我-设置"里填写' })
-    return
+    useChatEngineStore.getState().patch(conversationId, { error: '还没有配置 API Key，请前往“我 → LLM 设置”配置模型' })
+    return false
   }
 
   const streamId = uuid()
@@ -297,8 +299,10 @@ export async function sendMessage(
   useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: displayName(contact) })
 
   const now = await nextMessageTimestamp(conversationId)
-  const previousUserMessages = await db.messages.where('conversationId').equals(conversationId).toArray()
-  const previousUserAt = previousUserMessages.filter((message) => message.role === 'user').reduce((latest, message) => Math.max(latest, message.createdAt), 0)
+  const previousUserMessage = await db.messages.where('[conversationId+createdAt]')
+    .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey], true, true)
+    .reverse().filter((message) => message.role === 'user').first()
+  const previousUserAt = previousUserMessage?.createdAt ?? 0
   const msg: Message = {
     id: uuid(),
     conversationId,
@@ -307,10 +311,13 @@ export async function sendMessage(
     content: text.trim(),
     createdAt: now,
   }
-  await db.messages.add(msg)
-  await db.conversations.update(conversationId, { updatedAt: now })
+  await db.transaction('rw', db.messages, db.conversations, async () => {
+    await db.messages.add(msg)
+    await db.conversations.update(conversationId, { updatedAt: now })
+  })
 
   scheduleAiTurn(conversationId, contact, settings, stickers, streamId, text.trim(), '', previousUserAt || undefined, now)
+  return true
 }
 
 /**
@@ -343,7 +350,7 @@ export async function regenerateAiTurn(
   regenerationInstruction = '',
 ): Promise<void> {
   if (!settings.apiKey) {
-    useChatEngineStore.getState().patch(conversationId, { error: '还没有配置 API Key，请先去“我 / 设置”里填写' })
+    useChatEngineStore.getState().patch(conversationId, { error: '还没有配置 API Key，请前往“我 → LLM 设置”配置模型' })
     return
   }
 
@@ -399,7 +406,7 @@ async function runAiTurn(
   }
   console.log(`[chat] 开始生成回复 对方=${displayName(contact)} conversationId=${conversationId}`)
   try {
-    const directOutput = isModuleEnabled('directOutput')
+    const directOutput = isModuleEnabled('directOutput') && settings.actionDecisionProvider !== 'jev'
     const history = await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt')
     // System-presented turn illustrations are derived output, not something
     // either participant said or sent. Never feed them back into the model.
@@ -445,6 +452,7 @@ async function runAiTurn(
     const scheduleText = describeUpcomingScheduleText(contact, nowDate)
     let actionLocations: import('../types').LocationNode[] = []
     let locationActionContext = ''
+    let locationReplyContext = ''
     let locationFactsForReview = ''
     if (isModuleEnabled('location')) {
       await ensureLocationsInitialized()
@@ -460,8 +468,22 @@ async function runAiTurn(
       const currentLocation = actionLocations.find((location) => location.id === contact.currentLocationId)
       const leafLocations = actionLocations.filter((location) => !actionLocations.some((candidate) => candidate.parentId === location.id))
       const locationCatalog = leafLocations.map((location) => `${location.name}(${location.id})`).join('、')
+      const locationById = new Map(actionLocations.map((location) => [location.id, location]))
+      const isPlayerHomeRoom = (location: import('../types').LocationNode) => {
+        let current: import('../types').LocationNode | undefined = location
+        const visited = new Set<string>()
+        while (current && !visited.has(current.id)) {
+          if (current.id === 'home') return true
+          visited.add(current.id)
+          current = current.parentId ? locationById.get(current.parentId) : undefined
+        }
+        return false
+      }
+      const playerHomeCatalog = leafLocations.filter(isPlayerHomeRoom).map((location) => `${location.name}(${location.id})`).join('、')
+      const playerHomeRule = `用户家当前可确认的房间：${playerHomeCatalog || '无'}。玩家邀请你去自己家时，若未指明房间，默认到客厅(home-living)；若明确指定房间，必须与用户家列表中的房间匹配，不能改成别的房间。指定的房间不存在时，不要承诺已去或马上会去，先自然询问或说明需要确认地点。`
       locationFactsForReview = `当前地点=${currentLocation?.name ?? '未知地点'}(${contact.currentLocationId ?? '未知'})\n可执行地点=${locationCatalog}`
-      locationActionContext = `【地点与特殊任务】你当前位于：${currentLocation?.name ?? '未知地点'}（${contact.currentLocationId ?? '未知'}）。你可以按照自己的人设和意愿接受、拒绝，也可以主动提出行动。只有角色明确决定现在立刻前往某地并开始活动时，才在 submit_turn.events 中加入 type=activity_now；未来安排只有日期、整点开始和结束时间、地点都明确且角色已经作出具体承诺时才加入 type=schedule。行动工具从不代替自然聊天，整轮 events 必须至少包含一条 type=text。普通邀请、讨论可能性、拒绝、附带未满足条件或信息不全时，只需自然聊天，不要创建行动或日程。特殊任务一旦与某条默认任务重叠，那条默认任务会整项取消。玩家说“来我家/去我家/到我家/家里”是在邀请你去玩家的私人住宅，目的地只能是 客厅(home-living)，绝不能误用你自己的住所、住宅楼或任何其他联系人住处。以下列表是当前唯一可确认并执行的具体地点：${locationCatalog}。玩家提到列表外地点，或名称无法可靠对应列表时，不能假装去过、看过、知道它存在，也不能直接答应；请保持角色口吻自然询问位置或让对方进一步说明，不要提“系统”“目录”或地点ID。`
+      locationReplyContext = `【地点事实】你当前位于${currentLocation?.name ?? '未知地点'}。${playerHomeRule} 本轮只能提及确实存在的可执行地点：${locationCatalog}。不要在仍需地址、等待某事件完成等条件未满足时，说自己已经出发。不要向用户展示地点ID。`
+      locationActionContext = `【地点与特殊任务】你当前位于：${currentLocation?.name ?? '未知地点'}（${contact.currentLocationId ?? '未知'}）。你可以按照自己的人设和意愿接受、拒绝，也可以主动提出行动。只有角色明确决定现在立刻前往某地并开始活动，或明确约定1-720分钟后出发时，才在 events 中加入 type=activity_now；若仍需地址、等待直播结束等未满足条件，不得执行。未来安排只有日期、整点开始和结束时间、地点都明确且角色已经作出具体承诺时才加入 type=schedule。普通邀请、讨论可能性、拒绝、附带未满足条件或信息不全时，不要创建行动或日程。特殊任务一旦与某条默认任务重叠，那条默认任务会整项取消。${playerHomeRule} 绝不能误用你自己的住所、住宅楼或其他联系人住处。以下列表是当前唯一可确认并执行的具体地点：${locationCatalog}。玩家提到列表外地点，或名称无法可靠对应列表时，不能假装去过、看过、知道它存在。`
     }
     const memoryPromptOn = promptModuleEnabled(contactPromptSettings, 'memory')
     const [recentMemories, financeContext, socialMemories, sharedOriginalContext, worldbookTrace, existingContacts] = await Promise.all([
@@ -572,24 +594,35 @@ async function runAiTurn(
       localTurn = parseAiResponse(rawText)
     } else {
       const actionLocationIds = actionLocations.filter((location) => !actionLocations.some((candidate) => candidate.parentId === location.id)).map((location) => location.id)
+      const explicitImageKind = isImageProviderReady(settings) ? detectExplicitImageRequest(_triggeringUserText) : null
       const common = {
         apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, utilityModel: settings.utilityModel,
         signal: controller.signal, purpose: proactiveContext ? 'proactive' as const : 'chat' as const, automatic: !!proactiveContext,
         stickerNames: stickers.map((sticker) => sticker.name), stickerSearchEnabled: isStickerProviderReady(settings),
         imageEnabled: isImageProviderReady(settings) || !!settings.pexelsApiKey,
         knowledgeEnabled: false, scheduleEnabled: isModuleEnabled('location'), locationIds: actionLocationIds,
+        actionDecisionProvider: settings.actionDecisionProvider, actionDecisionApiKey: settings.actionDecisionApiKey,
+        requiredActionTypes: explicitImageKind ? ['image' as const] : [],
       }
       const baseMessages = chatMessages.slice(0, -1)
-      const textMessages = [...baseMessages, { role: 'system' as const, content: `【最终时间核对】${replyTimeContext}\n本轮只通过 submit_turn 生成用户可见的自然聊天正文。不得生成、提及或决定任何工具、地点、日程、图片、资金或其他行动；这些由独立模型处理。` }]
-      const explicitImageKind = isImageProviderReady(settings) ? detectExplicitImageRequest(_triggeringUserText) : null
+      const textRoleInstruction = settings.actionDecisionProvider === 'jev'
+        ? '本轮只通过 submit_turn 生成用户可见的自然聊天正文。你要以角色身份自然决定是否接受请求；只有确实打算现在行动或明确约定等待分钟数时才承诺出发。不得输出工具名或结构化行动参数。'
+        : '本轮只通过 submit_turn 生成用户可见的自然聊天正文。不得生成、提及或决定任何工具、地点、日程、图片、资金或其他行动；这些由独立模型处理。'
+      const textMessages = [...baseMessages, { role: 'system' as const, content: `【最终时间核对】${replyTimeContext}\n${textRoleInstruction}${locationReplyContext ? `\n${locationReplyContext}` : ''}` }]
       const explicitImageConstraint = explicitImageKind
         ? `\n【明确图片请求，不能漏】用户明确要求角色发送${explicitImageKind === 'selfie' ? '自拍' : '照片'}。本轮必须 decided=true，events 必须包含 type=image、kind=${explicitImageKind}、participants=["self"]，并按动作和环境选择 aspectRatio；普通自拍优先 3:4 或 9:16，禁止习惯性选择 1:1。图片 query 只能描述真实画面，不得包含手机、屏幕、聊天框、UI、文字、字幕、拼贴或分屏。自动氛围配图不能代替这个发送图片动作。`
         : ''
       const actionMessages = [...baseMessages, { role: 'system' as const, content: `【当前事实】${replyTimeContext}\n你是本轮唯一的世界状态决策者。只调用 decide_turn_actions，绝不生成用户可见正文。必须在 decided=false 与 decided=true 之间作出明确决定；false 时 events 必须为空并说明原因，true 时只填已由用户请求和当前事实充分支持的工具事件。衣物发生实际更换、穿上或脱下时必须加入 type=outfit_change，并在 items 中提交更改后的完整穿着；只是讨论、建议、未来打算、描述原有衣服或角色没有执行时绝不能改。${recommendationConstraint}${locationActionContext ? `\n${locationActionContext}` : ''}${explicitImageConstraint}` }]
-      const [textGenerated, actionDecision] = await Promise.all([
-        generatePrivateTextTurn({ ...common, messages: textMessages, trace: { turnId: streamId, stage: 'original_generation', conversationId } }),
-        decidePrivateTurnActions({ ...common, messages: actionMessages, trace: { turnId: streamId, stage: 'tool_call', conversationId } }),
-      ])
+      const textPromise = generatePrivateTextTurn({ ...common, messages: textMessages, trace: { turnId: streamId, stage: 'original_generation', conversationId } })
+      const actionOptions = { ...common, messages: actionMessages, trace: { turnId: streamId, stage: 'tool_call' as const, conversationId } }
+      const [textGenerated, actionDecision] = settings.actionDecisionProvider === 'jev'
+        ? await (async () => {
+          const generated = await textPromise
+          const candidateReply = generated.parsed.bubbles.filter((bubble) => bubble.type === 'text').map((bubble) => bubble.type === 'text' ? bubble.content : '').join('\n')
+          const decision = await decidePrivateTurnActions({ ...actionOptions, candidateReply })
+          return [generated, decision] as const
+        })()
+        : await Promise.all([textPromise, decidePrivateTurnActions(actionOptions)])
       rawText = textGenerated.raw
       actionDecisionRaw = actionDecision.raw
       if (actionDecision.decided) {

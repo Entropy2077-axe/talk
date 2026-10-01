@@ -3,6 +3,7 @@ import { parseJsonLoose, serializePrivateTurn, type ImmediateActivityAction, typ
 import { normalizeMood } from './mood'
 import type { ChatCompletionOptions, ChatMessage, ChatToolCall, ChatToolDefinition } from './deepseek'
 import { chatCompletion, chatCompletionText } from './deepseek'
+import { chooseJevActions, type JevActionType } from './jevActions'
 
 interface AgentToolOptions {
   apiKey: string
@@ -20,6 +21,10 @@ interface AgentToolOptions {
   knowledgeEnabled: boolean
   scheduleEnabled: boolean
   locationIds: string[]
+  actionDecisionProvider?: 'llm' | 'jev'
+  actionDecisionApiKey?: string
+  requiredActionTypes?: JevActionType[]
+  candidateReply?: string
 }
 
 interface ToolPlan { calls?: Array<{ name?: unknown; arguments?: unknown }> }
@@ -344,17 +349,19 @@ function textOnlyTurnTool(): ChatToolDefinition {
   }, ['events', 'thought', 'mood', 'knowledgeQueries'])
 }
 
-function actionDecisionTool(opts: Pick<AgentToolOptions, 'locationIds' | 'imageEnabled' | 'stickerNames' | 'stickerSearchEnabled' | 'scheduleEnabled'>): ChatToolDefinition {
+function actionDecisionTool(opts: Pick<AgentToolOptions, 'locationIds' | 'imageEnabled' | 'stickerNames' | 'stickerSearchEnabled' | 'scheduleEnabled'>, selected?: JevActionType[]): ChatToolDefinition {
   const eventTypes = [
     ...(opts.stickerNames.length || opts.stickerSearchEnabled ? ['sticker'] : []),
     ...(opts.imageEnabled ? ['image'] : []),
     ...(opts.scheduleEnabled && opts.locationIds.length ? ['schedule', 'activity_now'] : []),
     'outfit_change', 'contact_recommendation', 'transfer', 'red_packet', 'loan_request', 'loan_decision', 'gift_purchase',
   ]
-  return fn('decide_turn_actions', '只决定本轮是否需要执行结构化行动，绝不生成用户可见正文。若无需行动，decided=false、events=[]，并简短说明原因。若需要行动，decided=true，并只填已经明确成立的事件。', {
+  return fn('decide_turn_actions', selected
+    ? '只填写 Jev 已选行动的结构化参数，绝不重新判断是否行动或生成用户可见正文。'
+    : '只决定本轮是否需要执行结构化行动，绝不生成用户可见正文。若无需行动，decided=false、events=[]，并简短说明原因。若需要行动，decided=true，并只填已经明确成立的事件。', {
     decided: { type: 'boolean' }, reason: { type: 'string', description: '说明为何执行或不执行行动，仅供系统调试。' },
     events: { type: 'array', maxItems: 6, items: { type: 'object', additionalProperties: false, properties: {
-      type: { type: 'string', enum: eventTypes },
+      type: { type: 'string', enum: selected ?? eventTypes },
       name: { type: 'string' }, query: { type: 'string', description: 'image 的英文纯视觉提示；禁止屏幕、聊天框、UI、文字和拼贴。' }, caption: { type: 'string', description: 'image 的中文图片说明。' }, kind: { type: 'string', enum: ['selfie', 'portrait', 'scene', 'object'] }, aspectRatio: { type: 'string', enum: ['1:1', '4:3', '3:4', '16:9', '9:16'] }, participants: { type: 'array', items: { type: 'string', enum: ['self', 'user'] } },
       date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' }, startHour: { type: 'integer', minimum: 0, maximum: 23 }, endHour: { type: 'integer', minimum: 1, maximum: 24 }, locationId: { type: 'string', enum: opts.locationIds.length ? opts.locationIds : [''] }, activity: { type: 'string' }, durationMinutes: { type: 'integer', minimum: 5, maximum: 480 }, delayMinutes: { type: 'integer', minimum: 0, maximum: 720 }, phoneAccess: { type: 'string', enum: ['available', 'unavailable'], description: 'schedule 和 activity_now 必须填写；活动期间可正常聊天用 available，睡眠、考试等无法看手机时用 unavailable。' }, summary: { type: 'string' },
       amount: { type: 'integer', minimum: 1 }, note: { type: 'string' }, blessing: { type: 'string' }, reason: { type: 'string' }, loanId: { type: 'string' }, decision: { type: 'string', enum: ['accept', 'reject'] }, icon: { type: 'string' }, description: { type: 'string' },
@@ -370,6 +377,17 @@ export interface PrivateActionDecision {
   reason: string
   parsed: ParsedAiTurn
   raw: string
+}
+
+function parsedHasAction(parsed: ParsedAiTurn, type: JevActionType): boolean {
+  if (type === 'activity_now') return !!parsed.immediateActivities?.length
+  if (type === 'outfit_change') return !!parsed.outfitChanges?.length
+  if (type === 'contact_recommendation') return parsed.bubbles.some((bubble) => bubble.type === 'link' && bubble.app === 'contact_recommendation')
+  const bubbleTypes: Partial<Record<JevActionType, AiBubble['type']>> = {
+    sticker: 'sticker', image: 'image', schedule: 'scheduleChange', transfer: 'transfer', red_packet: 'redPacket',
+    loan_request: 'loanRequest', loan_decision: 'loanDecision', gift_purchase: 'giftPurchase',
+  }
+  return parsed.bubbles.some((bubble) => bubble.type === bubbleTypes[type])
 }
 
 /** Generates user-visible prose only. This can run in parallel with action selection. */
@@ -396,10 +414,26 @@ export async function generatePrivateTextTurn(opts: AgentToolOptions): Promise<{
 /** Chooses actions but can never generate user-visible text. */
 export async function decidePrivateTurnActions(opts: AgentToolOptions): Promise<PrivateActionDecision> {
   const messages = [...opts.messages]
+  let selected: JevActionType[] | undefined
+  if (opts.actionDecisionProvider === 'jev') {
+    const allowed = [
+      ...(opts.stickerNames.length || opts.stickerSearchEnabled ? ['sticker'] : []),
+      ...(opts.imageEnabled ? ['image'] : []),
+      ...(opts.scheduleEnabled && opts.locationIds.length ? ['schedule', 'activity_now'] : []),
+      'outfit_change', 'contact_recommendation', 'transfer', 'red_packet', 'loan_request', 'loan_decision', 'gift_purchase',
+    ] as JevActionType[]
+    const chosen = await chooseJevActions({ apiKey: opts.actionDecisionApiKey ?? '', messages, allowed, candidateReply: opts.candidateReply, signal: opts.signal })
+    selected = [...new Set([...chosen, ...(opts.requiredActionTypes ?? []).filter((type) => allowed.includes(type))])]
+    if (selected.length === 0) {
+      return { decided: false, reason: 'Jev 判断本轮无需行动', parsed: { bubbles: [], knowledgeQueries: [] }, raw: JSON.stringify({ source: 'jev', selected: [] }) }
+    }
+    messages.push({ role: 'system', content: `Jev 已完成行动判断。仅填写这些已选行动的完整参数，每种至少一条：${selected.join('、')}。decided 必须为 true；events 不得包含其他类型。不要重新判断是否行动。` })
+    if (opts.candidateReply) messages.push({ role: 'system', content: `角色已说出的本轮正文如下。行动的地点、时间、对象与此保持一致；不得补造正文中仍未满足的条件。\n${opts.candidateReply.slice(0, 5000)}` })
+  }
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const response = await chatCompletion({
       apiKey: opts.apiKey, baseUrl: opts.baseUrl, model: opts.utilityModel || opts.model, messages,
-      tools: [actionDecisionTool(opts)], toolChoice: { type: 'function', function: { name: 'decide_turn_actions' } }, signal: opts.signal,
+      tools: [actionDecisionTool(opts, selected)], toolChoice: { type: 'function', function: { name: 'decide_turn_actions' } }, signal: opts.signal,
       purpose: opts.purpose, automatic: opts.automatic, thinking: 'disabled', temperature: 0, maxTokens: 900,
       trace: { ...opts.trace, stage: 'tool_call' },
     })
@@ -412,12 +446,14 @@ export async function decidePrivateTurnActions(opts: AgentToolOptions): Promise<
       const parsed = parsePrivateTurnCall(call)
       const hasAction = parsed.bubbles.length > 0 || !!parsed.immediateActivities?.length || !!parsed.outfitChanges?.length || parsed.knowledgeQueries.length > 0
       const rawEventCount = Array.isArray(args.events) ? args.events.length : 0
-      const validNoAction = args.decided === false && rawEventCount === 0 && parsed.knowledgeQueries.length === 0
-      const validAction = args.decided === true && hasAction
+      const validNoAction = !selected && args.decided === false && rawEventCount === 0 && parsed.knowledgeQueries.length === 0
+      const rawTypes = Array.isArray(args.events) ? args.events.map((event: unknown) => event && typeof event === 'object' ? String((event as { type?: unknown }).type) : '') : []
+      const matchesJev = !selected || (rawTypes.every((type) => selected!.includes(type as JevActionType)) && selected.every((type) => rawTypes.includes(type) && parsedHasAction(parsed, type)))
+      const validAction = args.decided === true && hasAction && matchesJev
       if (validNoAction || validAction) return { decided: validAction, reason: args.reason.trim().slice(0, 240), parsed, raw: JSON.stringify(args) }
     }
     messages.push({ role: 'assistant', content: response.content, ...(response.toolCalls?.length ? { tool_calls: response.toolCalls } : {}) })
-    messages.push({ role: 'system', content: '上一次的行动决策参数无效。请只重试一次：decided=false 时 events=[]；decided=true 时每个 event 必须填齐该类型所需字段，thought 和中文文字 mood 必须非空。不要改变原判断。' })
+    messages.push({ role: 'system', content: `上一次的行动决策参数无效。请只重试一次：decided=true 时每个 event 必须填齐该类型所需字段，thought 和中文文字 mood 必须非空。${selected ? `必须包含且只包含这些行动类型：${selected.join('、')}。` : '不要改变原判断。'}` })
   }
   throw new Error('行动模型连续两次返回了无效决策参数')
 }
@@ -646,9 +682,13 @@ export function parseGroupToolCalls(calls: ChatToolCall[], speakerCount: number,
       if (schedule?.type === 'scheduleChange') bubbles.push({ ...common, ...schedule })
     } else if (call.function.name === 'start_activity_now' || call.function.name === 'change_location') {
       const locationId = text(args.locationId, 80), activity = text(args.activity, 16)
-      const durationMinutes = Number(args.durationMinutes), delayMinutes = args.delayMinutes === undefined ? 0 : Number(args.delayMinutes), phoneAccess = args.phoneAccess
+      const durationMinutes = Number(args.durationMinutes), delayMinutes = args.delayMinutes === undefined ? 0 : Number(args.delayMinutes)
+      // Keep parity with private chat: several OpenAI-compatible relays omit
+      // this field even when the rest of the location action is complete.
+      // Dropping the whole action makes a character verbally agree but stay
+      // in place, so default to the least disruptive reachable state.
+      const phoneAccess = args.phoneAccess === 'unavailable' ? 'unavailable' : 'available'
       if (locationId && activity && Number.isInteger(durationMinutes) && durationMinutes >= 5 && durationMinutes <= 480 && Number.isInteger(delayMinutes) && delayMinutes >= 0 && delayMinutes <= 720
-        && (phoneAccess === 'available' || phoneAccess === 'unavailable')
         && !immediateActivities.some((action) => action.speakerIndex === speakerIndex)) {
         immediateActivities.push({ speakerIndex, locationId, activity, durationMinutes, ...(delayMinutes ? { delayMinutes } : {}), phoneAccess })
       }

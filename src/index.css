@@ -25,6 +25,11 @@
  * used before switching to oklch.
  */
 @theme {
+  --color-red-200: #fecaca;
+  --color-red-700: #b91c1c;
+  --color-amber-800: #92400e;
+  --color-blue-100: #dbeafe;
+  --color-blue-800: #1e40af;
   --color-gray-50: #f9fafb;
   --color-gray-100: #f3f4f6;
   --color-gray-200: #e5e7eb;
@@ -790,6 +795,7 @@ html, body, #root { background: var(--ui-bg); font-family: var(--ui-font-body); 
 .ui-section-title { color: var(--ui-text); font-family: var(--ui-font-display); font-size: 14px; font-weight: 650; }
 .ui-section-summary { margin-top: 4px; color: var(--ui-text-3); font-size: 11px; line-height: 1.6; }
 .ui-list-card { margin: 0 16px; overflow: hidden; border-radius: var(--ui-radius-card); background: var(--ui-surface); box-shadow: var(--ui-shadow); }
+.ui-list-card.ui-section-spaced { margin-top: 12px; }
 .ui-list-row { display: flex; width: 100%; min-height: 52px; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--ui-border-soft); padding: 12px 16px; color: var(--ui-text); text-align: left; }
 .ui-list-row:last-child { border-bottom: 0; }
 .ui-list-row:active { background: var(--ui-surface-2); }

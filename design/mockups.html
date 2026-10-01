@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="zh-CN" data-v="a">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Talk 视觉方向示范</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "HarmonyOS Sans SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  /* 字号刻度：只 6 档 */
+  --t-xs: 11px; --t-sm: 13px; --t-md: 15px; --t-lg: 17px; --t-xl: 20px; --t-2xl: 26px;
+  /* 间距刻度：4 的倍数 */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 20px; --s6: 24px; --s8: 32px;
+  --r-sm: 8px; --r-md: 12px; --r-lg: 18px; --r-xl: 24px; --r-full: 999px;
+}
+
+/* ---------- 方向 A：克制高级 ---------- */
+[data-v="a"] {
+  --bg: #f2f1ee;
+  --surface: #fffefb;
+  --surface-2: #f7f6f2;
+  --line: rgba(23,20,16,.07);
+  --text: #181613;
+  --text-2: #6d685f;
+  --text-3: #a29c91;
+  --accent: #3f6b5a;
+  --accent-soft: #e6ece7;
+  --bubble-me: #3f6b5a;
+  --bubble-me-text: #fbfbf9;
+  --bubble-you: #ffffff;
+  --bubble-you-text: #181613;
+  --shadow-1: 0 1px 2px rgba(23,20,16,.04);
+  --shadow-2: 0 4px 16px -6px rgba(23,20,16,.14);
+  --bubble-radius: 20px;
+  --nav-bg: rgba(255,254,251,.82);
+}
+
+/* ---------- 方向 B：仿微信精修 ---------- */
+[data-v="b"] {
+  --bg: #ededed;
+  --surface: #ffffff;
+  --surface-2: #f7f7f7;
+  --line: rgba(0,0,0,.06);
+  --text: #191919;
+  --text-2: #7a7a7a;
+  --text-3: #b2b2b2;
+  --accent: #07a25a;
+  --accent-soft: #e3f4ea;
+  --bubble-me: #95ec69;
+  --bubble-me-text: #191919;
+  --bubble-you: #ffffff;
+  --bubble-you-text: #191919;
+  --shadow-1: 0 1px 1px rgba(0,0,0,.03);
+  --shadow-2: 0 2px 10px -4px rgba(0,0,0,.12);
+  --bubble-radius: 8px;
+  --nav-bg: rgba(247,247,247,.92);
+}
+
+/* ---------- 方向 C：陪伴感 ---------- */
+[data-v="c"] {
+  --bg: #14121a;
+  --surface: #1e1b26;
+  --surface-2: #272232;
+  --line: rgba(255,255,255,.07);
+  --text: #f3f0f7;
+  --text-2: #a9a2b8;
+  --text-3: #6f6880;
+  --accent: #b493f5;
+  --accent-soft: rgba(180,147,245,.14);
+  --bubble-me: linear-gradient(135deg,#8b6ce0,#b493f5);
+  --bubble-me-text: #ffffff;
+  --bubble-you: #272232;
+  --bubble-you-text: #f3f0f7;
+  --shadow-1: 0 1px 2px rgba(0,0,0,.3);
+  --shadow-2: 0 8px 28px -10px rgba(139,108,224,.45);
+  --bubble-radius: 22px;
+  --nav-bg: rgba(30,27,38,.82);
+}
+
+body {
+  font-family: var(--font-sans);
+  background: #dcdbd6;
+  color: #1a1a1a;
+  -webkit-font-smoothing: antialiased;
+  padding: var(--s6);
+  min-height: 100vh;
+}
+[data-v="c"] body { background: #0c0a11; color: #eee; }
+
+/* 顶部切换栏 */
+.switcher {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; gap: var(--s2); align-items: center;
+  padding: var(--s3) var(--s4); margin: calc(var(--s6) * -1) calc(var(--s6) * -1) var(--s6);
+  background: rgba(255,255,255,.72);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid rgba(0,0,0,.08);
+  flex-wrap: wrap;
+}
+[data-v="c"] .switcher { background: rgba(20,18,26,.75); border-bottom-color: rgba(255,255,255,.08); }
+.switcher b { font-size: var(--t-sm); letter-spacing: .02em; margin-right: var(--s2); }
+.switcher button {
+  font: inherit; font-size: var(--t-sm); font-weight: 500;
+  padding: 7px 14px; border-radius: var(--r-full);
+  border: 1px solid rgba(0,0,0,.1); background: #fff; color: inherit;
+  cursor: pointer; transition: background .15s, color .15s, border-color .15s;
+}
+[data-v="c"] .switcher button { background: #241f2e; border-color: rgba(255,255,255,.12); color: #eee; }
+.switcher button[aria-pressed="true"] { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+[data-v="c"] .switcher button[aria-pressed="true"] { background: #b493f5; color: #14121a; border-color: #b493f5; }
+.switcher small { font-size: var(--t-xs); opacity: .6; margin-left: auto; }
+
+/* 手机画框 */
+.gallery { display: flex; gap: var(--s6); flex-wrap: wrap; justify-content: center; align-items: flex-start; }
+.frame-wrap { display: flex; flex-direction: column; gap: var(--s2); align-items: center; }
+.frame-label { font-size: var(--t-xs); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; opacity: .5; }
+.phone {
+  width: 340px; height: 680px; flex: none;
+  background: var(--bg); color: var(--text);
+  border-radius: 34px; overflow: hidden;
+  display: flex; flex-direction: column;
+  box-shadow: 0 1px 1px rgba(0,0,0,.1), 0 18px 50px -12px rgba(0,0,0,.35);
+  border: 1px solid rgba(0,0,0,.12);
+}
+[data-v="c"] .phone { border-color: rgba(255,255,255,.1); }
+
+/* 状态栏 */
+.statusbar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px var(--s5) 2px; font-size: var(--t-xs); font-weight: 600;
+  color: var(--text); flex: none;
+}
+.statusbar span:last-child { letter-spacing: .1em; opacity: .8; }
+
+/* 导航栏 */
+.navbar {
+  flex: none; display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s2) var(--s4) var(--s3);
+  background: var(--nav-bg);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--line);
+}
+.navbar .title { font-size: var(--t-lg); font-weight: 600; letter-spacing: -.01em; }
+.navbar .sub { font-size: var(--t-xs); color: var(--text-3); margin-top: 1px; }
+.navbar .grow { flex: 1; min-width: 0; }
+.icon-btn {
+  width: 40px; height: 40px; flex: none;
+  display: grid; place-items: center;
+  border: 0; background: transparent; color: var(--text-2);
+  border-radius: var(--r-full); cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.icon-btn:hover { background: var(--surface-2); color: var(--text); }
+.icon-btn svg { width: 21px; height: 21px; }
+
+/* 滚动区 */
+.scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.scroll::-webkit-scrollbar { width: 0; }
+
+/* 底部 Tab */
+.tabbar {
+  flex: none; display: flex;
+  padding: var(--s2) var(--s2) var(--s4);
+  background: var(--nav-bg);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-top: 1px solid var(--line);
+}
+.tab {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+  border: 0; background: transparent; cursor: pointer;
+  color: var(--text-3); font-size: 10px; font-weight: 500;
+  padding: var(--s1) 0; position: relative;
+}
+.tab svg { width: 24px; height: 24px; }
+.tab[aria-current="page"] { color: var(--accent); }
+.tab .dot {
+  position: absolute; top: 2px; right: 50%; margin-right: -18px;
+  min-width: 17px; height: 17px; padding: 0 5px;
+  border-radius: var(--r-full); background: #f5483c; color: #fff;
+  font-size: 10px; font-weight: 600; line-height: 17px;
+  box-shadow: 0 0 0 2px var(--nav-bg);
+}
+
+/* ---- 会话列表 ---- */
+.list { padding: var(--s1) 0; }
+.row {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: 11px var(--s4);
+  cursor: pointer; position: relative;
+  transition: background .12s;
+}
+.row:hover { background: var(--surface-2); }
+.row + .row::before {
+  content: ""; position: absolute; top: 0; left: 68px; right: 0;
+  height: 1px; background: var(--line);
+}
+.avatar {
+  width: 46px; height: 46px; flex: none; border-radius: var(--r-md);
+  display: grid; place-items: center;
+  font-size: var(--t-md); font-weight: 600; color: #fff;
+  letter-spacing: -.02em; position: relative;
+}
+[data-v="a"] .avatar { border-radius: 14px; }
+[data-v="b"] .avatar { border-radius: 6px; }
+[data-v="c"] .avatar { border-radius: var(--r-full); }
+.avatar.online::after {
+  content: ""; position: absolute; right: -1px; bottom: -1px;
+  width: 12px; height: 12px; border-radius: var(--r-full);
+  background: #34c759; box-shadow: 0 0 0 2.5px var(--bg);
+}
+.row-main { flex: 1; min-width: 0; }
+.row-top { display: flex; align-items: baseline; gap: var(--s2); }
+.row-name {
+  font-size: var(--t-md); font-weight: 500; letter-spacing: -.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.row-time { font-size: var(--t-xs); color: var(--text-3); flex: none; margin-left: auto; }
+.row-msg {
+  font-size: var(--t-sm); color: var(--text-2); margin-top: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: flex; align-items: center; gap: var(--s1);
+}
+.row-badge {
+  flex: none; min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: var(--r-full); background: #f5483c; color: #fff;
+  font-size: 11px; font-weight: 600; line-height: 18px; text-align: center;
+}
+.muted-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
+
+/* 搜索条 */
+.searchbar { padding: var(--s1) var(--s4) var(--s3); }
+.searchbar div {
+  display: flex; align-items: center; gap: var(--s2);
+  height: 36px; padding: 0 var(--s3);
+  background: var(--surface-2); border-radius: var(--r-sm);
+  font-size: var(--t-sm); color: var(--text-3);
+}
+[data-v="c"] .searchbar div { background: rgba(255,255,255,.05); }
+.searchbar svg { width: 16px; height: 16px; }
+
+/* ---- 聊天气泡 ---- */
+.chat { padding: var(--s4) var(--s3) var(--s2); display: flex; flex-direction: column; gap: 3px; }
+.daymark {
+  align-self: center; margin: var(--s2) 0 var(--s4);
+  font-size: var(--t-xs); color: var(--text-3);
+  padding: 3px 10px; border-radius: var(--r-full); background: var(--surface-2);
+}
+[data-v="c"] .daymark { background: rgba(255,255,255,.05); }
+.msg { display: flex; gap: var(--s2); align-items: flex-end; max-width: 100%; }
+.msg + .msg { margin-top: 3px; }
+.msg.gap { margin-top: var(--s4); }
+.msg.me { flex-direction: row-reverse; }
+.msg .av {
+  width: 34px; height: 34px; flex: none; border-radius: var(--r-sm);
+  display: grid; place-items: center; color: #fff;
+  font-size: var(--t-xs); font-weight: 600;
+}
+[data-v="c"] .msg .av { border-radius: var(--r-full); }
+.msg .av.ghost { visibility: hidden; }
+.bubble {
+  max-width: 74%; padding: 9px 13px;
+  border-radius: var(--bubble-radius);
+  font-size: var(--t-md); line-height: 1.47; letter-spacing: -.003em;
+  word-break: break-word; position: relative;
+}
+.msg.you .bubble {
+  background: var(--bubble-you); color: var(--bubble-you-text);
+  box-shadow: var(--shadow-1);
+  border-bottom-left-radius: var(--r-sm);
+}
+.msg.me .bubble {
+  background: var(--bubble-me); color: var(--bubble-me-text);
+  border-bottom-right-radius: var(--r-sm);
+}
+[data-v="c"] .msg.me .bubble { box-shadow: var(--shadow-2); }
+.msg.tail-mid.you .bubble { border-bottom-left-radius: var(--bubble-radius); border-top-left-radius: var(--r-sm); }
+.msg.tail-mid.me .bubble { border-bottom-right-radius: var(--bubble-radius); border-top-right-radius: var(--r-sm); }
+.meta {
+  font-size: var(--t-xs); color: var(--text-3);
+  align-self: flex-end; padding-bottom: 2px; flex: none;
+  display: flex; align-items: center; gap: 3px;
+}
+.meta svg { width: 13px; height: 13px; }
+
+/* typing dots */
+.typing { display: flex; gap: 4px; padding: 13px; }
+.typing i {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--text-3); display: block;
+  animation: bounce 1.3s infinite ease-in-out both;
+}
+.typing i:nth-child(2) { animation-delay: .16s; }
+.typing i:nth-child(3) { animation-delay: .32s; }
+@keyframes bounce {
+  0%, 70%, 100% { transform: translateY(0); opacity: .45; }
+  35% { transform: translateY(-4px); opacity: 1; }
+}
+
+/* 输入栏 */
+.composer {
+  flex: none; display: flex; align-items: flex-end; gap: var(--s2);
+  padding: var(--s2) var(--s3) var(--s4);
+  background: var(--nav-bg);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-top: 1px solid var(--line);
+}
+.composer .field {
+  flex: 1; min-width: 0; min-height: 38px;
+  display: flex; align-items: center;
+  padding: 9px var(--s3);
+  background: var(--surface); border-radius: var(--r-lg);
+  font-size: var(--t-md); color: var(--text-3);
+  box-shadow: var(--shadow-1);
+}
+[data-v="b"] .composer .field { border-radius: var(--r-sm); }
+[data-v="c"] .composer .field { background: rgba(255,255,255,.06); box-shadow: none; }
+.send-btn {
+  width: 38px; height: 38px; flex: none; border: 0; cursor: pointer;
+  border-radius: var(--r-full); display: grid; place-items: center;
+  background: var(--accent); color: #fff;
+  transition: transform .12s, filter .15s;
+}
+[data-v="b"] .send-btn { background: var(--accent); }
+[data-v="c"] .send-btn { background: var(--bubble-me); box-shadow: var(--shadow-2); }
+.send-btn:active { transform: scale(.92); }
+.send-btn svg { width: 19px; height: 19px; }
+
+/* 快捷动作条 */
+.quickbar {
+  flex: none; display: flex; gap: var(--s2); overflow-x: auto;
+  padding: var(--s2) var(--s3) 0; background: var(--nav-bg);
+}
+.quickbar::-webkit-scrollbar { height: 0; }
+.chip {
+  flex: none; display: flex; align-items: center; gap: 5px;
+  padding: 6px 12px; border-radius: var(--r-full);
+  border: 1px solid var(--line); background: var(--surface);
+  font-size: var(--t-xs); font-weight: 500; color: var(--text-2);
+  cursor: pointer; white-space: nowrap;
+  transition: background .14s, color .14s;
+}
+.chip:hover { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.chip svg { width: 14px; height: 14px; }
+.chip.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+
+/* ---- 卡片 / 设置组 ---- */
+.section { padding: var(--s4) var(--s4) 0; }
+.section-title {
+  font-size: var(--t-xs); font-weight: 600; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--text-3);
+  padding: 0 var(--s1) var(--s2);
+}
+.card {
+  background: var(--surface); border-radius: var(--r-md);
+  box-shadow: var(--shadow-1); overflow: hidden;
+}
+[data-v="c"] .card { box-shadow: none; border: 1px solid var(--line); }
+.cell {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: 13px var(--s4); cursor: pointer; position: relative;
+  font-size: var(--t-md); transition: background .12s;
+}
+.cell:hover { background: var(--surface-2); }
+.cell + .cell::before {
+  content: ""; position: absolute; top: 0; left: var(--s4); right: 0;
+  height: 1px; background: var(--line);
+}
+.cell .ico {
+  width: 30px; height: 30px; flex: none; border-radius: var(--r-sm);
+  display: grid; place-items: center; color: #fff;
+}
+.cell .ico svg { width: 17px; height: 17px; }
+.cell .grow { flex: 1; min-width: 0; }
+.cell .val { font-size: var(--t-sm); color: var(--text-3); }
+.cell .chev { width: 17px; height: 17px; flex: none; color: var(--text-3); opacity: .7; }
+
+/* 个人资料头部 */
+.profile {
+  display: flex; align-items: center; gap: var(--s4);
+  padding: var(--s5) var(--s4) var(--s6);
+}
+.profile .big {
+  width: 64px; height: 64px; flex: none; border-radius: var(--r-lg);
+  display: grid; place-items: center; color: #fff;
+  font-size: var(--t-xl); font-weight: 600;
+}
+[data-v="c"] .profile .big { border-radius: var(--r-full); box-shadow: var(--shadow-2); }
+.profile h2 { font-size: var(--t-xl); font-weight: 600; letter-spacing: -.02em; }
+.profile p { font-size: var(--t-sm); color: var(--text-2); margin-top: 3px; }
+
+/* 骨架屏 */
+.skel {
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface) 50%, var(--surface-2) 75%);
+  background-size: 300% 100%; animation: shimmer 1.4s infinite linear;
+  border-radius: var(--r-sm); height: 12px;
+}
+@keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+
+/* 网格入口 */
+.grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s1); padding: var(--s3) var(--s2); }
+.grid-item {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: var(--s3) var(--s1); border: 0; background: transparent;
+  cursor: pointer; border-radius: var(--r-md); transition: background .14s;
+  color: var(--text);
+}
+.grid-item:hover { background: var(--surface-2); }
+.grid-item .ico { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; color: #fff; }
+.grid-item .ico svg { width: 22px; height: 22px; }
+.grid-item span { font-size: var(--t-xs); color: var(--text-2); font-weight: 500; }
+
+.pane { display: none; }
+.pane.active { display: block; }
+.note {
+  max-width: 1100px; margin: 0 auto var(--s6); padding: var(--s4) var(--s5);
+  background: rgba(255,255,255,.7); border-radius: var(--r-md);
+  font-size: var(--t-sm); line-height: 1.6;
+}
+[data-v="c"] .note { background: rgba(30,27,38,.7); }
+.note b { display: block; margin-bottom: var(--s1); font-size: var(--t-md); }
+
+</style>
+</head>
+<body>
+<div class="switcher">
+  <b>视觉方向</b>
+  <button data-set="a" aria-pressed="true">A 克制高级</button>
+  <button data-set="b" aria-pressed="false">B 仿微信精修</button>
+  <button data-set="c" aria-pressed="false">C 陪伴感暗色</button>
+  <small>同一套组件，三套 token。切换后对比气泡、列表、设置页。</small>
+</div>
+
+<div class="note" id="note"></div>
+
+<div class="gallery">
+  <!-- ========== 聊天页 ========== -->
+  <div class="frame-wrap">
+    <div class="frame-label">聊天页</div>
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>●●● ▮</span></div>
+      <div class="navbar">
+        <button class="icon-btn" aria-label="返回"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+        <div class="grow">
+          <div class="title" style="font-size:var(--t-md)">林晚</div>
+          <div class="sub">心情 平静 · 在咖啡馆</div>
+        </div>
+        <button class="icon-btn" aria-label="通话"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 01-2.2 2 19.8 19.8 0 01-8.6-3.1 19.5 19.5 0 01-6-6A19.8 19.8 0 012.1 4.2 2 2 0 014.1 2h3a2 2 0 012 1.7c.1 1 .4 2 .7 2.9a2 2 0 01-.5 2.1L8.1 9.9a16 16 0 006 6l1.2-1.2a2 2 0 012.1-.5c.9.3 1.9.6 2.9.7a2 2 0 011.7 2z"/></svg></button>
+        <button class="icon-btn" aria-label="资料"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/><circle cx="5" cy="12" r="1.6"/></svg></button>
+      </div>
+
+      <div class="scroll">
+        <div class="chat">
+          <div class="daymark">今天 21:04</div>
+
+          <div class="msg you">
+            <div class="av" style="background:#8a7bb8">晚</div>
+            <div class="bubble">刚下班，路过那家常去的咖啡馆，还开着</div>
+            <div class="meta">21:04</div>
+          </div>
+          <div class="msg you tail-mid">
+            <div class="av ghost"></div>
+            <div class="bubble">要不要我带一杯回去</div>
+          </div>
+
+          <div class="msg me gap">
+            <div class="av" style="background:#5c7fa8">我</div>
+            <div class="bubble">好啊，还是老样子</div>
+            <div class="meta">
+              21:06
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+            </div>
+          </div>
+
+          <div class="msg you gap">
+            <div class="av" style="background:#8a7bb8">晚</div>
+            <div class="bubble">记住了，燕麦奶不加糖</div>
+            <div class="meta">21:07</div>
+          </div>
+          <div class="msg you tail-mid">
+            <div class="av ghost"></div>
+            <div class="bubble">你今天声音听起来有点累，是又加班了吗</div>
+          </div>
+
+          <div class="msg you gap">
+            <div class="av" style="background:#8a7bb8">晚</div>
+            <div class="bubble" style="padding:0;overflow:hidden">
+              <div class="typing"><i></i><i></i><i></i></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="quickbar">
+        <button class="chip on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2a3 3 0 013 3v6a3 3 0 01-6 0V5a3 3 0 013-3z"/><path d="M19 10v1a7 7 0 01-14 0v-1M12 18v4"/></svg>读心</button>
+        <button class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 19l7-7 3 3-7 7-3-3zM18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5zM2 2l7.6 7.6"/><circle cx="11" cy="11" r="2"/></svg>代写</button>
+        <button class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>剧情</button>
+        <button class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15V6a2 2 0 00-2-2H5a2 2 0 00-2 2v13l4-4h12a2 2 0 002-2z"/></svg>重新生成</button>
+      </div>
+
+      <div class="composer">
+        <button class="icon-btn" aria-label="更多"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg></button>
+        <div class="field">说点什么…</div>
+        <button class="icon-btn" aria-label="表情"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><circle cx="9" cy="9.5" r="1"/><circle cx="15" cy="9.5" r="1"/></svg></button>
+        <button class="send-btn" aria-label="发送"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 会话列表 ========== -->
+  <div class="frame-wrap">
+    <div class="frame-label">消息列表</div>
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>●●● ▮</span></div>
+      <div class="navbar">
+        <div class="grow"><div class="title" style="font-size:var(--t-2xl);letter-spacing:-.03em">消息</div></div>
+        <button class="icon-btn" aria-label="新建"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+      </div>
+      <div class="scroll">
+        <div class="searchbar">
+          <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>搜索联系人、消息</div>
+        </div>
+        <div class="list">
+          <div class="row">
+            <div class="avatar online" style="background:#8a7bb8">晚</div>
+            <div class="row-main">
+              <div class="row-top"><span class="row-name">林晚</span><span class="row-time">21:07</span></div>
+              <div class="row-msg"><span style="flex:1;overflow:hidden;text-overflow:ellipsis">你今天声音听起来有点累…</span><span class="row-badge">2</span></div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="avatar" style="background:#c08457">研</div>
+            <div class="row-main">
+              <div class="row-top"><span class="row-name">周三读书会</span><span class="row-time">20:41</span></div>
+              <div class="row-msg"><span style="flex:1;overflow:hidden;text-overflow:ellipsis">陈默：那本我看完了，可以聊聊</span><span class="row-badge">5</span></div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="avatar online" style="background:#5f8d6f">默</div>
+            <div class="row-main">
+              <div class="row-top"><span class="row-name">陈默</span><span class="row-time">19:20</span></div>
+              <div class="row-msg"><span style="flex:1;overflow:hidden;text-overflow:ellipsis">[图片]</span><span class="muted-dot"></span></div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="avatar" style="background:#a86f8c">苏</div>
+            <div class="row-main">
+              <div class="row-top"><span class="row-name">苏青</span><span class="row-time">昨天</span></div>
+              <div class="row-msg">你说的那个地方我去了</div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="avatar" style="background:#6b7f9e">顾</div>
+            <div class="row-main">
+              <div class="row-top"><span class="row-name">顾之川</span><span class="row-time">昨天</span></div>
+              <div class="row-msg">草稿：其实我一直想说…</div>
+            </div>
+          </div>
+          <div class="row">
+            <div class="avatar" style="background:#9e7b6b">言</div>
+            <div class="row-main">
+              <div class="row-top"><span class="row-name">言溪</span><span class="row-time">周一</span></div>
+              <div class="row-msg">好，那就下次</div>
+            </div>
+          </div>
+          <div class="row" style="opacity:.75">
+            <div class="avatar skel" style="background:none"></div>
+            <div class="row-main">
+              <div class="row-top"><span class="skel" style="width:72px"></span></div>
+              <div class="row-msg" style="margin-top:7px"><span class="skel" style="width:150px;height:10px"></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <button class="tab" aria-current="page">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.4 8.4 0 013.8-.9h.5a8.5 8.5 0 018 8v.5z"/></svg>
+          消息<span class="dot">7</span>
+        </button>
+        <button class="tab">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.9M16 3.1a4 4 0 010 7.8"/></svg>
+          联系人
+        </button>
+        <button class="tab">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16.2 7.8l-2.1 6.3-6.3 2.1 2.1-6.3 6.3-2.1z"/></svg>
+          发现
+        </button>
+        <button class="tab">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          我
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 我 / 设置 ========== -->
+  <div class="frame-wrap">
+    <div class="frame-label">我 · 分组后的设置</div>
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>●●● ▮</span></div>
+      <div class="scroll">
+        <div class="profile">
+          <div class="big" style="background:#5c7fa8">我</div>
+          <div class="grow">
+            <h2>阿澈</h2>
+            <p>6 位联系人 · 已聊 1,284 条</p>
+          </div>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
+        </div>
+
+        <div class="section" style="padding-top:0">
+          <div class="section-title">必要配置</div>
+          <div class="card">
+            <div class="cell">
+              <div class="ico" style="background:#4a7c9b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 2l-2 2m-7.6 7.6a5 5 0 11-7.1 7.1 5 5 0 017.1-7.1zm0 0L15.9 7m0 0l3 3L22 7l-3-3"/></svg></div>
+              <span class="grow">模型与 API Key</span>
+              <span class="val" style="color:#e0803a">待配置</span>
+              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
+            </div>
+            <div class="cell">
+              <div class="ico" style="background:#7a6da8"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-2.9 1.2V22a2 2 0 11-4 0v-.2a1.7 1.7 0 00-2.9-1.2l-.1.1a2 2 0 11-2.8-2.8l.1-.1A1.7 1.7 0 002 15a2 2 0 010-4 1.7 1.7 0 001.2-2.9l-.1-.1a2 2 0 112.8-2.8l.1.1A1.7 1.7 0 009 4.6V4a2 2 0 114 0v.6a1.7 1.7 0 002.9 1.2l.1-.1a2 2 0 112.8 2.8l-.1.1A1.7 1.7 0 0022 11a2 2 0 010 4h-.6z"/></svg></div>
+              <span class="grow">功能模块</span>
+              <span class="val">17 项 · 开 9</span>
+              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-title">外观</div>
+          <div class="card">
+            <div class="cell">
+              <div class="ico" style="background:#3f6b5a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/><path d="M12 2a10 10 0 000 20 2.5 2.5 0 002.5-2.5 2 2 0 00-.6-1.4 2 2 0 01-.6-1.4A2 2 0 0115.4 15H17a5 5 0 005-5 8 8 0 00-10-8z"/></svg></div>
+              <span class="grow">主题与气泡</span>
+              <span class="val">克制高级</span>
+              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
+            </div>
+            <div class="cell">
+              <div class="ico" style="background:#8a7bb8"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg></div>
+              <span class="grow">字号</span>
+              <span class="val">标准</span>
+              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
+            </div>
+          </div>
+        </div>
+
+        <div class="section" style="padding-bottom:var(--s5)">
+          <div class="section-title">数据</div>
+          <div class="card">
+            <div class="cell">
+              <div class="ico" style="background:#6b7f9e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></svg></div>
+              <span class="grow">存档与备份</span>
+              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
+            </div>
+            <div class="cell">
+              <div class="ico" style="background:#9e8b6b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></div>
+              <span class="grow">关于</span>
+              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.4 8.4 0 013.8-.9h.5a8.5 8.5 0 018 8v.5z"/></svg>消息</button>
+        <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.9M16 3.1a4 4 0 010 7.8"/></svg>联系人</button>
+        <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16.2 7.8l-2.1 6.3-6.3 2.1 2.1-6.3 6.3-2.1z"/></svg>发现</button>
+        <button class="tab" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>我</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 发现页 ========== -->
+  <div class="frame-wrap">
+    <div class="frame-label">发现 · 网格代替长列表</div>
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>●●● ▮</span></div>
+      <div class="navbar">
+        <div class="grow"><div class="title" style="font-size:var(--t-2xl);letter-spacing:-.03em">发现</div></div>
+        <button class="icon-btn" aria-label="编辑"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4v16h16v-7M18.5 2.5a2.1 2.1 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+      </div>
+      <div class="scroll">
+        <div class="section" style="padding-top:var(--s2)">
+          <div class="section-title">社交</div>
+          <div class="card">
+            <div class="grid">
+              <button class="grid-item"><div class="ico" style="background:#e0803a"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M23 19V5a2 2 0 00-2-2H3a2 2 0 00-2 2v14M1 19h22M8 11l3 3 5-6"/></svg></div><span>朋友圈</span></button>
+              <button class="grid-item"><div class="ico" style="background:#c0564f"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20.8 4.6a5.5 5.5 0 00-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 00-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 000-7.8z"/></svg></div><span>好感度</span></button>
+              <button class="grid-item"><div class="ico" style="background:#5f8d6f"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg></div><span>关系图</span></button>
+              <button class="grid-item"><div class="ico" style="background:#7a6da8"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 11.5a8.4 8.4 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.7A8.5 8.5 0 0112.5 3a8.5 8.5 0 018.5 8v.5z"/></svg></div><span>主动聊天</span></button>
+            </div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">世界</div>
+          <div class="card">
+            <div class="grid">
+              <button class="grid-item"><div class="ico" style="background:#4a7c9b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg></div><span>世界书</span></button>
+              <button class="grid-item"><div class="ico" style="background:#9e8b6b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 010 20 15 15 0 010-20z"/></svg></div><span>知识库</span></button>
+              <button class="grid-item"><div class="ico" style="background:#6b8f9e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4.5 8-11a8 8 0 10-16 0c0 6.5 8 11 8 11z"/><circle cx="12" cy="11" r="3"/></svg></div><span>地点</span></button>
+              <button class="grid-item"><div class="ico" style="background:#8a6b9e"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2l2.4 7.3H22l-6.2 4.5 2.4 7.2L12 16.5 5.8 21l2.4-7.2L2 9.3h7.6L12 2z"/></svg></div><span>剧情大纲</span></button>
+            </div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">生活</div>
+          <div class="card">
+            <div class="grid">
+              <button class="grid-item"><div class="ico" style="background:#5f8d6f"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4H6zM3 6h18M16 10a4 4 0 01-8 0"/></svg></div><span>商城</span></button>
+              <button class="grid-item"><div class="ico" style="background:#9e7b6b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 16V8l-9-5-9 5v8l9 5 9-5zM3.3 7.5L12 12.5l8.7-5M12 22V12.5"/></svg></div><span>仓库</span></button>
+              <button class="grid-item"><div class="ico" style="background:#4a7c9b"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v16"/></svg></div><span>职业</span></button>
+              <button class="grid-item"><div class="ico" style="background:#c08457"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div><span>生活模拟</span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.4 8.4 0 013.8-.9h.5a8.5 8.5 0 018 8v.5z"/></svg>消息</button>
+        <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.9M16 3.1a4 4 0 010 7.8"/></svg>联系人</button>
+        <button class="tab" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16.2 7.8l-2.1 6.3-6.3 2.1 2.1-6.3 6.3-2.1z"/></svg>发现</button>
+        <button class="tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>我</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const notes = {
+  a: "<b>A 克制高级</b>暖中性米灰底（#f2f1ee）配深墨绿强调色，气泡大圆角 20px，靠 1px 极淡描边和极浅阴影分层，不用饱和色块。适合长时间阅读，质感接近 iMessage 和 Things。代价是和微信的视觉习惯有距离。",
+  b: "<b>B 仿微信精修</b>保留微信的绿气泡、灰底、小圆角和用户肌肉记忆，只修字体栈、间距刻度、分隔线内缩、按压反馈和层级对比。改动最小、风险最低，但天花板也最低，很难摆脱\"仿品\"感。",
+  c: "<b>C 陪伴感暗色</b>深紫灰底配淡紫强调色，圆形头像、渐变气泡、发光阴影。情绪浓度最高，最贴合 AI companion 的定位，夜间使用体验好。需要配一套同质量的亮色方案，工作量最大。"
+};
+const noteEl = document.getElementById("note");
+function apply(v) {
+  document.documentElement.dataset.v = v;
+  noteEl.innerHTML = notes[v];
+  document.querySelectorAll(".switcher button").forEach(b => {
+    b.setAttribute("aria-pressed", String(b.dataset.set === v));
+  });
+}
+document.querySelectorAll(".switcher button").forEach(b => {
+  b.addEventListener("click", () => apply(b.dataset.set));
+});
+apply("a");
+</script>
+
+</body>
+</html>

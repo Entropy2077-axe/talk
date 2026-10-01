@@ -31,6 +31,13 @@ function fallbackContactIdentity(contact: Contact): string {
   return `${contact.name}, ${contact.gender || 'adult person'}, stable recognizable facial features and hairstyle, ${facts}`
 }
 
+function visualGender(value: string | undefined): 'female' | 'male' | undefined {
+  const normalized = value?.trim().toLocaleLowerCase() || ''
+  if (/(?:^|\b)(?:female|woman|girl|f)(?:\b|$)|女/.test(normalized)) return 'female'
+  if (/(?:^|\b)(?:male|man|boy|m)(?:\b|$)|男/.test(normalized)) return 'male'
+  return undefined
+}
+
 function fallbackUserIdentity(settings: AppSettings): string {
   return `${settings.userNickname || 'the user'}, ${settings.userGender || 'adult person'}, stable recognizable facial features and hairstyle, ${settings.userBio || 'natural everyday appearance'}`
 }
@@ -49,7 +56,7 @@ async function generateIdentity(label: string, context: string, settings: AppSet
       temperature: 0.4,
       maxTokens: 220,
       messages: [
-        { role: 'system', content: 'Write one concise English visual identity for consistent image generation. Include apparent adult age, face shape, eyes, nose, lips, skin tone, hairstyle, build, and distinctive permanent features. Never include clothes, pose, scene, lighting, camera, mood, ethnicity not established by the input, or art style. Output only the description.' },
+        { role: 'system', content: 'Write one concise English visual identity for consistent image generation. Preserve every explicit identity fact, especially gender. Include apparent age, gender presentation when known, face shape, eyes, nose, lips, skin tone, hairstyle, build, and distinctive permanent features. Never include clothes, pose, scene, lighting, camera, mood, ethnicity not established by the input, or art style. Output only the description.' },
         { role: 'user', content: `${label}\n${context.slice(0, 1800)}` },
       ],
     })).trim().slice(0, 800) || context
@@ -132,13 +139,21 @@ export function composeImagePrompt(input: {
     ? input.stylePrompt ?? atlasStylePrompt(settings)
     : ''
   const people = [
-    ...contacts.map((contact) => ({ name: contact.name, identity: contact.visualIdentity || fallbackContactIdentity(contact) })),
-    ...(includeUser ? [{ name: settings.userNickname || 'User', identity: input.userIdentity || fallbackUserIdentity(settings) }] : []),
+    ...contacts.map((contact) => ({ name: contact.name, identity: contact.visualIdentity || fallbackContactIdentity(contact), gender: visualGender(contact.gender) })),
+    ...(includeUser ? [{ name: settings.userNickname || 'User', identity: input.userIdentity || fallbackUserIdentity(settings), gender: visualGender(settings.userGender) }] : []),
   ].slice(0, 4)
-  const labels = people.map((person, index) => `Person ${String.fromCharCode(65 + index)} (${person.name}): ${person.identity}`).join('\n')
+  const labels = people.map((person, index) => {
+    const label = `Person ${String.fromCharCode(65 + index)}`
+    const genderRule = person.gender === 'female'
+      ? `${label} is female. Never depict ${label} as male, a man, or a boy.`
+      : person.gender === 'male'
+        ? `${label} is male. Never depict ${label} as female, a woman, or a girl.`
+        : ''
+    return `${label} (${person.name}): ${person.identity}${genderRule ? `\n${genderRule}` : ''}`
+  }).join('\n')
   const countRule = people.length
-    ? `Show exactly ${people.length} distinct ${people.length === 1 ? 'person' : 'people'}. Preserve each identity, do not blend faces, duplicate people, swap features, or add extra people.`
-    : 'No people in the image unless an incidental distant figure is essential to the scene.'
+    ? `Show exactly ${people.length} distinct ${people.length === 1 ? 'person' : 'people'}, and only the listed ${people.length === 1 ? 'person' : 'people'}. Preserve each identity and explicit gender; these roster facts override conflicting person, gender, or count wording in the scene; do not blend faces, duplicate people, swap features, or add background or incidental people.`
+    : 'Show no people at all. Do not add men, women, children, faces, bodies, silhouettes, reflections, portraits, background figures, or incidental people.'
   const kindRule = kind === 'selfie' ? 'natural selfie-style viewpoint with framing wide enough to preserve the requested pose, ongoing action, clothing, and surrounding environment; the photographing equipment stays outside the frame' : kind === 'portrait' ? 'person-centered environmental photograph with body language, ongoing action, and surrounding context clearly visible' : kind === 'group' ? 'balanced group photo composition with each person clearly distinguishable' : kind === 'object' ? 'object-focused composition' : 'environment-focused composition'
   const ratioRule = input.aspectRatio ? `Compose specifically for a ${input.aspectRatio} aspect ratio; use the extra frame area for meaningful action and environment.` : ''
   return [style, kindRule, ratioRule, `Visual scene to render faithfully:\n${scene}`, labels, countRule, 'Choose scene-appropriate clothing and natural poses. Correct anatomy and hands. The result is one uninterrupted real-world scene: no visible phones or screens, no chat elements, no interface, no panels, no collage, no symbols, no watermark, and no readable text of any kind.'].filter(Boolean).join('\n')

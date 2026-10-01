@@ -10,5 +10,4 @@ export const proactiveChatModule: FeatureModule = {
   description: 'AI在后台定时自主发朋友圈、主动找你聊天（会产生API费用）',
   parentId: 'chat-assist',
   routes: [{ path: '/proactive-settings', component: ProactiveSettingsPage }],
-  discoverEntries: [{ to: '/proactive-settings', icon: '🤖', label: '自主行为设置' }],
 }

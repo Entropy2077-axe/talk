@@ -4,13 +4,14 @@ import Dexie from 'dexie'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { db } from '../db/db'
 import { TopBar } from '../components/TopBar'
+import { ChatComposer } from '../components/ChatComposer'
 import { MessageBubble } from '../components/MessageBubble'
 import { SearchOverlay } from '../components/SearchOverlay'
 import { ActionSheet } from '../components/ActionSheet'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { useModuleEnabled } from '../features'
 import { useChatUiStore } from '../store/useChatUiStore'
-import { DEFAULT_RUNTIME_STATE, regenerateAiTurn, sendMessage, stopAiTurn, triggerAiTurn, useChatEngineStore } from '../lib/chatEngine'
+import { DEFAULT_RUNTIME_STATE, nextMessageTimestamp, regenerateAiTurn, sendMessage, stopAiTurn, triggerAiTurn, useChatEngineStore } from '../lib/chatEngine'
 import { regenerateGroupAiTurn, sendGroupMessage, stopGroupAiTurn, triggerGroupAiTurn } from '../lib/groupChatEngine'
 import { displayName } from '../lib/contact'
 import { applyMessageFeedback } from '../lib/messageFeedback'
@@ -32,6 +33,7 @@ import { cacheSpeechForMessage, speechSignature } from '../lib/speechSynthesis'
 import { playSpeechMessage, playSpeechRecord, stopSpeechPlayback, useSpeechPlayerStore } from '../lib/speechPlayer'
 import { acceptContactRecommendation, declineContactRecommendation, recommendationFromMessage } from '../lib/contactRecommendations'
 
+const EMPTY_CONTACTS: Contact[] = []
 const EMPTY_MESSAGES: Message[] = []
 const EMPTY_STICKERS: Sticker[] = []
 const EMPTY_SPEECH_CACHE_ROWS: Array<SpeechCacheRecord | undefined> = []
@@ -65,15 +67,15 @@ export function ChatPage() {
   const isGroupConv = !!conversation?.groupId
   const contact = useLiveQuery(
     () => (conversation && !conversation.groupId ? db.contacts.get(conversation.contactId!) : undefined),
-    [conversation],
+    [conversation?.contactId, conversation?.groupId],
   )
   const group = useLiveQuery(
     () => (conversation?.groupId ? db.groups.get(conversation.groupId) : undefined),
-    [conversation],
+    [conversation?.groupId],
   )
   const groupLocation = useLiveQuery(
     () => (group?.kind === 'location' && group.locationId ? db.locations.get(group.locationId) : undefined),
-    [group],
+    [group?.kind, group?.locationId],
   )
   useEffect(() => {
     if (group?.kind !== 'location' || !group.locationId) return
@@ -85,22 +87,29 @@ export function ChatPage() {
     })()
     return () => { cancelled = true }
   }, [group?.id, group?.kind, group?.locationId])
+  const memberIdsKey = JSON.stringify(group?.memberContactIds ?? [])
   const groupMembersRaw = useLiveQuery(
     () => (group ? db.contacts.bulkGet(group.memberContactIds) : []),
-    [group],
+    [memberIdsKey],
   )
   const groupMembers = useMemo(() => (groupMembersRaw ?? []).filter((c): c is Contact => !!c), [groupMembersRaw])
   const memberById = useMemo(() => new Map(groupMembers.map((c) => [c.id, c])), [groupMembers])
 
   const [visibleMessageLimit, setVisibleMessageLimit] = useState(chatPageSize)
+  const nearBottomRef = useRef(true)
+  const retainedHistoryRef = useRef<{ conversationId: string; createdAt: number } | null>(null)
   useEffect(() => setVisibleMessageLimit(chatPageSize), [conversationId, chatPageSize])
   const messagePage = useLiveQuery(async () => {
     if (!conversationId) return { items: EMPTY_MESSAGES, total: 0 }
     const range = () => db.messages
       .where('[conversationId+createdAt]')
       .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey], true, true)
+    // New replies must not push the oldest visible message out of a reader's window.
+    const retainedStart = !nearBottomRef.current && retainedHistoryRef.current?.conversationId === conversationId ? retainedHistoryRef.current.createdAt : undefined
+    const retainedCount = retainedStart === undefined ? 0 : await db.messages.where('[conversationId+createdAt]')
+      .between([conversationId, retainedStart], [conversationId, Dexie.maxKey], true, true).count()
     const [newestFirst, total] = await Promise.all([
-      range().reverse().limit(visibleMessageLimit).toArray(),
+      range().reverse().limit(Math.max(visibleMessageLimit, retainedCount)).toArray(),
       range().count(),
     ])
     return { items: newestFirst.reverse(), total }
@@ -116,6 +125,9 @@ export function ChatPage() {
     [speechCacheRows],
   )
   const latestMessageId = messages.at(-1)?.id
+  const latestMessageAt = messages.at(-1)?.createdAt ?? 0
+  const messagesReady = Boolean(messagePage)
+  const contentReady = isGroupConv ? Boolean(group) : Boolean(contact)
   const hasOlderMessages = messages.length < (messagePage?.total ?? 0)
   const stickers = useLiveQuery(() => db.stickers.toArray(), []) ?? EMPTY_STICKERS
   const stickerByName = useMemo(() => new Map(stickers.map((s) => [s.name, s.dataUrl])), [stickers])
@@ -146,11 +158,9 @@ export function ChatPage() {
     (s) => s.states[conversationId ?? ''] ?? DEFAULT_RUNTIME_STATE,
   )
 
-  const [input, setInput] = useState('')
   const [toast, setToast] = useState('')
   const [showLongPressHint, setShowLongPressHint] = useState(false)
   const [searching, setSearching] = useState(false)
-  const [selectedMentionIds, setSelectedMentionIds] = useState<string[]>([])
   const [replyToId, setReplyToId] = useState<string | null>(null)
   const [menuMessageId, setMenuMessageId] = useState<string | null>(null)
 
@@ -168,6 +178,7 @@ export function ChatPage() {
   const [captureBusy, setCaptureBusy] = useState(false)
   const [appsOpen, setAppsOpen] = useState(false)
   const [stickerPickerOpen, setStickerPickerOpen] = useState(false)
+  function openStickers() { setStickerPickerOpen(true); setStickerQuery(''); setStickerResults([]) }
   const [stickerQuery, setStickerQuery] = useState('')
   const [stickerResults, setStickerResults] = useState<RemoteStickerResult[]>([])
   const [stickerBusy, setStickerBusy] = useState(false)
@@ -194,6 +205,11 @@ export function ChatPage() {
   const [financeNote,setFinanceNote]=useState('')
 
   const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const messageContentRef = useRef<HTMLDivElement>(null)
+  const initializedScrollRef = useRef<string | undefined>(undefined)
+  const highlightedScrollRef = useRef('')
+  const readingAnchorRef = useRef<{ id: string; offset: number } | null>(null)
+  const [awayFromLatest, setAwayFromLatest] = useState(false)
   const loadingOlderRef = useRef<{ scrollHeight: number } | null>(null)
   const bubbleRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const [flashId, setFlashId] = useState<string | null>(highlightId)
@@ -205,23 +221,11 @@ export function ChatPage() {
     : undefined
   const menuSpeechVoice = speechEnabled ? contactSpeechVoice(menuSpeechContact, settings.speechProvider) : undefined
   const regenerationMessage = regenerationMessageId ? messageById.get(regenerationMessageId) : undefined
+  const latestRegeneratableMessage = [...messages].reverse().find((message) => message.role === 'assistant' && message.debugAiTurnId && message.image?.presentation !== 'illustration')
   const selectedMessages = useMemo(
     () => messages.filter((message) => selectedMessageIds.includes(message.id)),
     [messages, selectedMessageIds],
   )
-
-  const mentionQuery = useMemo(() => {
-    if (!isGroupConv) return null
-    const match = input.match(/(?:^|\s)@([^\s@]*)$/)
-    return match ? match[1].toLowerCase() : null
-  }, [input, isGroupConv])
-
-  const mentionCandidates = useMemo(() => {
-    if (mentionQuery === null) return []
-    return groupMembers
-      .filter((member) => displayName(member).toLowerCase().includes(mentionQuery))
-      .slice(0, 6)
-  }, [groupMembers, mentionQuery])
 
   // Registers this conversation as "currently open" so background replies
   // don't pop a notification for the chat the user is already looking at.
@@ -235,77 +239,120 @@ export function ChatPage() {
   // (clears existing unread) and again each time a new message streams in
   // while the user is still looking at it (keeps it cleared in real time).
   useEffect(() => {
-    if (!conversationId || messages.length === 0) return
-    void db.conversations.update(conversationId, { lastReadAt: Date.now() })
-  }, [conversationId, messages.length])
+    if (!conversationId || !latestMessageId) return
+    void db.conversations.update(conversationId, { lastReadAt: Math.max(Date.now(), latestMessageAt) })
+  }, [conversationId, latestMessageId, latestMessageAt])
 
   useEffect(() => {
     if (!speechEnabled) stopSpeechPlayback()
   }, [speechEnabled])
 
-  // useLayoutEffect (not useEffect) so the jump-to-bottom happens before the
-  // browser paints — otherwise opening a long conversation briefly flashes
-  // the middle/top of the history before snapping to the bottom. `contact`
-  // and `group` are in the deps deliberately: `messages` resolves from its
-  // own independent useLiveQuery and can settle *before* contact/group does,
-  // and the scroll container only actually mounts (guards passed) once
-  // contact/group resolves too — without these in the deps, that final
-  // unlocking render doesn't re-fire the effect (messages.length already
-  // stopped changing by then) and the ref never gets scrolled at all.
-  useLayoutEffect(() => {
+  function jumpToLatest() {
+    nearBottomRef.current = true
+    readingAnchorRef.current = null
+    setAwayFromLatest(false)
+    const el = scrollContainerRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }
+
+  function rememberReadingPosition() {
     const el = scrollContainerRef.current
     if (!el) return
-    if (loadingOlderRef.current) {
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    nearBottomRef.current = nearBottom
+    setAwayFromLatest(!nearBottom)
+    const top = el.getBoundingClientRect().top
+    const visible = Array.from(bubbleRefs.current.entries()).find(([, node]) => node.getBoundingClientRect().bottom > top)
+    readingAnchorRef.current = !nearBottom && visible ? { id: visible[0], offset: visible[1].getBoundingClientRect().top - top } : null
+  }
+
+  // Initialize before paint; subsequent updates follow only readers already at the bottom.
+  useLayoutEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el || !messagesReady) return
+    retainedHistoryRef.current = messages[0] && conversationId ? { conversationId, createdAt: messages[0].createdAt } : null
+    if (initializedScrollRef.current !== conversationId) {
+      initializedScrollRef.current = conversationId
+      loadingOlderRef.current = null
+      readingAnchorRef.current = null
+      nearBottomRef.current = !highlightId
+      setAwayFromLatest(Boolean(highlightId))
+      if (!highlightId) el.scrollTop = el.scrollHeight
+    } else if (loadingOlderRef.current) {
       el.scrollTop += el.scrollHeight - loadingOlderRef.current.scrollHeight
       loadingOlderRef.current = null
-    } else {
+    } else if (nearBottomRef.current) {
       el.scrollTop = el.scrollHeight
+    } else if (readingAnchorRef.current) {
+      const anchor = bubbleRefs.current.get(readingAnchorRef.current.id)
+      if (anchor) el.scrollTop += anchor.getBoundingClientRect().top - el.getBoundingClientRect().top - readingAnchorRef.current.offset
     }
-  }, [conversationId, messages.length, latestMessageId, aiTyping, contact, group])
+  }, [conversationId, messages, aiTyping, contentReady, messagesReady, highlightId])
+
+  useEffect(() => {
+    const el = scrollContainerRef.current
+    const content = messageContentRef.current
+    if (!el || !content || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (nearBottomRef.current) el.scrollTop = el.scrollHeight
+      else if (readingAnchorRef.current) {
+        const anchor = bubbleRefs.current.get(readingAnchorRef.current.id)
+        if (anchor) el.scrollTop += anchor.getBoundingClientRect().top - el.getBoundingClientRect().top - readingAnchorRef.current.offset
+      }
+    })
+    observer.observe(el)
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [conversationId, contentReady])
 
   function loadOlderMessages() {
     const el = scrollContainerRef.current
     if (!el || !hasOlderMessages || loadingOlderRef.current) return
     loadingOlderRef.current = { scrollHeight: el.scrollHeight }
-    setVisibleMessageLimit((value) => value + chatPageSize)
+    setVisibleMessageLimit((value) => Math.max(value, messages.length) + chatPageSize)
   }
 
   useEffect(() => {
     if (!highlightId || !conversationId) return
+    const key = `${conversationId}:${highlightId}`
+    if (highlightedScrollRef.current === key) return
+    let cancelled = false
     if (!messageById.has(highlightId)) {
       void db.messages.get(highlightId).then(async (target) => {
-        if (!target || target.conversationId !== conversationId) return
+        if (cancelled || !target || target.conversationId !== conversationId) return
         const newer = await db.messages.where('[conversationId+createdAt]')
           .above([conversationId, target.createdAt]).count()
-        setVisibleMessageLimit((value) => Math.max(value, newer + 1))
+        if (!cancelled) setVisibleMessageLimit((value) => Math.max(value, newer + 1))
       })
-      return
+      return () => { cancelled = true }
     }
     const el = bubbleRefs.current.get(highlightId)
+    if (!el) return
     el?.scrollIntoView({ block: 'center' })
+    highlightedScrollRef.current = key
+    setFlashId(highlightId)
+    rememberReadingPosition()
     const t = setTimeout(() => setFlashId(null), 2000)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlightId, conversationId, messages.length, messageById])
+  }, [highlightId, conversationId, messages.length, messageById, contentReady])
 
-  async function handleSend() {
-    const text = input.trim()
-    if (!text || !conversationId) return
-    if (isGroupConv) {
-      if (!group) return
-      const typedMentionIds = groupMembers
-        .filter((member) => text.includes(`@${displayName(member)}`))
-        .map((member) => member.id)
-      const mentionIds = Array.from(new Set([...selectedMentionIds, ...typedMentionIds]))
-      setInput('')
-      setSelectedMentionIds([])
-      setReplyToId(null)
-      await sendGroupMessage(conversationId, group, groupMembers, settings, stickers, text, mentionIds, replyToId ?? undefined)
-      return
+  async function handleSend(text: string, mentionIds: string[]): Promise<boolean> {
+    if (!conversationId) return false
+    const currentSettings = useSettingsStore.getState()
+    try {
+      const sent = isGroupConv
+        ? !!group && await sendGroupMessage(conversationId, group, groupMembers, currentSettings, stickers, text, mentionIds, replyToId ?? undefined)
+        : !!contact && await sendMessage(conversationId, contact, currentSettings, stickers, text)
+      if (sent && useChatUiStore.getState().activeConversationId === conversationId) {
+        setReplyToId((value) => value === replyToId ? null : value)
+        jumpToLatest()
+      }
+      return sent
+    } catch (error) {
+      useChatEngineStore.getState().patch(conversationId, { error: '消息未发送，输入已保留：' + (error instanceof Error ? error.message : String(error)) })
+      return false
     }
-    if (!contact) return
-    setInput('')
-    await sendMessage(conversationId, contact, settings, stickers, text)
   }
 
   function retryCurrentTurn() {
@@ -315,18 +362,6 @@ export function ChatPage() {
       return
     }
     if (contact) void triggerAiTurn(conversationId, contact, settings, stickers)
-  }
-
-  function insertMention(member: Contact) {
-    const name = displayName(member)
-    setInput((prev) => {
-      const next = prev.replace(/(?:^|\s)@([^\s@]*)$/, (match) => {
-        const prefix = match.startsWith(' ') ? ' ' : ''
-        return `${prefix}@${name} `
-      })
-      return next === prev ? `${prev}@${name} ` : next
-    })
-    setSelectedMentionIds((prev) => Array.from(new Set([...prev, member.id])))
   }
 
   function labelForMessage(message: Message): string {
@@ -524,24 +559,29 @@ export function ChatPage() {
     }
   }
 
+  async function sendSticker(name: string, url: string, provider?: NonNullable<Message['sticker']>['provider']): Promise<boolean> {
+    if (!conversationId) return false
+    try {
+      const createdAt = await nextMessageTimestamp(conversationId)
+      await db.transaction('rw', db.messages, db.conversations, async () => {
+        await db.messages.add({ id: uuid(), conversationId, role: 'user', type: 'sticker', content: name, sticker: { url, provider }, createdAt })
+        await db.conversations.update(conversationId, { updatedAt: createdAt })
+      })
+      setStickerPickerOpen(false)
+      setStickerResults([])
+      jumpToLatest()
+      if (!isGroupConv && contact) void triggerAiTurn(conversationId, contact, settings, stickers)
+      else if (isGroupConv && group) void triggerGroupAiTurn(conversationId, group, groupMembers, settings, stickers)
+      return true
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : String(error))
+      return false
+    }
+  }
+
   async function sendRemoteSticker(result: RemoteStickerResult) {
-    if (!conversationId) return
     const name = result.name?.trim() || stickerQuery.trim() || '远程表情'
-    await db.messages.add({
-      id: uuid(),
-      conversationId,
-      role: 'user',
-      type: 'sticker',
-      content: name,
-      sticker: { url: result.url, provider: result.provider },
-      createdAt: Date.now(),
-    })
-    await db.conversations.update(conversationId, { updatedAt: Date.now() })
-    void trackRemoteStickerSend(result)
-    setStickerPickerOpen(false)
-    setStickerResults([])
-    if (!isGroupConv && contact) void triggerAiTurn(conversationId, contact, settings, stickers)
-    else if (isGroupConv && group) void triggerGroupAiTurn(conversationId, group, groupMembers, settings, stickers)
+    if (await sendSticker(name, result.url, result.provider)) void trackRemoteStickerSend(result)
   }
   const handleFinanceCard = useCallback(async (message: Message) => {
     if(message.type==='redPacket'&&message.role==='assistant'&&message.finance?.transactionId&&message.finance.status==='pending'){try{await claimRedPacket(message.finance.transactionId,USER_WALLET_ID);await db.messages.update(message.id,{finance:{...message.finance,status:'claimed'}});setToast('红包已领取')}catch(e){setToast(e instanceof Error?e.message:String(e))}}
@@ -776,10 +816,11 @@ export function ChatPage() {
       <div
         ref={scrollContainerRef}
         data-testid="chat-scroll"
-        className="flex-1 overflow-y-auto pt-2"
+        className="min-h-0 flex-1 overflow-y-auto pt-2"
         style={chatBackgroundStyle}
-        onScroll={(event) => { if (event.currentTarget.scrollTop < 80) loadOlderMessages() }}
+        onScroll={(event) => { rememberReadingPosition(); if (event.currentTarget.scrollTop < 80) loadOlderMessages() }}
       >
+        <div ref={messageContentRef}>
         {hasOlderMessages && (
           <div className="flex justify-center py-2">
             <button onClick={loadOlderMessages} className="rounded-full bg-white/90 px-3 py-1 text-xs text-gray-500 shadow-sm">加载更早消息</button>
@@ -850,18 +891,20 @@ export function ChatPage() {
           }
           return <div key={`message-${m.id}`}>{msgBubble}</div>
         })}
+        </div>
       </div>
 
+      {awayFromLatest && <div className="shrink-0 bg-white px-3 py-1 text-right"><button type="button" onClick={jumpToLatest} className="min-h-10 rounded-lg bg-gray-100 px-3 text-xs text-gray-700">回到最新消息</button></div>}
       {error && (
         <div className="flex items-center gap-3 bg-red-50 px-4 py-1.5 text-xs text-red-500">
           <p className="min-w-0 flex-1">{error}</p>
           <button
             type="button"
-            onClick={retryCurrentTurn}
+            onClick={!settings.apiKey ? () => navigate('/settings/api-configurations') : error.startsWith('消息未发送，输入已保留') ? () => useChatEngineStore.getState().patch(conversationId!, { error: '' }) : retryCurrentTurn}
             disabled={aiTyping}
             className="shrink-0 rounded-md border border-red-200 bg-white px-2.5 py-1 font-medium text-red-600 disabled:opacity-50"
           >
-            再次尝试
+            {!settings.apiKey ? '去配置' : error.startsWith('消息未发送，输入已保留') ? '继续编辑' : '再次尝试'}
           </button>
         </div>
       )}
@@ -896,76 +939,39 @@ export function ChatPage() {
             {replyToMessage && (
               <div className="mb-2 flex items-center gap-2 rounded-lg bg-gray-50 px-2.5 py-1.5 text-xs text-gray-500">
                 <span className="min-w-0 flex-1 truncate">回复 {previewForReply(replyToMessage)}</span>
-                <button onClick={() => setReplyToId(null)} className="shrink-0 text-gray-400">
+                <button onClick={() => setReplyToId(null)} className="min-h-10 min-w-10 shrink-0 text-gray-400">
                   取消
                 </button>
               </div>
             )}
-            {mentionCandidates.length > 0 && (
-              <div className="mb-2 max-h-44 overflow-y-auto rounded-xl border border-gray-100 bg-white shadow-sm">
-                {mentionCandidates.map((member) => (
-                  <button
-                    key={member.id}
-                    onClick={() => insertMention(member)}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left active:bg-gray-50"
-                  >
-                    <span className="text-sm text-gray-800">@{displayName(member)}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-            {desktop ? (
-              <div className="desktop-chat-composer">
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      void handleSend()
-                    }
-                  }}
-                  placeholder={aiTyping ? '对方正在输入，你可以直接插话打断' : '输入消息…'}
-                  rows={4}
-                  className="desktop-chat-textarea"
-                />
-                <div className="desktop-chat-tools">
-                  <div className="desktop-chat-tool-group">
-                    <button type="button" onClick={() => { setStickerPickerOpen(true); setStickerQuery(''); setStickerResults([]) }} aria-label="搜索表情包" title="表情包"><StickerIcon size={18} /></button>
-                    {!isGroupConv && careerEnabled && <span className="desktop-chat-tool-divider" />}
-                    {!isGroupConv && careerEnabled && <button type="button" onClick={() => setFinanceMode('transfer')} aria-label="转账" title="转账"><ArrowLeftRight size={18} /></button>}
-                    {!isGroupConv && careerEnabled && <button type="button" onClick={() => setFinanceMode('redPacket')} aria-label="红包" title="红包"><Gift size={18} /></button>}
-                    {!isGroupConv && careerEnabled && <button type="button" onClick={() => setFinanceMode('loan')} aria-label="借款" title="借款"><HandCoins size={18} /></button>}
-                    {!isGroupConv && careerEnabled && <button type="button" onClick={() => void repayLoan()} aria-label="归还借款" title="归还借款"><CircleDollarSign size={18} /></button>}
-                    {(careerEnabled || shopEnabled || warehouseEnabled) && <span className="desktop-chat-tool-divider" />}
-                    {careerEnabled && <button type="button" onClick={() => navigate('/work')} aria-label="工作" title="工作"><BriefcaseBusiness size={18} /></button>}
-                    {shopEnabled && <button type="button" onClick={() => navigate('/shop')} aria-label="商城" title="商城"><ShoppingBag size={18} /></button>}
-                    {warehouseEnabled && <button type="button" onClick={() => navigate('/warehouse')} aria-label="仓库" title="仓库"><Package size={18} /></button>}
-                  </div>
-                  {aiTyping && <button type="button" onClick={handleStopGeneration} aria-label="停止生成" className="desktop-chat-send">停止</button>}
-                  <button type="button" onClick={handleSend} disabled={!input.trim()} aria-label="发送消息" className="desktop-chat-send">发送</button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-end gap-2">
-                <button onClick={()=>setAppsOpen(true)} aria-label="更多聊天功能" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-600"><Plus size={20} /></button>
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      void handleSend()
-                    }
-                  }}
-                  placeholder={aiTyping ? '对方正在输入 你可以直接插话打断' : '发消息…'}
-                  rows={1}
-                  className="max-h-24 flex-1 resize-none rounded-xl border border-gray-200 px-3 py-2 text-[14.5px] outline-none disabled:cursor-wait disabled:bg-gray-50 disabled:text-gray-400"
-                />
-                {aiTyping && <button onClick={handleStopGeneration} aria-label="停止生成" className="shrink-0 rounded-xl bg-gray-200 px-3 py-2 text-sm text-gray-700">停止</button>}
-                <button onClick={handleSend} disabled={!input.trim()} aria-label="发送消息" className="shrink-0 rounded-xl bg-gray-900 px-4 py-2 text-sm text-white disabled:opacity-40">发送</button>
-              </div>
-            )}
+            {latestRegeneratableMessage && <div className="mb-2 flex items-center gap-2">
+              <button type="button" disabled={aiTyping} onClick={() => void regenerateTurn(latestRegeneratableMessage).catch((error: unknown) => setToast(error instanceof Error ? error.message : String(error)))} className="min-h-10 rounded-lg bg-gray-100 px-3 text-xs text-gray-700 disabled:opacity-40">重新生成</button>
+              <button type="button" disabled={aiTyping} onClick={() => { setRegenerationInstruction(''); setRegenerationMessageId(latestRegeneratableMessage.id) }} className="min-h-10 rounded-lg bg-gray-100 px-3 text-xs text-gray-700 disabled:opacity-40">附加要求</button>
+            </div>}
+            <ChatComposer
+              key={conversationId}
+              desktop={desktop}
+              aiTyping={aiTyping}
+              members={isGroupConv ? groupMembers : EMPTY_CONTACTS}
+              onSend={handleSend}
+              onStop={handleStopGeneration}
+              tools={desktop ? <>
+                <button type="button" onClick={openStickers} aria-label="搜索表情包" title="表情包"><StickerIcon size={18} /></button>
+                {!isGroupConv && careerEnabled && <>
+                  <span className="desktop-chat-tool-divider" />
+                  <button type="button" onClick={() => setFinanceMode('transfer')} aria-label="转账" title="转账"><ArrowLeftRight size={18} /></button>
+                  <button type="button" onClick={() => setFinanceMode('redPacket')} aria-label="红包" title="红包"><Gift size={18} /></button>
+                  <button type="button" onClick={() => setFinanceMode('loan')} aria-label="借款" title="借款"><HandCoins size={18} /></button>
+                  <button type="button" onClick={() => void repayLoan()} aria-label="归还借款" title="归还借款"><CircleDollarSign size={18} /></button>
+                </>}
+                {careerEnabled && <button type="button" onClick={() => navigate('/work')} aria-label="工作" title="工作"><BriefcaseBusiness size={18} /></button>}
+                {shopEnabled && <button type="button" onClick={() => navigate('/shop')} aria-label="商城" title="商城"><ShoppingBag size={18} /></button>}
+                {warehouseEnabled && <button type="button" onClick={() => navigate('/warehouse')} aria-label="仓库" title="仓库"><Package size={18} /></button>}
+              </> : <>
+                <button type="button" onClick={() => setAppsOpen(true)} aria-label="更多聊天功能" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-600"><Plus size={20} /></button>
+                <button type="button" onClick={openStickers} aria-label="搜索表情包" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-600"><StickerIcon size={20} /></button>
+              </>}
+            />
           </>
         )}
       </div>
@@ -1002,33 +1008,34 @@ export function ChatPage() {
       )}
       {menuMessage && (
         <ActionSheet
+          title="消息操作"
           onClose={() => setMenuMessageId(null)}
           options={[
-            { label: '复制', onSelect: () => void copyMessage(menuMessage) },
+            { group: '常用操作', label: '复制', onSelect: () => void copyMessage(menuMessage) },
+            ...(isGroupConv && menuMessage.image?.presentation !== 'illustration' ? [{ group: '常用操作', label: '回复', onSelect: () => setReplyToId(menuMessage.id) }] : []),
+            { group: '常用操作', label: '选择转发截图', onSelect: () => beginMessageSelection(menuMessage.id) },
             ...(speechEnabled && menuMessage.type === 'text' && menuMessage.role === 'assistant'
               ? !!menuSpeechVoice && speechCacheByMessage.get(menuMessage.id)?.signature === speechSignature(menuMessage.content, settings, menuSpeechVoice)
                 ? [
-                    { label: speechPlayingId === menuMessage.id && speechPlaying ? '暂停语音' : '播放语音', onSelect: () => handleSpeechClick(menuMessage) },
-                    { label: '重新生成语音', onSelect: () => void generateMessageSpeech(menuMessage, true) },
-                    { label: '删除语音缓存', onSelect: () => void deleteMessageSpeech(menuMessage) },
+                    { group: '语音', label: speechPlayingId === menuMessage.id && speechPlaying ? '暂停语音' : '播放语音', onSelect: () => handleSpeechClick(menuMessage) },
+                    { group: '语音', label: '重新生成语音', onSelect: () => void generateMessageSpeech(menuMessage, true) },
+                    { group: '语音', label: '删除语音缓存', onSelect: () => void deleteMessageSpeech(menuMessage) },
                   ]
-                : [{ label: '生成语音', onSelect: () => void generateMessageSpeech(menuMessage) }]
+                : [{ group: '语音', label: '生成语音', onSelect: () => void generateMessageSpeech(menuMessage) }]
               : []),
             ...(speechEnabled && menuMessage.role === 'assistant' && menuMessage.type === 'text'
-              ? [{ label: '生成这一轮全部语音', onSelect: () => void generateReplyRoundSpeech(menuMessage) }]
+              ? [{ group: '语音', label: '生成这一轮全部语音', onSelect: () => void generateReplyRoundSpeech(menuMessage) }]
               : []),
-            { label: '选择转发截图', onSelect: () => beginMessageSelection(menuMessage.id) },
             ...(feedbackContactFor(menuMessage)
               ? [
                   ...(menuMessage.debugAiTurnId
-                    ? [{ label: '重新生成这一轮', onSelect: () => { setRegenerationInstruction(''); setRegenerationMessageId(menuMessage.id) } }]
+                    ? [{ group: '重新生成与反馈', label: '重新生成这一轮', onSelect: () => { setRegenerationInstruction(''); setRegenerationMessageId(menuMessage.id) } }]
                     : []),
-                  { label: '这不像TA', onSelect: () => void sendFeedback(menuMessage, 'unlike') },
-                  { label: '以后别这样说', onSelect: () => void sendFeedback(menuMessage, 'avoid') },
+                  { group: '重新生成与反馈', label: '这不像TA', onSelect: () => void sendFeedback(menuMessage, 'unlike') },
+                  { group: '重新生成与反馈', label: '以后别这样说', onSelect: () => void sendFeedback(menuMessage, 'avoid') },
                 ]
               : []),
-            ...(isGroupConv && menuMessage.image?.presentation !== 'illustration' ? [{ label: '回复', onSelect: () => setReplyToId(menuMessage.id) }] : []),
-            { label: '删除这条消息', onSelect: () => void deleteMessage(menuMessage), danger: true },
+            { group: '删除', label: '删除这条消息', onSelect: () => void deleteMessage(menuMessage), danger: true },
           ]}
         />
       )}
@@ -1066,10 +1073,11 @@ export function ChatPage() {
         <div className="absolute inset-0 z-50 flex items-end bg-black/30" onClick={() => setStickerPickerOpen(false)}>
           <div className="flex max-h-[78%] w-full flex-col rounded-t-2xl bg-white pb-[env(safe-area-inset-bottom)]" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2 border-b border-gray-100 p-3">
-              <input autoFocus value={stickerQuery} onChange={(e) => setStickerQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void searchStickers() }} placeholder="搜一个表情包，例如：猫猫、无语" className="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm" />
+              <input value={stickerQuery} onChange={(e) => setStickerQuery(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void searchStickers() }} placeholder="搜一个表情包，例如：猫猫、无语" className="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm" />
               <button type="button" onClick={() => void searchStickers()} disabled={stickerBusy} className="rounded-lg bg-gray-900 px-3 py-2 text-sm text-white disabled:opacity-40">{stickerBusy ? '搜索中' : '搜索'}</button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
+              {stickers.length > 0 && <><h3 className="mb-2 text-xs text-gray-500">我的表情</h3><div className="mb-4 grid grid-cols-4 gap-2">{stickers.map((sticker) => <button key={sticker.id} type="button" onClick={() => void sendSticker(sticker.name, sticker.dataUrl)} className="aspect-square overflow-hidden rounded-xl bg-gray-100"><img src={sticker.dataUrl} alt={sticker.name} className="h-full w-full object-contain" /></button>)}</div></>}
               {stickerResults.length === 0 ? <p className="py-8 text-center text-xs text-gray-400">输入关键词后搜索，点图片即可发送</p> : <div className="grid grid-cols-3 gap-2">{stickerResults.map((result, index) => <button key={`${result.url}-${index}`} type="button" onClick={() => void sendRemoteSticker(result)} className="aspect-square overflow-hidden rounded-xl bg-gray-100"><img src={result.url} alt={result.name || stickerQuery} loading="lazy" className="h-full w-full object-cover" /></button>)}</div>}
               {settings.stickerProvider !== 'none' && <p className="mt-3 text-center text-[10px] text-gray-400">Powered by {stickerProviderName(settings.stickerProvider)}</p>}
             </div>

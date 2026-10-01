@@ -12,49 +12,49 @@ export const LOCATION_GROUP_ID = 'talk-location-group'
 export const LOCATION_CONVERSATION_ID = 'talk-location-conversation'
 const MAP_SEED = 'talk-location-map-v1'
 
-type LocationSeed = Pick<LocationNode, 'id' | 'parentId' | 'name' | 'kind' | 'description' | 'access' | 'sortOrder'>
-const seed = (id: string, parentId: string | undefined, name: string, kind: string, description: string, sortOrder: number, access: LocationNode['access'] = 'public'): LocationSeed => ({ id, parentId, name, kind, description, access, sortOrder })
+type LocationSeed = Pick<LocationNode, 'id' | 'parentId' | 'name' | 'kind' | 'description' | 'sortOrder'>
+const seed = (id: string, parentId: string | undefined, name: string, kind: string, description: string, sortOrder: number): LocationSeed => ({ id, parentId, name, kind, description, sortOrder })
 
 const LOCATION_SEEDS: LocationSeed[] = [
   seed('city', undefined, '临江市', 'world', '一座临河而建的现代城市。', 0),
-  seed('home', 'city', '我的家', 'residence', '安静的私人住所。', 10, 'private'),
-  seed('home-living', 'home', '客厅', 'living-room', '适合休息和闲聊的客厅。', 11, 'private'),
-  seed('home-kitchen', 'home', '厨房', 'kitchen', '连着客厅的开放式厨房。', 12, 'private'),
+  seed('home', 'city', '我的家', 'residence', '安静的私人住所。', 10),
+  seed('home-living', 'home', '客厅', 'living-room', '适合休息和闲聊的客厅。', 11),
+  seed('home-kitchen', 'home', '厨房', 'kitchen', '连着客厅的开放式厨房。', 12),
   seed('riverside-apartment', 'city', '临江公寓', 'apartment', '靠近江岸的城市公寓。', 14),
   seed('riverside-apartment-lobby', 'riverside-apartment', '公寓大堂', 'lobby', '住户和访客经过的一层大堂。', 15),
-  seed('riverside-apartment-room', 'riverside-apartment', '临江公寓住宅楼', 'apartment-building', '一栋每层仅一户的住宅楼；具体住处必须精确到门牌号。', 16, 'restricted'),
-  seed('riverside-apartment-101', 'riverside-apartment-room', '101室', 'apartment-room', '临江公寓一层的独立住户房间。', 161, 'restricted'),
-  seed('riverside-apartment-201', 'riverside-apartment-room', '201室', 'apartment-room', '临江公寓二层的独立住户房间。', 162, 'restricted'),
-  seed('riverside-apartment-302', 'riverside-apartment-room', '302室', 'apartment-room', '临江公寓三层的独立住户房间。', 163, 'restricted'),
+  seed('riverside-apartment-room', 'riverside-apartment', '临江公寓住宅楼', 'apartment-building', '一栋每层仅一户的住宅楼；具体住处必须精确到门牌号。', 16),
+  seed('riverside-apartment-101', 'riverside-apartment-room', '101室', 'apartment-room', '临江公寓一层的独立住户房间。', 161),
+  seed('riverside-apartment-201', 'riverside-apartment-room', '201室', 'apartment-room', '临江公寓二层的独立住户房间。', 162),
+  seed('riverside-apartment-302', 'riverside-apartment-room', '302室', 'apartment-room', '临江公寓三层的独立住户房间。', 163),
   seed('youth-apartment', 'city', '青年公寓', 'apartment', '许多年轻上班族居住的公寓。', 17),
-  seed('youth-apartment-room', 'youth-apartment', '青年公寓住宅楼', 'apartment-building', '一栋每层仅一户的紧凑型住宅楼；具体住处必须精确到门牌号。', 18, 'restricted'),
-  seed('youth-apartment-101', 'youth-apartment-room', '101室', 'apartment-room', '青年公寓一层的独立住户房间。', 181, 'restricted'),
-  seed('youth-apartment-202', 'youth-apartment-room', '202室', 'apartment-room', '青年公寓二层的独立住户房间。', 182, 'restricted'),
-  seed('youth-apartment-301', 'youth-apartment-room', '301室', 'apartment-room', '青年公寓三层的独立住户房间。', 183, 'restricted'),
-  seed('student-dorm', 'city', '学生宿舍', 'dormitory', '供学生住宿的宿舍楼。', 19, 'restricted'),
-  seed('student-dorm-room', 'student-dorm', '学生宿舍楼', 'dorm-building', '一栋每层仅一间宿舍的学生宿舍楼；具体住处必须精确到房号。', 20, 'restricted'),
-  seed('student-dorm-101', 'student-dorm-room', '101室', 'dorm-room', '学生宿舍一层的独立房间。', 201, 'restricted'),
-  seed('student-dorm-201', 'student-dorm-room', '201室', 'dorm-room', '学生宿舍二层的独立房间。', 202, 'restricted'),
-  seed('student-dorm-302', 'student-dorm-room', '302室', 'dorm-room', '学生宿舍三层的独立房间。', 203, 'restricted'),
+  seed('youth-apartment-room', 'youth-apartment', '青年公寓住宅楼', 'apartment-building', '一栋每层仅一户的紧凑型住宅楼；具体住处必须精确到门牌号。', 18),
+  seed('youth-apartment-101', 'youth-apartment-room', '101室', 'apartment-room', '青年公寓一层的独立住户房间。', 181),
+  seed('youth-apartment-202', 'youth-apartment-room', '202室', 'apartment-room', '青年公寓二层的独立住户房间。', 182),
+  seed('youth-apartment-301', 'youth-apartment-room', '301室', 'apartment-room', '青年公寓三层的独立住户房间。', 183),
+  seed('student-dorm', 'city', '学生宿舍', 'dormitory', '供学生住宿的宿舍楼。', 19),
+  seed('student-dorm-room', 'student-dorm', '学生宿舍楼', 'dorm-building', '一栋每层仅一间宿舍的学生宿舍楼；具体住处必须精确到房号。', 20),
+  seed('student-dorm-101', 'student-dorm-room', '101室', 'dorm-room', '学生宿舍一层的独立房间。', 201),
+  seed('student-dorm-201', 'student-dorm-room', '201室', 'dorm-room', '学生宿舍二层的独立房间。', 202),
+  seed('student-dorm-302', 'student-dorm-room', '302室', 'dorm-room', '学生宿舍三层的独立房间。', 203),
   seed('old-residences', 'city', '老城区住宅', 'apartment', '街巷密集、生活气息浓厚的旧住宅区。', 21),
   seed('old-residences-lane', 'old-residences', '旧城住宅楼', 'residential-building', '旧城区一栋每层仅一户的住宅楼；具体住处必须精确到门牌号。', 22),
-  seed('old-residences-101', 'old-residences-lane', '101室', 'apartment-room', '旧城住宅楼一层的独立住户房间。', 221, 'restricted'),
-  seed('old-residences-202', 'old-residences-lane', '202室', 'apartment-room', '旧城住宅楼二层的独立住户房间。', 222, 'restricted'),
-  seed('old-residences-302', 'old-residences-lane', '302室', 'apartment-room', '旧城住宅楼三层的独立住户房间。', 223, 'restricted'),
-  seed('villa-district', 'city', '郊外别墅区', 'villa', '位于丘陵边缘的低密度住宅区。', 23, 'restricted'),
-  seed('villa-district-lane', 'villa-district', '别墅住宅区', 'villa-cluster', '通向各栋独立住宅的安静道路；具体住处必须精确到房号。', 24, 'restricted'),
-  seed('villa-district-101', 'villa-district-lane', '101号', 'villa-room', '别墅区第一栋独立住宅。', 241, 'restricted'),
-  seed('villa-district-201', 'villa-district-lane', '201号', 'villa-room', '别墅区第二栋独立住宅。', 242, 'restricted'),
-  seed('villa-district-302', 'villa-district-lane', '302号', 'villa-room', '别墅区第三栋独立住宅。', 243, 'restricted'),
-  seed('school', 'city', '临江学校', 'school', '有教室、食堂和操场的校园。', 20, 'restricted'),
-  seed('school-classroom', 'school', '教室', 'classroom', '上课与自习的教室。', 21, 'restricted'),
+  seed('old-residences-101', 'old-residences-lane', '101室', 'apartment-room', '旧城住宅楼一层的独立住户房间。', 221),
+  seed('old-residences-202', 'old-residences-lane', '202室', 'apartment-room', '旧城住宅楼二层的独立住户房间。', 222),
+  seed('old-residences-302', 'old-residences-lane', '302室', 'apartment-room', '旧城住宅楼三层的独立住户房间。', 223),
+  seed('villa-district', 'city', '郊外别墅区', 'villa', '位于丘陵边缘的低密度住宅区。', 23),
+  seed('villa-district-lane', 'villa-district', '别墅住宅区', 'villa-cluster', '通向各栋独立住宅的安静道路；具体住处必须精确到房号。', 24),
+  seed('villa-district-101', 'villa-district-lane', '101号', 'villa-room', '别墅区第一栋独立住宅。', 241),
+  seed('villa-district-201', 'villa-district-lane', '201号', 'villa-room', '别墅区第二栋独立住宅。', 242),
+  seed('villa-district-302', 'villa-district-lane', '302号', 'villa-room', '别墅区第三栋独立住宅。', 243),
+  seed('school', 'city', '临江学校', 'school', '有教室、食堂和操场的校园。', 20),
+  seed('school-classroom', 'school', '教室', 'classroom', '上课与自习的教室。', 21),
   seed('school-canteen', 'school', '食堂', 'canteen', '学生们集中用餐的地方。', 22),
   seed('school-playground', 'school', '操场', 'playground', '适合运动与散步的开阔场地。', 23),
   seed('university', 'city', '临江大学', 'university', '临江市规模最大的综合大学。', 24),
   seed('university-library', 'university', '大学图书馆', 'library', '安静宽敞的大学图书馆。', 25),
   seed('university-campus', 'university', '校园广场', 'campus-square', '连接教学楼和宿舍区的广场。', 26),
   seed('office', 'city', '临江中心', 'office', '城市里的办公楼。', 25),
-  seed('office-floor', 'office', '办公区', 'office-floor', '安静忙碌的开放办公区。', 26, 'restricted'),
+  seed('office-floor', 'office', '办公区', 'office-floor', '安静忙碌的开放办公区。', 26),
   seed('office-lobby', 'office', '大堂', 'lobby', '办公楼的一层公共大堂。', 27),
   seed('mall', 'city', '中心商场', 'mall', '人流密集的综合商场。', 30),
   seed('mall-atrium', 'mall', '商场中庭', 'atrium', '明亮开阔的商场中庭。', 31),
@@ -62,9 +62,9 @@ const LOCATION_SEEDS: LocationSeed[] = [
   seed('mall-shop', 'mall', '商店', 'shop', '陈列着各种商品的店铺。', 33),
   seed('hospital', 'city', '市立医院', 'hospital', '提供门诊和住院服务的医院。', 40),
   seed('hospital-lobby', 'hospital', '医院大厅', 'lobby', '患者与访客往来的大厅。', 41),
-  seed('hospital-clinic', 'hospital', '门诊室', 'clinic', '安静的门诊诊室。', 42, 'restricted'),
+  seed('hospital-clinic', 'hospital', '门诊室', 'clinic', '安静的门诊诊室。', 42),
   seed('city-hall', 'city', '市政中心', 'city-hall', '处理城市公共事务的行政中心。', 43),
-  seed('police', 'city', '临江警察局', 'police', '负责城区治安与公共安全。', 44, 'restricted'),
+  seed('police', 'city', '临江警察局', 'police', '负责城区治安与公共安全。', 44),
   seed('station', 'city', '临江车站', 'station', '连接城区和外地的综合车站。', 45),
   seed('commercial-street', 'city', '临江商业街', 'market', '餐饮、零售和夜间活动集中的街区。', 46),
   seed('commercial-street-restaurant', 'commercial-street', '餐厅街', 'restaurant-street', '汇集不同餐馆的小街。', 47),
@@ -81,12 +81,12 @@ const LOCATION_SEEDS: LocationSeed[] = [
   seed('mountain-lookout', 'mountain', '山顶观景台', 'lookout', '可以俯瞰城市的观景台。', 71),
   seed('hills', 'city', '青岚丘陵', 'hill', '城市西北侧起伏舒缓的丘陵。', 72),
   seed('hills-trail', 'hills', '丘陵步道', 'hill-trail', '沿缓坡延伸的郊野步道。', 73),
-  seed('farm', 'city', '晴川农场', 'farm', '位于乡村区域的农场。', 80, 'restricted'),
-  seed('farm-field', 'farm', '农田', 'farmland', '开阔的田地。', 81, 'restricted'),
+  seed('farm', 'city', '晴川农场', 'farm', '位于乡村区域的农场。', 80),
+  seed('farm-field', 'farm', '农田', 'farmland', '开阔的田地。', 81),
   seed('village', 'city', '南溪村', 'village', '位于城市南侧的近郊村庄。', 84),
   seed('village-square', 'village', '村口广场', 'village-square', '村民日常聚集的小广场。', 85),
-  seed('industrial-park', 'city', '临江工业园', 'factory', '位于下游郊区的产业园区。', 88, 'restricted'),
-  seed('industrial-park-gate', 'industrial-park', '园区入口', 'factory-gate', '人员车辆进出工业园的入口。', 89, 'restricted'),
+  seed('industrial-park', 'city', '临江工业园', 'factory', '位于下游郊区的产业园区。', 88),
+  seed('industrial-park-gate', 'industrial-park', '园区入口', 'factory-gate', '人员车辆进出工业园的入口。', 89),
 ]
 
 const RESIDENCE_LAYOUT_VERSION = 2
@@ -466,7 +466,6 @@ export async function syncContactLocationAt(contactId: string, now = new Date())
   await ensureLocationsInitialized()
   const [locations, contact] = await Promise.all([db.locations.toArray(), db.contacts.get(contactId)])
   if (!contact) return false
-  if (contact.locationSource === 'unknown') return false
   const leafIds = new Set(locations.filter((item) => isLeafLocation(item.id, locations)).map((item) => item.id))
   const resolved = resolveContactRuntimeAt(contact, now, leafIds)
   const changed = contact.currentLocationId !== resolved.locationId || contact.locationSource !== resolved.source || contact.currentTaskId !== resolved.taskId || contact.currentTaskKind !== resolved.taskKind || contact.currentActivity !== resolved.activity

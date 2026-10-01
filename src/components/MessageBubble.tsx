@@ -3,7 +3,7 @@ import type React from 'react'
 import { Avatar } from './Avatar'
 import { useLongPress } from '../hooks/useLongPress'
 import { displayName } from '../lib/contact'
-import type { Contact, Message } from '../types'
+import type { Contact, MediaAsset, Message } from '../types'
 import { Check } from 'lucide-react'
 import { UiIcon } from './UiIcon'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -49,7 +49,17 @@ function assetAspectRatio(asset: { size?: string; width?: number; height?: numbe
   return width > 0 && height > 0 ? `${width} / ${height}` : undefined
 }
 
-export const MessageBubble = memo(function MessageBubble({
+export const MessageBubble = memo(function MessageBubble(props: MessageBubbleProps) {
+  return props.message.type === 'image' ? <SubscribedImageBubble {...props} /> : <MessageBubbleContent {...props} />
+})
+
+function SubscribedImageBubble(props: MessageBubbleProps) {
+  const assetId = props.message.image?.assetId
+  const imageAsset = useLiveQuery(() => assetId ? db.mediaAssets.get(assetId) : undefined, [assetId], null)
+  return <MessageBubbleContent {...props} imageAsset={imageAsset} />
+}
+
+const MessageBubbleContent = memo(function MessageBubbleContent({
   message,
   contactName,
   contactAvatar,
@@ -76,13 +86,9 @@ export const MessageBubble = memo(function MessageBubble({
   onAvatarClick,
   registerRef,
   showName = false,
-}: MessageBubbleProps) {
+  imageAsset,
+}: MessageBubbleProps & { imageAsset?: MediaAsset | null }) {
   const isUser = message.role === 'user'
-  const imageAsset = useLiveQuery(
-    () => message.image?.assetId ? db.mediaAssets.get(message.image.assetId) : undefined,
-    [message.image?.assetId],
-    null,
-  )
   const longPress = useLongPress(() => onLongPress?.(message.id))
   const mentionNames = useMemo(
     () =>

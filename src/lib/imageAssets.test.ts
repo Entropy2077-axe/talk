@@ -19,10 +19,10 @@ vi.mock('./remoteMedia', () => ({
   generateRemoteImage: vi.fn(async () => ({ url: 'data:image/png;base64,aW1hZ2U=', provider: 'atlas' })),
 }))
 
-function contact(id: string, name: string, identity: string): Contact {
+function contact(id: string, name: string, identity: string, gender = ''): Contact {
   return {
     id, name, avatar: '🙂', avatarColor: '#ddd', systemPrompt: `${name} persona`,
-    visualIdentity: identity, visualSeed: id.charCodeAt(0), createdAt: 1,
+    gender, visualIdentity: identity, visualSeed: id.charCodeAt(0), createdAt: 1,
     memoryFacts: '', memoryStyle: '', memoryUpdatedAt: 1, memoryMessageCursor: 0,
     relationshipBase: 'friend', relationshipDynamic: '',
   }
@@ -93,6 +93,26 @@ describe('persistent image assets and prompt orchestration', () => {
     const otherPrompt = composeImagePrompt({ scene: 'portrait', kind: 'portrait', contacts: [], includeUser: false, settings: settings('custom'), provider: 'novelai' })
     expect(atlasPrompt).toContain('muted watercolor editorial art')
     expect(otherPrompt).not.toContain('muted watercolor editorial art')
+  })
+
+  it('locks a female contact to the only visible person even when the scene conflicts', () => {
+    const prompt = composeImagePrompt({
+      scene: 'a man walking behind her in a cafe', kind: 'portrait',
+      contacts: [contact('a', 'Ari', 'oval face, long black hair', '女')],
+      includeUser: false, settings: settings(), provider: 'atlas',
+    })
+
+    expect(prompt).toContain('Person A is female')
+    expect(prompt).toContain('Never depict Person A as male')
+    expect(prompt).toContain('exactly 1 distinct person, and only the listed person')
+    expect(prompt).toContain('override conflicting person, gender, or count wording')
+    expect(prompt).toContain('do not blend faces, duplicate people, swap features, or add background or incidental people')
+  })
+
+  it('forbids every person when a scene or object image has no participant roster', () => {
+    const prompt = composeImagePrompt({ scene: 'coffee on a desk', kind: 'object', contacts: [], includeUser: false, settings: settings(), provider: 'atlas' })
+    expect(prompt).toContain('Show no people at all')
+    expect(prompt).toContain('background figures')
   })
 
   it.each([

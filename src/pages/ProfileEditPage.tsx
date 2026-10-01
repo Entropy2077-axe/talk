@@ -53,7 +53,9 @@ export function ProfileEditPage() {
             <div className="desktop-profile-form">
               <label><span>昵称</span><input value={nickname} onChange={(event) => setNickname(event.target.value)} maxLength={20} /></label>
               <label><span>性别</span><div className="desktop-profile-options">{GENDER_OPTIONS.map((value) => <button type="button" key={value} onClick={() => setGender(gender === value ? '' : value)} className={gender === value ? 'active' : ''}>{value}</button>)}</div></label>
-              <label><span>生日</span><input type="date" value={birthday} onChange={(event) => setBirthday(event.target.value)} /></label>
+              <label><span>生日</span><input type="text"
+          aria-label="生日"
+          placeholder="例如：10月1日、2004年10月或农历八月十五" value={birthday} onChange={(event) => setBirthday(event.target.value)} /></label>
               <label><span>个人简介</span><textarea value={bio} onChange={(event) => setBio(event.target.value)} rows={4} placeholder="职业、爱好、性格之类的，会作为聊天背景信息" /></label>
               <label><span>标准长相</span><textarea value={visualIdentity} onChange={(event) => setVisualIdentity(event.target.value)} rows={4} placeholder="稳定外貌，不写衣服、动作、背景或画风"/><button type="button" disabled={visualBusy || !settings.apiKey} onClick={async()=>{if(visualIdentity&& !window.confirm('重新生成会覆盖当前标准长相，确定继续？'))return;setVisualBusy(true);try{setVisualIdentity(await regenerateUserVisualIdentity({...settings,userVisualIdentity:visualIdentity}))}finally{setVisualBusy(false)}}}>{visualBusy?'生成中…':'AI重新生成外貌描述'}</button></label>
               <label><span>数据说明</span><small>头像和资料只写入当前设备，不会上传到 Talk 服务器。</small></label>
@@ -105,7 +107,9 @@ export function ProfileEditPage() {
 
         <label className="mb-1 block text-xs text-gray-400">生日</label>
         <input
-          type="date"
+          type="text"
+          aria-label="生日"
+          placeholder="例如：10月1日或农历八月十五"
           value={birthday}
           onChange={(e) => setBirthday(e.target.value)}
           className="mb-3 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"

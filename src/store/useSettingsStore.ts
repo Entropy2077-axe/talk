@@ -49,8 +49,10 @@ export const useSettingsStore = create<SettingsState>()(
       baseUrl: envBaseUrl,
       model: 'deepseek-v4-pro',
       utilityModel: 'deepseek-v4-flash',
+      actionDecisionProvider: 'llm',
+      actionDecisionApiKey: '',
       aiApiConfigs: [legacyAiApiConfig({ aiProvider: 'deepseek', apiKey: envKey, baseUrl: envBaseUrl, model: 'deepseek-v4-pro', utilityModel: 'deepseek-v4-flash' })],
-      aiApiFailoverOrder: ['legacy-primary-api'],
+      activeAiApiConfigId: 'legacy-primary-api',
       globalSystemPrompt: DEFAULT_STYLE_PROMPT,
       promptModules: createDefaultPromptModules(),
       promptPresets: normalizePromptPresets(undefined, createDefaultPromptModules()),
@@ -113,11 +115,23 @@ export const useSettingsStore = create<SettingsState>()(
       chatResponseTimeoutMs: 60 * 1000,
       adminModeEnabled: false,
       enabledModules: ['shop', 'warehouse', 'saveLoad', 'relationship', 'speech', 'career', 'location'],
-      setSettings: (patch) => set(patch),
+      setSettings: (patch) => set((current) => {
+        const connectionFields = ['aiProvider', 'apiKey', 'baseUrl', 'model', 'utilityModel'] as const
+        if (!('aiApiConfigs' in patch) && !('activeAiApiConfigId' in patch) && !connectionFields.some((field) => field in patch)) return patch
+        const merged = { ...current, ...patch }
+        const configs = normalizeAiApiConfigs(merged.aiApiConfigs, merged)
+        const legacyOrder = (patch as Partial<AppSettings> & { aiApiFailoverOrder?: string[] }).aiApiFailoverOrder
+        const selectedId = patch.activeAiApiConfigId ?? legacyOrder?.[0] ?? merged.activeAiApiConfigId
+        let selected = configs.find((config) => config.id === selectedId) ?? configs[0]
+        selected = { ...selected, ...Object.fromEntries(connectionFields.filter((field) => field in patch).map((field) => [field === 'aiProvider' ? 'provider' : field, patch[field]])) }
+        const cleanPatch = { ...patch }
+        delete (cleanPatch as Partial<AppSettings> & { aiApiFailoverOrder?: string[] }).aiApiFailoverOrder
+        return { ...cleanPatch, aiApiConfigs: configs.map((config) => config.id === selected.id ? selected : config), activeAiApiConfigId: selected.id, ...legacyFieldsForApiConfig(selected) }
+      }),
     }),
     {
       name: 'talk-settings',
-      version: 30,
+      version: 31,
       migrate: (persisted, version) => {
         const next = persisted as Partial<SettingsState>
         if (next.experienceMode !== 'immersive' && next.experienceMode !== 'free') next.experienceMode = 'free'
@@ -204,7 +218,6 @@ export const useSettingsStore = create<SettingsState>()(
           next.aiApiConfigs = normalizeAiApiConfigs(next.aiApiConfigs, {
             aiProvider: next.aiProvider ?? 'deepseek', apiKey: next.apiKey ?? '', baseUrl: next.baseUrl ?? '', model: next.model ?? '', utilityModel: next.utilityModel ?? '',
           }, legacySampling)
-          next.aiApiFailoverOrder = next.aiApiConfigs.map((config) => config.id)
         }
         next.uiTheme = normalizeUiTheme(next.uiTheme)
         next.promptModules = normalizePromptModules(next.promptModules, next.globalSystemPrompt)
@@ -216,9 +229,12 @@ export const useSettingsStore = create<SettingsState>()(
         next.aiApiConfigs = normalizeAiApiConfigs(next.aiApiConfigs, {
           aiProvider: next.aiProvider ?? 'deepseek', apiKey: next.apiKey ?? '', baseUrl: next.baseUrl ?? '', model: next.model ?? '', utilityModel: next.utilityModel ?? '',
         })
-        const orderedIds = Array.isArray(next.aiApiFailoverOrder) ? next.aiApiFailoverOrder.filter((id): id is string => typeof id === 'string' && next.aiApiConfigs!.some((config) => config.id === id)) : []
-        next.aiApiFailoverOrder = [...orderedIds, ...next.aiApiConfigs.map((config) => config.id).filter((id) => !orderedIds.includes(id))]
-        Object.assign(next, legacyFieldsForApiConfig(next.aiApiConfigs[0]))
+        const legacyRouting = next as Partial<AppSettings> & { aiApiFailoverOrder?: string[] }
+        const selectedId = next.activeAiApiConfigId ?? legacyRouting.aiApiFailoverOrder?.[0]
+        const selected = next.aiApiConfigs.find((config) => config.id === selectedId) ?? next.aiApiConfigs[0]
+        next.activeAiApiConfigId = selected.id
+        delete legacyRouting.aiApiFailoverOrder
+        Object.assign(next, legacyFieldsForApiConfig(selected))
         return next
       },
     },

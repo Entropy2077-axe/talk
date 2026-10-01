@@ -24,6 +24,7 @@ export function MessagesPage() {
   const [showAddMenu, setShowAddMenu] = useState(false)
   const navigate = useNavigate()
   const locationEnabled = useSettingsStore((state) => state.enabledModules.includes('location'))
+  const apiKeyConfigured = useSettingsStore((state) => Boolean(state.apiKey.trim()))
 
   const conversations = useLiveQuery(() => db.conversations.toArray(), []) ?? EMPTY_ARRAY
   const contacts = useLiveQuery(() => db.contacts.toArray(), []) ?? EMPTY_ARRAY
@@ -35,7 +36,11 @@ export function MessagesPage() {
   // The startup repair handles persisted data. Re-run after a live world
   // switch too, because this tab can stay mounted while Dexie replaces the
   // active world's contact rows.
-  useEffect(() => { void ensureContactConversations() }, [contacts, conversations])
+  const repairKey = JSON.stringify([
+    contacts.map((contact) => contact.id).sort(),
+    conversations.map((conversation) => `${conversation.id}:${conversation.contactId ?? ''}`).sort(),
+  ])
+  useEffect(() => { void ensureContactConversations() }, [repairKey])
 
   const rows = useMemo(() => {
     const contactById = new Map(contacts.map((c) => [c.id, c]))
@@ -109,6 +114,11 @@ export function MessagesPage() {
         }
       />
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {!apiKeyConfigured && <div className="mx-3 my-3 rounded-xl bg-gray-100 px-4 py-3">
+          <p className="text-sm text-gray-800">先配置聊天模型</p>
+          <p className="mt-1 text-xs text-gray-500">填写 API Key 后，联系人就可以回复你。</p>
+          <button type="button" onClick={() => navigate('/settings/api-configurations')} className="mt-2 min-h-10 rounded-lg bg-gray-900 px-3 text-xs text-white">去配置</button>
+        </div>}
         {rows.length === 0 && (
           <div className="ui-empty-state"><p className="text-sm text-[var(--ui-text-2)]">还没有会话</p><p className="mt-1 text-xs">认识联系人后，对话会集中显示在这里。</p><button type="button" onClick={() => navigate('/contacts')} className="ui-primary-action mt-4 px-4 py-2 text-sm">前往联系人</button></div>
         )}
@@ -145,6 +155,10 @@ export function MessagesPage() {
         <ActionSheet
           onClose={() => setMenuFor(null)}
           options={[
+            {
+              label: '标为已读',
+              onSelect: () => db.conversations.update(menuConv.id, { lastReadAt: Math.max(Date.now(), lastMessageByConversation.get(menuConv.id)?.createdAt ?? 0) }),
+            },
             {
               label: menuConv.pinned ? '取消置顶' : '置顶会话',
               onSelect: () => db.conversations.update(menuConv.id, { pinned: !menuConv.pinned }),

@@ -46,4 +46,22 @@ describe('special task tool', () => {
     expect(result.success).toBe(true)
     expect(await db.contacts.get('agent')).toMatchObject({ currentLocationId: 'mall-cafe', locationSource: 'specialTask', currentTaskKind: 'special', currentActivity: '喝咖啡' })
   })
+
+  it('moves a contact with unknown prior position into a custom room immediately', async () => {
+    const now = new Date(2026, 7, 3, 22, 0).getTime()
+    await db.locations.add({
+      id: 'custom-bedroom', parentId: 'home', name: '我的卧室', kind: 'bedroom', description: '后来创建的卧室',
+      sortOrder: 13, createdAt: now, updatedAt: now,
+    })
+    await db.contacts.update('agent', { currentLocationId: undefined, locationSource: 'unknown' })
+
+    const result = await createSpecialTask('agent', {
+      startsAt: now, endsAt: now + 60 * 60_000, locationId: 'custom-bedroom', activity: '回卧室休息', summary: '回卧室休息',
+    }, now)
+
+    expect(result.success).toBe(true)
+    expect(await db.contacts.get('agent')).toMatchObject({
+      currentLocationId: 'custom-bedroom', locationSource: 'specialTask', currentTaskKind: 'special', currentActivity: '回卧室休息',
+    })
+  })
 })

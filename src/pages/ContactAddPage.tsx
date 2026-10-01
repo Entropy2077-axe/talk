@@ -484,25 +484,36 @@ export function ContactAddPage() {
       <TopBar title="添加联系人" showBack />
 
       <div className="flex-1 overflow-y-auto px-4 pb-5 pt-4">
-        <section className="mb-4">
-          <p className="text-xs font-medium text-[var(--ui-text-3)]">认识一个新的人</p>
-          <h1 className="ui-font-display mt-1 text-xl font-semibold text-[var(--ui-text)]">先决定你想参与到什么程度</h1>
-          <p className="mt-2 text-xs leading-relaxed text-[var(--ui-text-3)]">只填写你真正关心的部分；名字和未指定资料会由对方自己确定。</p>
-        </section>
         {settings.experienceMode === 'free' ? <div className="mb-4 grid grid-cols-2 gap-2" role="group" aria-label="创建方式">
             <button type="button" aria-pressed={!isNuwaMode} onClick={() => { setIsNuwaMode(false); setPersonaDraft(null); setError('') }} className={`rounded-[var(--ui-radius-card)] border p-3 text-left ${!isNuwaMode ? 'border-[var(--ui-action)] bg-[var(--ui-accent-soft)]' : 'border-[var(--ui-border)] bg-[var(--ui-surface)]'}`}><span className="block text-sm font-semibold text-[var(--ui-text)]">帮我找人</span><span className="mt-1 block text-[11px] leading-relaxed text-[var(--ui-text-3)]">给出偏好，其余内容自然补全</span></button>
             <button type="button" aria-pressed={isNuwaMode} onClick={() => { setIsNuwaMode(true); setPersonaDraft(null); setError('') }} className={`rounded-[var(--ui-radius-card)] border p-3 text-left ${isNuwaMode ? 'border-[var(--ui-action)] bg-[var(--ui-accent-soft)]' : 'border-[var(--ui-border)] bg-[var(--ui-surface)]'}`}><span className="block text-sm font-semibold text-[var(--ui-text)]">精细创建</span><span className="mt-1 block text-[11px] leading-relaxed text-[var(--ui-text-3)]">先生成完整初稿，再逐项确认</span></button>
         </div> : <div className="mb-4 rounded-[var(--ui-radius-card)] border border-[var(--ui-special-border)] bg-[var(--ui-special-soft)] px-3 py-3"><p className="text-sm font-medium text-[var(--ui-special-ink)]">帮我找人</p><p className="mt-1 text-xs leading-relaxed text-[var(--ui-special-ink)]">只需选择你在意的条件，其他资料会在寻找过程中自然确定。</p></div>}
         {!isNuwaMode && <button type="button" onClick={completelyRandom} disabled={generating} className="mb-4 flex w-full items-center justify-center gap-2 rounded-lg bg-gray-900 py-3 text-sm font-medium text-white transition active:scale-[.98] disabled:opacity-50"><Dice5 size={17} />完全随机寻找</button>}
-        {settings.experienceMode === 'free' && <><button type="button" onClick={() => characterCardInputRef.current?.click()} disabled={generating} className="mb-4 w-full rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] bg-[var(--ui-surface)] py-2.5 text-sm text-[var(--ui-text-2)] disabled:opacity-50">已有角色卡？导入到资料库并创建</button>
+
+<section className="mb-4 rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] p-4">        <label className="mb-2 block text-xs font-medium text-gray-400">{isNuwaMode ? '初稿建议（可选）' : '你想认识什么样的人？'}</label>
+        <textarea
+          value={extra}
+          onChange={(e) => setExtra(e.target.value)}
+          placeholder={draftMode ? '例如：一位慢热的朋友，我们从小就认识。' : '比如职业、爱好、说话口头禅、你们认识的契机…'}
+          rows={4}
+          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+        />
+
+
+</section>
+        {settings.experienceMode === 'free' && <details className="mb-4 rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4"><summary className="cursor-pointer text-sm font-medium text-[var(--ui-text)]">导入与复用</summary><div className="mt-4">        {settings.experienceMode === 'free' && <><button type="button" onClick={() => characterCardInputRef.current?.click()} disabled={generating} className="mb-4 w-full rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] bg-[var(--ui-surface)] py-2.5 text-sm text-[var(--ui-text-2)] disabled:opacity-50">已有角色卡？导入到资料库并创建</button>
         <input ref={characterCardInputRef} type="file" accept=".png,.json,application/json,image/png" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importCharacterCard(file) }} />
         {importedCardName && <p className="-mt-2 mb-4 break-all text-[11px] text-[var(--ui-text-3)]">已载入：{importedCardName}</p>}</>}
-        {isNuwaMode && <p className="mb-2 text-xs text-[var(--ui-special-ink)]">女娲模式：先写初稿建议和你确定的设定，AI只补全仍为空的内容。</p>}
-        <div className="mb-4 border-t border-[var(--ui-border-soft)] pt-4"><h2 className="ui-font-display text-sm font-semibold text-[var(--ui-text)]">{personaDraft ? '检查 AI 初稿' : '告诉我你在意的部分'}</h2><p className="mt-1 text-[11px] text-[var(--ui-text-3)]">{personaDraft ? '确认身份、关系、经历和说话方式后再创建。' : '未选择的项目会自动补全；创建后仍可在管理员模式修正完整设定。'}</p></div>
-
         {isNuwaMode && <div className="mb-4 grid grid-cols-2 gap-2"><button type="button" onClick={() => void saveCurrentPersona()} className="rounded-lg bg-gray-900 py-2.5 text-sm text-white">保存当前人设</button><button type="button" onClick={() => { setPersonaPage(0); setPersonaPickerOpen(true) }} className="rounded-lg border border-gray-300 bg-white py-2.5 text-sm text-gray-800">使用已保存的人设</button></div>}
         {isNuwaMode && <button type="button" onClick={() => setCreationPickerOpen(true)} className="mb-4 w-full rounded-lg border border-[var(--ui-special-border)] bg-[var(--ui-special-soft)] py-2.5 text-sm text-[var(--ui-special-ink)]">调用以前创建过的人设（{creationRecords.length}）</button>}
-        {!draftMode && <>
+        {settings.experienceMode === 'free' && <section className="mb-4 rounded-xl border border-[var(--ui-special-border)] bg-[var(--ui-special-soft)] p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div><p className="text-sm font-medium text-[var(--ui-special-ink)]">本次生成的参考资料</p><p className="mt-1 text-[11px] leading-relaxed text-[var(--ui-special-ink)]">从资料库选择角色卡、外部世界书或联网资料，只用于生成这个人物，不会自动写入世界正史。</p></div>
+            <button type="button" onClick={() => setWorldbookSelectorOpen(true)} className="shrink-0 rounded-lg bg-[var(--ui-special)] px-3 py-2 text-xs text-white">选择资料</button>
+          </div>
+          <p className="mt-2 text-xs text-[var(--ui-special-ink)]">{selectedWorldbookEntryIds.length ? `已选择 ${selectedWorldbookEntryIds.length} 条资料` : '暂未额外选择，将使用所属世界的正史生成'}</p>
+        </section>}</div></details>}
+        {!isNuwaMode && <details className="mb-4 rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4"><summary className="cursor-pointer text-sm font-medium text-[var(--ui-text)]">具体偏好与共同经历（可选）</summary><div className="mt-4">        {!draftMode && <>
         {settings.experienceMode === 'free' && <><label className="mb-1 block text-xs text-gray-400">头像</label>
         <button
           onClick={() => setPickingAvatar(true)}
@@ -689,9 +700,7 @@ export function ContactAddPage() {
           </div>
         </div></>}
 
-        {!draftMode && isNuwaMode && <div className="mb-4 grid grid-cols-2 gap-2 rounded-xl border border-gray-200 p-3"><label className="col-span-2 text-xs font-medium text-gray-500">身份资料（可留空，由 AI 补全）</label><input value={customRealName} onChange={(e) => setCustomRealName(e.target.value)} placeholder="真名" className="rounded-lg border border-gray-200 px-3 py-2 text-sm"/><input value={customNickname} onChange={(e) => setCustomNickname(e.target.value)} placeholder="网名" className="rounded-lg border border-gray-200 px-3 py-2 text-sm"/><input value={customBirthday} onChange={(e) => setCustomBirthday(e.target.value)} placeholder="出生年月日 YYYY-MM-DD" className="col-span-2 rounded-lg border border-gray-200 px-3 py-2 text-sm"/></div>}
 
-        {!draftMode && isNuwaMode && <div className="mb-4 space-y-3"><div><label className="mb-1 block text-xs font-medium text-gray-400">性格倾向</label><input value={customTendencies} onChange={(e) => setCustomTendencies(e.target.value)} placeholder="例如：慢热、敏感、有主见（顿号分隔）" className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"/></div><div className="grid grid-cols-2 gap-2"><div><label className="mb-1 block text-xs text-gray-400">年龄</label><input value={customAge} onChange={(e) => setCustomAge(e.target.value)} placeholder="例如：24岁" className="w-full rounded-lg border px-3 py-2 text-sm"/></div><div><label className="mb-1 block text-xs text-gray-400">性别</label><input value={customGender} onChange={(e) => setCustomGender(e.target.value)} placeholder="自由填写" className="w-full rounded-lg border px-3 py-2 text-sm"/></div></div><div><label className="mb-1 block text-xs text-gray-400">关系定位</label><input value={customRelationship} onChange={(e) => setCustomRelationship(e.target.value)} placeholder="与用户是什么关系" className="w-full rounded-lg border px-3 py-2 text-sm"/></div>{careerEnabled && <div><label className="mb-1 block text-xs text-gray-400">职业</label><input value={customOccupation} onChange={(e) => setCustomOccupation(e.target.value)} placeholder="自由填写职业" className="w-full rounded-lg border px-3 py-2 text-sm"/></div>}<div><label className="mb-1 block text-xs text-gray-400">兴趣爱好</label><input value={customHobbies} onChange={(e) => setCustomHobbies(e.target.value)} placeholder="多个兴趣用顿号分隔" className="w-full rounded-lg border px-3 py-2 text-sm"/></div></div>}
 
 
         {existingContacts.length > 0 && !draftMode && (
@@ -755,34 +764,11 @@ export function ContactAddPage() {
             className="mb-4 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
           />
         </>}
-        {settings.experienceMode === 'free' && <section className="mb-4 rounded-xl border border-[var(--ui-special-border)] bg-[var(--ui-special-soft)] p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div><p className="text-sm font-medium text-[var(--ui-special-ink)]">本次生成的参考资料</p><p className="mt-1 text-[11px] leading-relaxed text-[var(--ui-special-ink)]">从资料库选择角色卡、外部世界书或联网资料，只用于生成这个人物，不会自动写入世界正史。</p></div>
-            <button type="button" onClick={() => setWorldbookSelectorOpen(true)} className="shrink-0 rounded-lg bg-[var(--ui-special)] px-3 py-2 text-xs text-white">选择资料</button>
-          </div>
-          <p className="mt-2 text-xs text-[var(--ui-special-ink)]">{selectedWorldbookEntryIds.length ? `已选择 ${selectedWorldbookEntryIds.length} 条资料` : '暂未额外选择，将使用所属世界的正史生成'}</p>
-        </section>}
-        <label className="mb-2 block text-xs font-medium text-gray-400">{draftMode ? '初稿建议 / 补全方向（可选）' : '人设（可选）'}</label>
-        <textarea
-          value={extra}
-          onChange={(e) => setExtra(e.target.value)}
-          placeholder={draftMode ? '例如：想要一个嘴硬但很在乎我的雌小鬼恋人，我们小时候就认识。AI会先生成初稿，之后你可以修改。' : '比如职业、爱好、说话口头禅、你们认识的契机…'}
-          rows={4}
-          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
-        />
 
+</div></details>}
         {isNuwaMode && (
-          <div className="mt-2">
-            <p className="mb-2 text-[11px] leading-relaxed text-gray-500">这里告诉 AI 你希望补全的方向、重点和边界。AI 会结合初稿建议、下方已填设定、所选资料和角色所属世界，只补空白项，不改动你已经填写的内容。</p>
-            <button type="button" onClick={() => void polishNuwaPersona()} disabled={polishingPersona || generating} className="w-full rounded-lg bg-[var(--ui-special)] px-3 py-2 text-xs text-white disabled:opacity-50">{polishingPersona ? 'AI补全中…' : 'AI补全'}</button>
-            {error && <p className="mt-2 text-xs leading-relaxed text-red-500">{error}</p>}
-          </div>
-        )}
-
-        {isNuwaMode && (
-          <section className="mt-4 rounded-xl border border-[var(--ui-special-border)] bg-[var(--ui-special-soft)] p-3" data-testid="nuwa-persona-setting">
-            <label className="block text-sm font-medium text-[var(--ui-special-ink)]">角色设定</label>
-            <p className="mt-1 text-[11px] leading-relaxed text-[var(--ui-special-ink)]">逐项填写你已经确定的内容，空白项可交给 AI 补全。性格特质和角色关系既可选用建议，也可完全自定义。</p>
+          <details className="mb-4 rounded-[var(--ui-radius-card)] border border-[var(--ui-border)] bg-[var(--ui-surface)] p-4" data-testid="nuwa-persona-setting"><summary className="cursor-pointer text-sm font-medium text-[var(--ui-text)]">详细人物设定（可选）</summary>
+            <div className="mt-4"><button type="button" onClick={() => setPickingAvatar(true)} className="flex items-center gap-3 rounded-lg border border-gray-200 px-3 py-2"><Avatar avatar={avatar} size={44} /><span className="text-sm text-gray-500">选择头像</span></button></div>
             <div className="mt-3 space-y-3">
               <div className="grid grid-cols-2 gap-2">
                 <label className="block text-xs font-medium text-[var(--ui-special-ink)]">真名<input value={customRealName} onChange={(event) => setCustomRealName(event.target.value)} placeholder="可选" className="mt-1 w-full rounded-lg border border-[var(--ui-special-border)] bg-white px-3 py-2 text-sm" /></label>
@@ -797,6 +783,7 @@ export function ContactAddPage() {
               <label className="block text-xs font-medium text-[var(--ui-special-ink)]">关系定位<input value={customRelationship} onChange={(event) => setCustomRelationship(event.target.value)} placeholder="例如：青梅竹马、同事、暧昧对象" className="mt-1 w-full rounded-lg border border-[var(--ui-special-border)] bg-white px-3 py-2 text-sm" /></label>
               <label className="block text-xs font-medium text-[var(--ui-special-ink)]">职业<input value={customOccupation} onChange={(event) => setCustomOccupation(event.target.value)} placeholder="完全自由填写职业" className="mt-1 w-full rounded-lg border border-[var(--ui-special-border)] bg-white px-3 py-2 text-sm" /></label>
               <label className="block text-xs font-medium text-[var(--ui-special-ink)]">兴趣爱好<input value={customHobbies} onChange={(event) => setCustomHobbies(event.target.value)} placeholder="例如：摄影、烘焙、深夜散步" className="mt-1 w-full rounded-lg border border-[var(--ui-special-border)] bg-white px-3 py-2 text-sm" /></label>
+              <label className="block text-xs font-medium text-[var(--ui-special-ink)]">共同过往<textarea value={sharedHistory} onChange={(event) => setSharedHistory(event.target.value)} rows={3} placeholder="你们认识的契机或共同经历" className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" /></label>
               <label className="block text-xs font-medium text-[var(--ui-special-ink)]">其他角色设定<textarea value={nuwaOtherSetting} onChange={(event) => setNuwaOtherSetting(event.target.value)} rows={5} placeholder="补充已确定的经历、边界、习惯、生活细节、说话方式或关系表现；填写后 AI 补全不会改写。" className="mt-1 w-full resize-y rounded-lg border border-[var(--ui-special-border)] bg-white px-3 py-2 text-sm leading-relaxed" /></label>
               {existingContacts.length > 0 && (
                 <div className="rounded-xl border border-[var(--ui-special-border)] bg-white p-3">
@@ -811,7 +798,14 @@ export function ContactAddPage() {
                 </div>
               )}
             </div>
-          </section>
+        {isNuwaMode && (
+          <div className="mt-2">
+            <button type="button" onClick={() => void polishNuwaPersona()} disabled={polishingPersona || generating} className="w-full rounded-lg bg-[var(--ui-special)] px-3 py-2 text-xs text-white disabled:opacity-50">{polishingPersona ? 'AI补全中…' : 'AI补全'}</button>
+            {error && <p className="mt-2 text-xs leading-relaxed text-red-500">{error}</p>}
+          </div>
+        )}
+
+          </details>
         )}
 
         {isNuwaMode && personaDraft && (
@@ -844,9 +838,9 @@ export function ContactAddPage() {
         </button>
       </div>
 
-      {creationPickerOpen && <div className="absolute inset-0 z-40 flex items-center bg-black/30 p-4"><div className="max-h-[82%] w-full overflow-y-auto rounded-2xl bg-white p-4"><div className="mb-3 flex items-center justify-between"><div><h2 className="font-medium text-gray-900">以前创建过的人设</h2><p className="mt-1 text-[11px] text-gray-400">不会自动删除，但你可以手动移除不需要的记录</p></div><button type="button" onClick={() => setCreationPickerOpen(false)} className="text-sm text-gray-500">关闭</button></div><div className="space-y-2">{creationRecords.map((record) => <div key={record.id} className="flex items-center gap-2 rounded-xl bg-gray-50 px-3 py-2"><button type="button" onClick={() => applyCreationRecord(record)} className="min-w-0 flex-1 py-1 text-left"><div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-medium text-gray-900">{record.nickname || record.name}</span><span className="shrink-0 text-[10px] text-gray-400">{new Date(record.createdAt).toLocaleString()}</span></div><p className="mt-1 line-clamp-2 text-xs text-gray-500">{record.persona}</p></button><button type="button" onClick={() => void deleteCreationRecord(record)} className="shrink-0 rounded-lg px-2 py-2 text-xs text-red-500">删除</button></div>)}{creationRecords.length === 0 && <p className="py-8 text-center text-sm text-gray-400">还没有创建记录</p>}</div></div></div>}
+      {creationPickerOpen && <div className="absolute inset-0 z-40 flex items-center bg-black/30 p-4"><div className="max-h-[82%] w-full overflow-y-auto rounded-2xl bg-white p-4"><div className="mb-3 flex items-center justify-between"><div><h2 className="font-medium text-gray-900">以前创建过的人设</h2><p className="mt-1 text-[11px] text-gray-400">不会自动删除，但你可以手动移除不需要的记录</p></div><button type="button" onClick={() => setCreationPickerOpen(false)} className="min-h-10 min-w-10 text-sm text-gray-500">关闭</button></div><div className="space-y-2">{creationRecords.map((record) => <div key={record.id} className="flex items-center gap-2 rounded-xl bg-gray-50 px-3 py-2"><button type="button" onClick={() => applyCreationRecord(record)} className="min-w-0 flex-1 py-1 text-left"><div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-medium text-gray-900">{record.nickname || record.name}</span><span className="shrink-0 text-[10px] text-gray-400">{new Date(record.createdAt).toLocaleString()}</span></div><p className="mt-1 line-clamp-2 text-xs text-gray-500">{record.persona}</p></button><button type="button" onClick={() => void deleteCreationRecord(record)} className="shrink-0 rounded-lg px-2 py-2 text-xs text-red-500">删除</button></div>)}{creationRecords.length === 0 && <p className="py-8 text-center text-sm text-gray-400">还没有创建记录</p>}</div></div></div>}
 
-      {personaPickerOpen && <div className="absolute inset-0 z-30 flex items-center bg-black/30 p-4"><div className="w-full rounded-2xl bg-white p-4"><div className="mb-3 flex items-center justify-between"><h2 className="font-medium">已保存的人设</h2><button type="button" onClick={() => setPersonaPickerOpen(false)} className="text-sm text-gray-500">关闭</button></div><div className="space-y-2">{savedPersonas.slice(personaPage * 5, personaPage * 5 + 5).map((saved, index) => <div key={saved.id} className="flex items-center gap-2 rounded-xl bg-gray-50 px-3 py-2"><button type="button" onClick={() => applySavedPersona(saved)} className="min-w-0 flex-1 py-1 text-left"><span className="block truncate text-sm text-gray-900">{saved.nickname || saved.realName || `未命名人设${personaPage * 5 + index + 1}`}</span><span className="mt-0.5 block text-[11px] text-gray-400">点击使用</span></button><button type="button" onClick={() => void deleteSavedPersona(saved)} className="rounded-lg px-2 py-2 text-xs text-red-500" aria-label={`删除${saved.nickname || saved.realName || '未命名人设'}`}>删除</button></div>)}{savedPersonas.length === 0 && <p className="py-6 text-center text-sm text-gray-400">还没有保存的人设</p>}</div><div className="mt-4 flex items-center justify-between"><button type="button" disabled={personaPage === 0} onClick={() => setPersonaPage((page) => page - 1)} className="text-sm text-gray-600 disabled:text-gray-300">上一页</button><span className="text-xs text-gray-400">{personaPage + 1} / {Math.max(1, Math.ceil(savedPersonas.length / 5))}</span><button type="button" disabled={(personaPage + 1) * 5 >= savedPersonas.length} onClick={() => setPersonaPage((page) => page + 1)} className="text-sm text-gray-600 disabled:text-gray-300">下一页</button></div></div></div>}
+      {personaPickerOpen && <div className="absolute inset-0 z-30 flex items-center bg-black/30 p-4"><div className="w-full rounded-2xl bg-white p-4"><div className="mb-3 flex items-center justify-between"><h2 className="font-medium">已保存的人设</h2><button type="button" onClick={() => setPersonaPickerOpen(false)} className="min-h-10 min-w-10 text-sm text-gray-500">关闭</button></div><div className="space-y-2">{savedPersonas.slice(personaPage * 5, personaPage * 5 + 5).map((saved, index) => <div key={saved.id} className="flex items-center gap-2 rounded-xl bg-gray-50 px-3 py-2"><button type="button" onClick={() => applySavedPersona(saved)} className="min-w-0 flex-1 py-1 text-left"><span className="block truncate text-sm text-gray-900">{saved.nickname || saved.realName || `未命名人设${personaPage * 5 + index + 1}`}</span><span className="mt-0.5 block text-[11px] text-gray-400">点击使用</span></button><button type="button" onClick={() => void deleteSavedPersona(saved)} className="min-h-10 min-w-10 rounded-lg px-2 py-2 text-xs text-red-500" aria-label={`删除${saved.nickname || saved.realName || '未命名人设'}`}>删除</button></div>)}{savedPersonas.length === 0 && <p className="py-6 text-center text-sm text-gray-400">还没有保存的人设</p>}</div><div className="mt-4 flex items-center justify-between"><button type="button" disabled={personaPage === 0} onClick={() => setPersonaPage((page) => page - 1)} className="text-sm text-gray-600 disabled:text-gray-300">上一页</button><span className="text-xs text-gray-400">{personaPage + 1} / {Math.max(1, Math.ceil(savedPersonas.length / 5))}</span><button type="button" disabled={(personaPage + 1) * 5 >= savedPersonas.length} onClick={() => setPersonaPage((page) => page + 1)} className="text-sm text-gray-600 disabled:text-gray-300">下一页</button></div></div></div>}
       {pickingAvatar && (
         <AvatarPicker
           onSelect={(a) => {

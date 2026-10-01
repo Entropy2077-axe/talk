@@ -469,7 +469,6 @@ export interface LocationNode {
   description: string
   /** User-authored notes kept separate from the public place description. */
   note?: string
-  access: 'public' | 'restricted' | 'private'
   mapBinding?: LocationMapBinding
   userCreated?: boolean
   sortOrder: number
@@ -925,10 +924,12 @@ export interface AppSettings {
   baseUrl: string
   model: string
   utilityModel: string // model for secondary tasks: shop generation, warmth scoring / memory updates, worldview drafts, etc.
-  /** Saved AI endpoints. Legacy fields above mirror the first item for older call sites. */
+  actionDecisionProvider?: 'llm' | 'jev'
+  actionDecisionApiKey?: string
+  /** Saved AI endpoints. Legacy fields above mirror the selected item for older call sites. */
   aiApiConfigs: AiApiConfig[]
-  /** Ordered primary-to-fallback route. */
-  aiApiFailoverOrder: string[]
+  /** The only AI endpoint used until the user selects another configuration. */
+  activeAiApiConfigId: string
   globalSystemPrompt: string
   /** Global, user-editable original prompt templates shared by all relevant model calls. */
   promptModules: PromptModuleSettings

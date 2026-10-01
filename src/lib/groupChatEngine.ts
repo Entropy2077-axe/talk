@@ -46,9 +46,22 @@ interface ImmediateLocationRequest {
   locationName: string
 }
 
-function findImmediateLocationRequest(userText: string, locations: Array<{ id: string; name: string }>): ImmediateLocationRequest | undefined {
+export function findImmediateLocationRequest(userText: string, locations: Array<{ id: string; name: string }>): ImmediateLocationRequest | undefined {
   if (!/(?:现在|立刻|马上|这就|赶紧|去|到|进|回|让.{0,8}去|叫.{0,8}去)/.test(userText)) return undefined
-  const target = locations.find((location) => location.name.length >= 2 && userText.includes(location.name))
+  const exact = locations.find((location) => location.name.length >= 2 && userText.includes(location.name))
+  if (exact) return { locationId: exact.id, locationName: exact.name }
+
+  // Custom rooms are often named “我的卧室” or “主卧室”, while the user
+  // naturally says only “回卧室”. Resolve the noun after a movement verb
+  // against containing custom location names instead of requiring the full
+  // configured display name verbatim.
+  const phrase = userText.match(/(?:前往|移动到|回到|进入|去到|到|进|回|去)([^，。！？!?\s]{2,16})/)?.[1]
+    ?.replace(/(?:睡觉|休息|待着|等着|一下|一趟|吧|了|去)+$/, '')
+  const target = phrase
+    ? locations
+        .filter((location) => location.name.length >= 2 && (location.name.includes(phrase) || phrase.includes(location.name)))
+        .sort((a, b) => Math.abs(a.name.length - phrase.length) - Math.abs(b.name.length - phrase.length))[0]
+    : undefined
   return target ? { locationId: target.id, locationName: target.name } : undefined
 }
 
@@ -137,7 +150,7 @@ function parseGroupTurnDebugPayload(
 ): unknown {
   const parsed = parseJsonLoose(finalRaw)
   if (parsed && typeof parsed === 'object') {
-    return { ...(parsed as Record<string, unknown>), mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, promptTrace: { sections: [{ label: '群聊主提示词', content: mainPrompt }] } }
+    return { ...(parsed as Record<string, unknown>), mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, turnSummary, promptTrace: { sections: [{ label: '群聊主提示词', content: mainPrompt }] } }
   }
   if (parsed !== null) return parsed
   return { mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, knowledgeQueries, turnSummary, promptTrace: { sections: [{ label: '群聊主提示词', content: mainPrompt }] } }
@@ -205,12 +218,63 @@ async function updateGroupMemoryAndVibe(opts: {
     }
   }
 
-  await db.groups.update(group.id, patch)
-  const turn = await db.aiTurns.get(aiTurnId)
-  if (turn?.parsed && typeof turn.parsed === 'object') {
-    await db.aiTurns.update(aiTurnId, {
-      parsed: { ...(turn.parsed as Record<string, unknown>), groupMemoryUpdate: patch },
-    })
+  await db.transaction('rw', db.groups, db.aiTurns, async () => {
+    const turn = await db.aiTurns.get(aiTurnId)
+    // Regeneration deletes the rejected turn first. An already-running
+    // memory update must not put that rejected summary back afterwards.
+    if (!turn) return
+    await db.groups.update(group.id, patch)
+    if (turn.parsed && typeof turn.parsed === 'object') {
+      await db.aiTurns.update(aiTurnId, {
+        parsed: {
+          ...(turn.parsed as Record<string, unknown>),
+          groupMemoryUpdate: {
+            before: { memory: group.memory ?? '', memoryTurnCount: group.memoryTurnCount ?? 0 },
+            after: patch,
+          },
+        },
+      })
+    }
+  })
+}
+
+function groupTurnSummary(parsed: unknown): string {
+  if (!parsed || typeof parsed !== 'object') return ''
+  const value = (parsed as Record<string, unknown>).turnSummary
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+export function rollbackGroupMemory(group: Group, parsed: unknown): Partial<Group> | undefined {
+  if (!parsed || typeof parsed !== 'object') return undefined
+  const update = (parsed as Record<string, unknown>).groupMemoryUpdate
+  if (update && typeof update === 'object') {
+    const record = update as Record<string, unknown>
+    const before = record.before
+    const after = record.after
+    if (before && typeof before === 'object' && after && typeof after === 'object') {
+      const previous = before as Record<string, unknown>
+      const applied = after as Record<string, unknown>
+      if (typeof applied.memory === 'string' && applied.memory === (group.memory ?? '')) {
+        return {
+          memory: typeof previous.memory === 'string' ? previous.memory : '',
+          memoryTurnCount: typeof previous.memoryTurnCount === 'number' ? previous.memoryTurnCount : 0,
+        }
+      }
+    }
+  }
+
+  // Legacy turns only stored the resulting patch. Their summary was appended
+  // as one timestamped line, so remove that line without disturbing later
+  // accepted group history.
+  const summary = groupTurnSummary(parsed)
+  if (!summary || !group.memory) return undefined
+  const lines = group.memory.split('\n')
+  const index = lines.findLastIndex((line) => line.trim() === summary || line.trim().endsWith(`] ${summary}`))
+  if (index < 0) return undefined
+  lines.splice(index, 1)
+  return {
+    memory: lines.join('\n').trim(),
+    memoryTurnCount: Math.max(0, (group.memoryTurnCount ?? 0) - 1),
   }
 }
 
@@ -280,8 +344,8 @@ export async function sendGroupMessage(
   text: string,
   mentionContactIds: string[] = [],
   replyToMessageId?: string,
-): Promise<void> {
-  if (!text.trim()) return
+): Promise<boolean> {
+  if (!text.trim()) return false
   if (group.kind === 'location' && group.locationId) {
     await syncContactLocationsAt(new Date())
     const participants = await resolveLocationParticipants(group.locationId)
@@ -290,8 +354,8 @@ export async function sendGroupMessage(
     await db.groups.update(group.id, { memberContactIds: group.memberContactIds })
   }
   if (!settings.apiKey && members.length > 0) {
-    useChatEngineStore.getState().patch(conversationId, { error: '还没有配置API Key 请先去"我-设置"里填写' })
-    return
+    useChatEngineStore.getState().patch(conversationId, { error: '还没有配置 API Key，请前往“我 → LLM 设置”配置模型' })
+    return false
   }
 
   const streamId = uuid()
@@ -309,11 +373,13 @@ export async function sendGroupMessage(
     replyToMessageId,
     createdAt: messageCreatedAt,
   }
-  await db.messages.add(msg)
-  await db.conversations.update(conversationId, { updatedAt: messageCreatedAt })
+  await db.transaction('rw', db.messages, db.conversations, async () => {
+    await db.messages.add(msg)
+    await db.conversations.update(conversationId, { updatedAt: messageCreatedAt })
+  })
   if (group.kind === 'location' && members.length === 0) {
     useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined, error: '' })
-    return
+    return true
   }
   if (msg.mentions?.length || msg.replyToMessageId) {
     const mentionedNames = msg.mentions
@@ -332,10 +398,13 @@ export async function sendGroupMessage(
         ? `群聊"${group.name}"里，用户@了${mentionedNames}: ${text.trim()}`
         : `群聊"${group.name}"里，用户回复了一条消息: ${text.trim()}`,
       importance: 2,
+    }).catch((error: unknown) => {
+      console.error('Failed to record group mention event', error)
     })
   }
 
   scheduleGroupAiTurn(conversationId, group, members, settings, stickers, streamId)
+  return true
 }
 
 /** Trigger a group reply after a non-text user action has already been stored. */
@@ -347,7 +416,7 @@ export async function triggerGroupAiTurn(
   stickers: Sticker[],
 ): Promise<void> {
   if (!settings.apiKey) {
-    useChatEngineStore.getState().patch(conversationId, { error: '还没有配置 API Key，请先去“我 / 设置”里填写' })
+    useChatEngineStore.getState().patch(conversationId, { error: '还没有配置 API Key，请前往“我 → LLM 设置”配置模型' })
     return
   }
   const streamId = uuid()
@@ -366,7 +435,7 @@ export async function regenerateGroupAiTurn(
   regenerationInstruction = '',
 ): Promise<void> {
   if (!settings.apiKey) {
-    useChatEngineStore.getState().patch(conversationId, { error: '还没有配置 API Key，请先去“我 / 设置”里填写' })
+    useChatEngineStore.getState().patch(conversationId, { error: '还没有配置 API Key，请前往“我 → LLM 设置”配置模型' })
     return
   }
 
@@ -374,22 +443,31 @@ export async function regenerateGroupAiTurn(
   turns.begin(conversationId, streamId)
   useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: '群成员' })
 
+  const rejectedTurn = await db.aiTurns.get(aiTurnId)
   const turnMessages = await db.messages
     .where('conversationId')
     .equals(conversationId)
     .filter((message) => message.debugAiTurnId === aiTurnId)
     .toArray()
-  if (turnMessages.length > 0) {
-    await db.transaction('rw', db.messages, db.mediaAssets, async () => {
+  const rejectedMessageIds = new Set(turnMessages.map((message) => message.id))
+  const rejectedSocialEvents = rejectedMessageIds.size
+    ? await db.socialEvents.filter((event) => !!event.messageId && rejectedMessageIds.has(event.messageId)).toArray()
+    : []
+  const currentGroup = await db.groups.get(group.id)
+  const groupRollback = currentGroup ? rollbackGroupMemory(currentGroup, rejectedTurn?.parsed) : undefined
+  if (turnMessages.length > 0 || rejectedSocialEvents.length > 0 || rejectedTurn || groupRollback) {
+    await db.transaction('rw', db.messages, db.mediaAssets, db.socialEvents, db.aiTurns, db.groups, async () => {
       await db.messages.bulkDelete(turnMessages.map((message) => message.id))
       const assetIds = turnMessages.map((message) => message.image?.assetId).filter((id): id is string => !!id)
       if (assetIds.length) await db.mediaAssets.bulkDelete(assetIds)
+      if (rejectedSocialEvents.length) await db.socialEvents.bulkDelete(rejectedSocialEvents.map((event) => event.id))
+      await db.aiTurns.delete(aiTurnId)
+      if (groupRollback) await db.groups.update(group.id, groupRollback)
     })
   }
-  await db.aiTurns.delete(aiTurnId)
   await db.conversations.update(conversationId, { updatedAt: Date.now() })
 
-  scheduleGroupAiTurn(conversationId, group, members, settings, stickers, streamId, regenerationInstruction.trim())
+  scheduleGroupAiTurn(conversationId, await db.groups.get(group.id) ?? group, members, settings, stickers, streamId, regenerationInstruction.trim())
 }
 
 async function runGroupAiTurn(
@@ -419,6 +497,9 @@ async function runGroupAiTurn(
   }
   console.log(`[group] 开始生成回复 群=${group.name} conversationId=${conversationId}`)
   try {
+    // The page can still hold the pre-regeneration Group object. Always use
+    // the current durable memory when composing the next model request.
+    group = await db.groups.get(group.id) ?? group
     let locationParticipants: LocationParticipants | undefined
     if (group.kind === 'location' && group.locationId) {
       await syncContactLocationsAt(new Date())
@@ -618,8 +699,8 @@ async function runGroupAiTurn(
       const addressedContactId = latestUserMessage?.mentions?.find((id) => speakers.some((speaker) => speaker.id === id))
         ?? repliedContactId
         ?? speakers.find((speaker) => userRequest.includes(speaker.name))?.id
-      const refusal = /不去|不能去|不想去|没法去|不方便|晚点|之后|下次|等会/
-      const acceptance = /好[呀吧]?|行[呀吧]?|可以|没问题|当然|这就|马上|现在就|我去|我来|动身|出发|过去|走吧/
+      const refusal = /不去|不回|不能去|不想去|没法去|不方便|晚点|之后|下次|等会/
+      const acceptance = /好[呀吧]?|行[呀吧]?|可以|没问题|当然|这就|马上|现在就|我去|我来|动身|出发|过去|回去|回房|回卧室|走吧/
       const acceptedBubble = bubbles.find((bubble) => {
         if (bubble.type !== 'text' || refusal.test(bubble.content) || !acceptance.test(bubble.content)) return false
         const speaker = speakers[bubble.speakerIndex - 1]

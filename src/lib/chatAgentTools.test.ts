@@ -111,6 +111,17 @@ describe('native chat agent tools', () => {
     }])
   })
 
+  it('keeps a group location change when a compatible relay omits phone access', () => {
+    const parsed = parseGroupToolCalls([call('change_location', {
+      speakerIndex: 2, locationId: 'custom-bedroom', activity: '回卧室休息', durationMinutes: 60,
+      thought: '已经答应回房间', mood: '放松',
+    })], 2)
+
+    expect(parsed.immediateActivities).toEqual([{
+      speakerIndex: 2, locationId: 'custom-bedroom', activity: '回卧室休息', durationMinutes: 60, phoneAccess: 'available',
+    }])
+  })
+
   it('parses complete private and group outfit changes', () => {
     const items = [
       { name: '蓝色睡衣', category: '睡衣', color: '蓝色', description: '柔软棉质睡衣' },

@@ -208,7 +208,7 @@ function buildMomentsPrompt(
               .filter((c) => c.willComment)
               .map(
                 (c, j) =>
-                  `  评论者${j + 1}: ${c.contact.name}\n  人设: ${c.contact.systemPrompt}\n  与发布者的关系: ${c.relationLabel || '普通朋友'}；${c.relationContext}\n  最近可用素材: ${contexts.get(c.contact.id) || '无'}`,
+                  `  评论者${j + 1}: ${c.contact.name}\n  身份ID: ${c.contact.id}\n  性别: ${c.contact.gender || '未设定'}\n  人设: ${c.contact.systemPrompt}\n  与发布者的关系: ${c.relationLabel || '普通朋友'}；${c.relationContext}\n  最近可用素材: ${contexts.get(c.contact.id) || '无'}`,
               )
               .join('\n')
           : '  （这条没有人评论）'
@@ -217,19 +217,19 @@ function buildMomentsPrompt(
       const photoLine = e.willHavePhoto
         ? `这条动态会配一张照片。填写 imageKeyword（具体英文画面描述）、imageKind（selfie/portrait/scene/object）和 includePoster（照片是否出现发布者本人）。只有本人确实入镜时 includePoster 才为 true。\n`
         : ''
-      return `人物${i + 1}: ${e.poster.name}\n人设: ${e.poster.systemPrompt}\n当前心情: ${e.poster.mood?.text || '平静'}\n最近可用素材: ${contexts.get(e.poster.id) || '无'}\n${statusLine}${photoLine}这条朋友圈下会评论的人(按顺序):\n${commenterLines}`
+      return `人物${i + 1}: ${e.poster.name}\n发布者ID: ${e.poster.id}\n性别: ${e.poster.gender || '未设定'}\n人设: ${e.poster.systemPrompt}\n当前心情: ${e.poster.mood?.text || '平静'}\n最近可用素材: ${contexts.get(e.poster.id) || '无'}\n${statusLine}${photoLine}这条朋友圈下会评论的人(按顺序):\n${commenterLines}`
     })
     .join('\n\n')
 
   const worldviewSection = worldviewText ? `${worldviewText}\n\n` : ''
 
   const editable = getPromptTemplate(settings, 'moments', 'generation', { momentContext: `${worldviewSection}${stickerCommentInstruction(stickerNames)}\n${sections}` }) ?? ''
-  return `${editable}\n\n【不可覆盖的朋友圈运行时规则】\n- 正文是发布给不特定好友看的公开自述，不是发给用户、主人、哥哥或其他特定对象的私聊。不得呼叫某人、向某人提问、催促其回复或要求其采取行动；可以在不泄密时用第三人称自然提及他人。\n- 当前事实是硬约束，但不要求正文一定复述日程。没有当前安排时，不得仅凭“学生/职员”等身份编造今天正在上课或上班。\n- 必须区分过去、现在和未来。尚未开始的约定只能写准备或期待；不得写成正在进行或已经完成。引用约定时，活动、参与者和时间状态必须一致。\n- 私聊原文只能帮助理解状态，不能把对话续句、昵称呼唤、秘密或等待回复的话直接变成朋友圈。\n- 每条先选择一个与该人物近期topicKey不同的具体主题；同批人物也尽量不要撞题。topicKey用简短稳定的“领域-事件”概括，不能只写“日常”“心情”。factBasis简述依据；没有具体事件依据时写“普通公开观察”，不得虚构。\n\n固定输出协议：只输出JSON {"moments":[{"content":"人物1动态","topicKey":"领域-具体事件","timeFrame":"past|current|future|timeless","factBasis":"事实依据","imageKeyword":"需要配图才填写","imageKind":"selfie|portrait|scene|object","includePoster":true,"comments":["评论者1评论"]}]}。moments及comments必须与输入顺序和数量一致。`
+  return `${editable}\n\n【不可覆盖的朋友圈运行时规则】\n- 每次输入只有一位发布者。正文只能使用该发布者的人设、经历、关系、心情和说话习惯；不得借用评论者或其他人物的身份、经历、称呼、语气或行为。每条评论也只能由对应身份ID的评论者演绎。\n- 正文是发布给不特定好友看的公开自述，不是发给用户、主人、哥哥或其他特定对象的私聊。不得呼叫某人、向某人提问、催促其回复或要求其采取行动；可以在不泄密时用第三人称自然提及他人。\n- 当前事实是硬约束，但不要求正文一定复述日程。没有当前安排时，不得仅凭“学生/职员”等身份编造今天正在上课或上班。\n- 必须区分过去、现在和未来。尚未开始的约定只能写准备或期待；不得写成正在进行或已经完成。引用约定时，活动、参与者和时间状态必须一致。\n- 私聊原文只能帮助理解状态，不能把对话续句、昵称呼唤、秘密或等待回复的话直接变成朋友圈。\n- 每条先选择一个与该人物近期topicKey不同的具体主题；同批人物也尽量不要撞题。topicKey用简短稳定的“领域-事件”概括，不能只写“日常”“心情”。factBasis简述依据；没有具体事件依据时写“普通公开观察”，不得虚构。\n- selfie/portrait 必须 includePoster=true；scene/object 只有发布者确实入镜时才能为true。imageKeyword不得添加未声明的人物、路人或背景人物。\n\n固定输出协议：只输出JSON {"moments":[{"posterId":"逐字复制发布者ID","content":"发布者动态","topicKey":"领域-具体事件","timeFrame":"past|current|future|timeless","factBasis":"事实依据","imageKeyword":"需要配图才填写","imageKind":"selfie|portrait|scene|object","includePoster":true,"comments":[{"authorId":"逐字复制评论者身份ID","content":"该评论者的评论"}]}]}。posterId、authorId、moments及comments的顺序和数量必须与输入完全一致。`
 }
 
 interface ParsedMoment {
   content: string
-  comments: string[]
+  comments: { authorId: string; content: string }[]
   topicKey: string
   timeFrame: 'past' | 'current' | 'future' | 'timeless'
   factBasis: string
@@ -238,7 +238,24 @@ interface ParsedMoment {
   includePoster: boolean
 }
 
-function parseMomentsResponse(raw: string, expected: number[]): ParsedMoment[] | null {
+export interface MomentResponseExpectation {
+  posterId: string
+  commenterIds: string[]
+}
+
+function momentExpectation(entry: { poster: Contact; commenters: ReactorPlan[] }): MomentResponseExpectation {
+  return { posterId: entry.poster.id, commenterIds: entry.commenters.filter((commenter) => commenter.willComment).map((commenter) => commenter.contact.id) }
+}
+
+function momentPersonaContext(entry: { poster: Contact; commenters: ReactorPlan[] }, worldviewText: string, facts: Map<string, string>): string {
+  const commenters = entry.commenters
+    .filter((commenter) => commenter.willComment)
+    .map((commenter) => `${commenter.contact.name} (${commenter.contact.id}, ${commenter.contact.gender || '性别未设定'}): ${commenter.contact.systemPrompt}`)
+    .join(' | ')
+  return [worldviewText, `Poster ${entry.poster.name} (${entry.poster.id}, ${entry.poster.gender || '性别未设定'}): ${entry.poster.systemPrompt}\n${facts.get(entry.poster.id) || ''}\nCommenters: ${commenters || 'none'}`].filter(Boolean).join('\n\n')
+}
+
+export function parseMomentsResponse(raw: string, expected: MomentResponseExpectation[]): ParsedMoment[] | null {
   const parsed = parseJsonLoose<{ moments?: unknown[] }>(raw)
   if (!parsed || !Array.isArray(parsed.moments) || parsed.moments.length !== expected.length) return null
   const result: ParsedMoment[] = []
@@ -246,10 +263,17 @@ function parseMomentsResponse(raw: string, expected: number[]): ParsedMoment[] |
     const value = parsed.moments[i]
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null
     const m = value as Record<string, unknown>
+    if (m.posterId !== expected[i].posterId) return null
     if (typeof m.content !== 'string' || !m.content.trim()) return null
-    const comments: string[] = Array.isArray(m.comments)
-      ? m.comments.filter((c: unknown): c is string => typeof c === 'string' && c.trim().length > 0)
-      : []
+    if (!Array.isArray(m.comments) || m.comments.length !== expected[i].commenterIds.length) return null
+    const comments = m.comments.flatMap((value, index) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+      const comment = value as Record<string, unknown>
+      return comment.authorId === expected[i].commenterIds[index] && typeof comment.content === 'string' && comment.content.trim()
+        ? [{ authorId: comment.authorId, content: comment.content.trim() }]
+        : []
+    })
+    if (comments.length !== expected[i].commenterIds.length) return null
     const suppliedTopicKey = typeof m.topicKey === 'string' ? m.topicKey.trim().slice(0, 80) : ''
     // Keep the feed usable with weaker/older models that occasionally omit a
     // newly introduced metadata field. The reviewer still sees the content,
@@ -261,7 +285,7 @@ function parseMomentsResponse(raw: string, expected: number[]): ParsedMoment[] |
     const factBasis = typeof m.factBasis === 'string' ? m.factBasis.trim().slice(0, 160) : ''
     const imageKeyword = typeof m.imageKeyword === 'string' ? m.imageKeyword.trim() : ''
     const imageKind = ['selfie', 'portrait', 'scene', 'object'].includes(String(m.imageKind)) ? m.imageKind as import('../types').AiImageKind : 'scene'
-    const includePoster = typeof m.includePoster === 'boolean' ? m.includePoster : imageKind === 'selfie' || imageKind === 'portrait'
+    const includePoster = imageKind === 'selfie' || imageKind === 'portrait' || m.includePoster === true
     result.push({ content: m.content.trim(), comments, topicKey, timeFrame, factBasis, imageKeyword, imageKind, includePoster })
   }
   return result
@@ -288,7 +312,7 @@ async function reviewMomentPayload(settings: AppSettings, raw: string, expectedS
       purpose: 'quality',
       automatic: true,
       messages: [
-        { role: 'system', content: `${editableReview}\n\n【不可覆盖的审核规则】逐条核对当前日期星期、日程、地点、未来约定状态和事实依据；把同一主题换说法视为重复。正文若直接呼叫用户/主人/亲属、向特定对象提问、催促回复或像私聊续句，必须判为无效。尚未发生的计划被写成正在发生或已经完成、无日程却凭身份编造今天上课上班、活动或参与者与依据不一致，也必须判为无效。\n固定输出协议：候选JSON应符合 ${expectedShape}。只输出JSON：{"valid":true,"reason":""}` },
+        { role: 'system', content: `${editableReview}\n\n【不可覆盖的审核规则】逐条核对候选中存在的posterId与authorId是否逐字对应输入身份，以及正文、每条评论的身份、经历、关系、称呼、语气和行为是否只属于其对应人物；任何人设或说话者串台都必须判为无效。逐条核对当前日期星期、日程、地点、未来约定状态和事实依据；把同一主题换说法视为重复。正文若直接呼叫用户/主人/亲属、向特定对象提问、催促回复或像私聊续句，必须判为无效。尚未发生的计划被写成正在发生或已经完成、无日程却凭身份编造今天上课上班、活动或参与者与依据不一致，也必须判为无效。\n固定输出协议：候选JSON应符合 ${expectedShape}。只输出JSON：{"valid":true,"reason":""}` },
         { role: 'user', content: '请审查候选内容。' },
       ],
     })
@@ -316,7 +340,7 @@ async function reviewMomentPayload(settings: AppSettings, raw: string, expectedS
       purpose: 'quality',
       automatic: true,
       messages: [
-        { role: 'system', content: `${editableRepair}\n\n【不可覆盖的修复规则】保持当前日期星期、日程、地点和未来约定状态一致；换掉重复topicKey。朋友圈正文必须是面向不特定好友的公开自述，不能直接呼叫用户、主人或亲属，不能索要回复，也不能把尚未发生的计划写成已经发生。\n固定输出协议：只输出符合 ${expectedShape} 的JSON。` },
+        { role: 'system', content: `${editableRepair}\n\n【不可覆盖的修复规则】输出协议要求的posterId和authorId必须逐字复制输入身份。正文只用发布者的人设和经历，每条评论只用其authorId对应人物的人设和经历，不得串台。保持当前日期星期、日程、地点和未来约定状态一致；换掉重复topicKey。朋友圈正文必须是面向不特定好友的公开自述，不能直接呼叫用户、主人或亲属，不能索要回复，也不能把尚未发生的计划写成已经发生。\n固定输出协议：只输出符合 ${expectedShape} 的JSON。` },
         { role: 'user', content: '请修复候选内容。' },
       ],
     })
@@ -368,9 +392,9 @@ export async function runMomentTestSandbox(contact: Contact, settings: AppSettin
     purpose: 'moments',
     automatic: false,
   })
-  const personaContext = [worldbookPrompt, `Poster ${contact.name}: ${contact.systemPrompt}`].filter(Boolean).join('\n\n')
-  const reviewedRaw = await reviewMomentPayload(settings, raw, '{"moments":[{"content":"...","topicKey":"...","timeFrame":"past|current|future|timeless","factBasis":"...","imageKeyword":"...","comments":[]}]}', personaContext)
-  return { raw, reviewedRaw, parsed: parseMomentsResponse(reviewedRaw, [0]) }
+  const personaContext = [worldbookPrompt, `Poster ${contact.name} (${contact.id}): ${contact.systemPrompt}`].filter(Boolean).join('\n\n')
+  const reviewedRaw = await reviewMomentPayload(settings, raw, '{"moments":[{"posterId":"...","content":"...","topicKey":"...","timeFrame":"past|current|future|timeless","factBasis":"...","imageKeyword":"...","comments":[]}]}', personaContext)
+  return { raw, reviewedRaw, parsed: parseMomentsResponse(reviewedRaw, [momentExpectation(entries[0])]) }
 }
 
 /**
@@ -437,26 +461,35 @@ export async function refreshMoments(settings: AppSettings, options: RefreshMome
           worldbookEntries: await retrieveWorldbookContext(entries.map((e) => `${e.poster.name} ${e.poster.systemPrompt} ${e.poster.memoryFacts}`).join('\n'), { worldviewId: selectedWorldviewId }),
         }) ?? '')
       : ''
-  const raw = await chatCompletion({
-    apiKey: settings.apiKey,
-    baseUrl: settings.baseUrl,
-    model: settings.model,
-    messages: [
-      { role: 'system', content: buildMomentsPrompt(entries, momentsWorldbookPrompt, stickerNames, contexts, settings) },
-      { role: 'user', content: '请生成' },
-    ],
-    jsonMode: true,
-    purpose: 'moments',
-    automatic: true,
-  })
+  // Generate each publisher in an isolated request. A batched role-play prompt
+  // made it possible for one person's persona, experience or speech pattern to
+  // leak into a neighbouring post even when the array order remained valid.
+  const initial = await Promise.all(entries.map(async (entry) => {
+    const raw = await chatCompletion({
+      apiKey: settings.apiKey,
+      baseUrl: settings.baseUrl,
+      model: settings.model,
+      messages: [
+        { role: 'system', content: buildMomentsPrompt([entry], momentsWorldbookPrompt, stickerNames, contexts, settings) },
+        { role: 'user', content: '请生成' },
+      ],
+      jsonMode: true,
+      purpose: 'moments',
+      automatic: true,
+    })
+    const personaContext = momentPersonaContext(entry, momentsWorldbookPrompt, facts)
+    const reviewedRaw = await reviewMomentPayload(settings, raw, '{"moments":[{"posterId":"...","content":"...","topicKey":"...","timeFrame":"past|current|future|timeless","factBasis":"...","imageKeyword":"...","comments":[{"authorId":"...","content":"..."}]}]}', personaContext)
+    return parseMomentsResponse(reviewedRaw, [momentExpectation(entry)])?.[0]
+  }))
   console.info(`[moments-perf] 主模型完成=${Math.round(performance.now() - startedAt)}ms 条数=${entries.length}`)
-
-  const expectedCommentCounts = entries.map((e) => e.commenters.filter((c) => c.willComment).length)
-  const personaContext = [momentsWorldbookPrompt, entries.map((entry) => `Poster ${entry.poster.name}: ${entry.poster.systemPrompt}\n${facts.get(entry.poster.id) || ''}\nCommenters: ${entry.commenters.filter((commenter) => commenter.willComment).map((commenter) => `${commenter.contact.name}: ${commenter.contact.systemPrompt}`).join(' | ') || 'none'}`).join('\n\n')].filter(Boolean).join('\n\n')
-  const reviewedRaw = await reviewMomentPayload(settings, raw, '{"moments":[{"content":"...","topicKey":"...","timeFrame":"past|current|future|timeless","factBasis":"...","imageKeyword":"...","comments":["..."]}]}', personaContext)
   console.info(`[moments-perf] 自检完成=${Math.round(performance.now() - startedAt)}ms 条数=${entries.length}`)
-  const parsed = parseMomentsResponse(reviewedRaw, expectedCommentCounts)
-  if (!parsed) return { postedCount: 0, message: '生成失败 请再刷新试试' }
+  const parsed: ParsedMoment[] = []
+  for (let index = initial.length - 1; index >= 0; index--) {
+    const item = initial[index]
+    if (item) parsed.unshift(item)
+    if (!item) entries.splice(index, 1)
+  }
+  if (parsed.length === 0) return { postedCount: 0, message: '生成失败 请再刷新试试' }
 
   // A rejected post is regenerated individually. This preserves successful
   // posters and gives the model a concrete correction instead of silently
@@ -472,20 +505,22 @@ export async function refreshMoments(settings: AppSettings, options: RefreshMome
   }
   let retryIndexes = finalParsed.flatMap((item, index) => generationIssue(item, index, finalParsed) ? [index] : [])
   for (let attempt = 0; retryIndexes.length > 0 && attempt < 3; attempt++) {
-    const retryEntries = retryIndexes.map((index) => entries[index])
     const retryContexts = new Map(contexts)
     for (const index of retryIndexes) {
       const issue = generationIssue(finalParsed[index], index, finalParsed) || '本条没有换掉近期重复题材。'
       retryContexts.set(entries[index].poster.id, `【本次必须纠正】${issue}\n不得改几个字重发旧内容；必须换一个近期未使用的具体题材、场景或情绪落点。\n${contexts.get(entries[index].poster.id) || ''}`.slice(0, 12_000))
     }
-    const retryRaw = await chatCompletion({
-      apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, jsonMode: true, purpose: 'moments', automatic: true,
-      messages: [{ role: 'system', content: buildMomentsPrompt(retryEntries, momentsWorldbookPrompt, stickerNames, retryContexts, settings) }, { role: 'user', content: '请根据【本次必须纠正】重新生成，并在输出前逐项检查。' }],
-    })
-    const retryReviewed = await reviewMomentPayload(settings, retryRaw, '{"moments":[{"content":"...","topicKey":"...","timeFrame":"past|current|future|timeless","factBasis":"...","imageKeyword":"...","comments":["..."]}]}', personaContext)
-    const retryParsed = parseMomentsResponse(retryReviewed, retryEntries.map((entry) => entry.commenters.filter((commenter) => commenter.willComment).length))
-    if (!retryParsed) continue
-    retryIndexes.forEach((index, retryIndex) => { finalParsed[index] = retryParsed[retryIndex] })
+    const retries = await Promise.all(retryIndexes.map(async (index) => {
+      const entry = entries[index]
+      const retryRaw = await chatCompletion({
+        apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, jsonMode: true, purpose: 'moments', automatic: true,
+        messages: [{ role: 'system', content: buildMomentsPrompt([entry], momentsWorldbookPrompt, stickerNames, retryContexts, settings) }, { role: 'user', content: '请根据【本次必须纠正】重新生成，并在输出前逐项检查。' }],
+      })
+      const personaContext = momentPersonaContext(entry, momentsWorldbookPrompt, facts)
+      const retryReviewed = await reviewMomentPayload(settings, retryRaw, '{"moments":[{"posterId":"...","content":"...","topicKey":"...","timeFrame":"past|current|future|timeless","factBasis":"...","imageKeyword":"...","comments":[{"authorId":"...","content":"..."}]}]}', personaContext)
+      return parseMomentsResponse(retryReviewed, [momentExpectation(entry)])?.[0]
+    }))
+    retryIndexes.forEach((index, retryIndex) => { if (retries[retryIndex]) finalParsed[index] = retries[retryIndex] })
     retryIndexes = retryIndexes.filter((index) => !!generationIssue(finalParsed[index], index, finalParsed))
   }
 
@@ -570,13 +605,13 @@ export async function refreshMoments(settings: AppSettings, options: RefreshMome
         createdAt: now,
       })
       if (reactor.willComment) {
-        const commentText = comments[commentIndex++]
-        if (commentText) {
+        const comment = comments[commentIndex++]
+        if (comment?.authorId === reactor.contact.id && comment.content) {
           await db.momentComments.add({
             id: uuid(),
             momentId,
             authorContactId: reactor.contact.id,
-            content: commentText,
+            content: comment.content,
             createdAt: now,
           })
           await recordSocialEvent({
@@ -585,7 +620,7 @@ export async function refreshMoments(settings: AppSettings, options: RefreshMome
             targetId: poster.id,
             relatedContactIds: [reactor.contact.id, poster.id],
             momentId,
-            summary: `${reactor.contact.name}评论了${poster.name}的朋友圈: ${commentText}`,
+            summary: `${reactor.contact.name}评论了${poster.name}的朋友圈: ${comment.content}`,
             importance: 2,
             createdAt: now,
           })
@@ -618,8 +653,8 @@ export async function regenerateMoment(momentId: string, requirement: string, se
       apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, jsonMode: true, purpose: 'moments',
       messages: [{ role: 'system', content: buildMomentsPrompt([{ poster, commenters: [], willHavePhoto: false }], '', [], new Map([[poster.id, `${correction}${contexts.get(poster.id)}`]]), settings) }, { role: 'user', content: '请重新生成这条动态。必须优先服从用户要求。' }],
     })
-    const reviewed = await reviewMomentPayload(settings, raw, '{"moments":[{"content":"...","topicKey":"...","timeFrame":"past|current|future|timeless","factBasis":"...","imageKeyword":"...","comments":[]}]}', `Poster ${poster.name}: ${poster.systemPrompt}\n${runtimeFactsText(poster, new Date(), currentLocationName)}`)
-    parsed = parseMomentsResponse(reviewed, [0])
+    const reviewed = await reviewMomentPayload(settings, raw, '{"moments":[{"posterId":"...","content":"...","topicKey":"...","timeFrame":"past|current|future|timeless","factBasis":"...","imageKeyword":"...","comments":[]}]}', `Poster ${poster.name} (${poster.id}): ${poster.systemPrompt}\n${runtimeFactsText(poster, new Date(), currentLocationName)}`)
+    parsed = parseMomentsResponse(reviewed, [{ posterId: poster.id, commenterIds: [] }])
     const issue = parsed?.[0] ? publicMomentSceneIssue(parsed[0].content) || momentNoveltyIssue(parsed[0].content, history, parsed[0].topicKey) : '输出格式不正确。'
     if (parsed?.[0] && !issue) break
     correction = `【本次必须纠正】${issue}\n不得改几个字重发旧内容，换一个近期未使用的题材。\n`
@@ -685,19 +720,24 @@ function buildUserMomentCommentPrompt(content: string, commenters: Contact[], wo
   const commenterLines = commenters
     .map((c, i) => {
       const scheduleLine = describeCurrentSchedule(c, now)
-      return `评论者${i + 1}: ${c.name} 人设: ${c.systemPrompt}${scheduleLine ? ` ${scheduleLine}` : ''}\n和用户的关系: ${c.relationshipBase || '朋友'} ${c.relationshipDynamic || ''} 好感度:${c.warmth ?? 0} 当前心情:${c.mood?.text || '平静'}\n最近素材: ${contexts.get(c.id) || '无'}`
+      return `评论者${i + 1}: ${c.name}\n评论者ID: ${c.id}\n性别: ${c.gender || '未设定'}\n人设: ${c.systemPrompt}${scheduleLine ? ` ${scheduleLine}` : ''}\n和用户的关系: ${c.relationshipBase || '朋友'} ${c.relationshipDynamic || ''} 好感度:${c.warmth ?? 0} 当前心情:${c.mood?.text || '平静'}\n最近素材: ${contexts.get(c.id) || '无'}`
     })
     .join('\n')
   const worldviewSection = worldviewText ? `${worldviewText}\n\n` : ''
   const commentContext = `${worldviewSection}用户动态：${content}\n评论者：\n${commenterLines}\n${stickerCommentInstruction(stickerNames)}`
   const editable = getPromptTemplate(settings, 'moments', 'comments', { commentContext }) ?? ''
-  return `${editable}\n\n固定输出协议：只输出JSON {"comments":["评论者1的评论","评论者2的评论"]}，数组顺序和数量必须与评论者一致。`
+  return `${editable}\n\n【身份硬约束】每次输入只有一位评论者，只能用该评论者的人设、经历、关系和语气，不得代入其他角色。\n固定输出协议：只输出JSON {"comments":[{"authorId":"逐字复制评论者ID","content":"该评论者的评论"}]}。`
 }
 
-function parseCommentsResponse(raw: string, expectedCount: number): string[] | null {
+function parseCommentsResponse(raw: string, expectedAuthorId: string): string | null {
   const parsed = parseJsonLoose<{ comments?: unknown[] }>(raw)
-  if (!parsed || !Array.isArray(parsed.comments) || parsed.comments.length !== expectedCount) return null
-  return parsed.comments.map((c: unknown) => (typeof c === 'string' ? c.trim() : ''))
+  if (!parsed || !Array.isArray(parsed.comments) || parsed.comments.length !== 1) return null
+  const value = parsed.comments[0]
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const comment = value as Record<string, unknown>
+  return comment.authorId === expectedAuthorId && typeof comment.content === 'string' && comment.content.trim()
+    ? comment.content.trim()
+    : null
 }
 
 /**
@@ -737,30 +777,23 @@ export async function postUserMoment(content: string, settings: AppSettings): Pr
               worldbookEntries: await retrieveWorldbookContext(content, { worldviewId: settings.activeWorldId || settings.defaultWorldviewId }),
             }) ?? '')
           : ''
-      const raw = await chatCompletion({
-        apiKey: settings.apiKey,
-        baseUrl: settings.baseUrl,
-        model: settings.model,
-        messages: [
-          {
-            role: 'system',
-            content: buildUserMomentCommentPrompt(
-              content,
-              commenterPlans.map((p) => p.contact),
-              commentWorldbookPrompt,
-              stickerNames,
-              new Map(contextRows),
-              settings,
-            ),
-          },
-          { role: 'user', content: '请生成' },
-        ],
-        jsonMode: true,
-        purpose: 'moments',
-      })
-      const personaContext = [commentWorldbookPrompt, commenterPlans.map(({ contact }) => `${contact.name}: ${contact.systemPrompt}\nRelationship: ${contact.relationshipBase || 'friend'}`).join('\n\n')].filter(Boolean).join('\n\n')
-      const reviewedRaw = await reviewMomentPayload(settings, raw, '{"comments":["..."]}', personaContext)
-      comments = parseCommentsResponse(reviewedRaw, commenterPlans.length) ?? []
+      const contexts = new Map(contextRows)
+      comments = (await Promise.all(commenterPlans.map(async ({ contact }) => {
+        const raw = await chatCompletion({
+          apiKey: settings.apiKey,
+          baseUrl: settings.baseUrl,
+          model: settings.model,
+          messages: [
+            { role: 'system', content: buildUserMomentCommentPrompt(content, [contact], commentWorldbookPrompt, stickerNames, contexts, settings) },
+            { role: 'user', content: '请生成' },
+          ],
+          jsonMode: true,
+          purpose: 'moments',
+        })
+        const personaContext = [commentWorldbookPrompt, `${contact.name} (${contact.id}, ${contact.gender || '性别未设定'}): ${contact.systemPrompt}\nRelationship: ${contact.relationshipBase || 'friend'}`].filter(Boolean).join('\n\n')
+        const reviewedRaw = await reviewMomentPayload(settings, raw, '{"comments":[{"authorId":"...","content":"..."}]}', personaContext)
+        return parseCommentsResponse(reviewedRaw, contact.id)
+      }))).map((comment) => comment || '')
     } catch {
       // reactions are a nice-to-have; the moment itself already posted successfully
     }

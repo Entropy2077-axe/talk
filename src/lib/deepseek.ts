@@ -35,7 +35,7 @@ import {
   resolveModelsUrl,
   type AiProviderId,
 } from './aiProviders'
-import { orderedAiApiConfigs } from './aiApiConfigs'
+import { activeAiApiConfig } from './aiApiConfigs'
 import type { SamplingParameters } from '../types'
 
 /**
@@ -198,8 +198,6 @@ export interface ChatCompletionOptions {
   singleRequest?: boolean
   tools?: ChatToolDefinition[]
   toolChoice?: 'auto' | 'none' | 'required' | { type: 'function'; function: { name: string } }
-  /** Internal guard used while trying a saved fallback configuration. */
-  disableFailover?: boolean
 }
 
 /**
@@ -419,39 +417,17 @@ function retryableProtocolError(status: number, payload: unknown): 'response_for
   return null
 }
 
+function resolveSelectedApiOptions(opts: ChatCompletionOptions): ChatCompletionOptions {
+  const settings = useSettingsStore.getState()
+  // Explicit connection tests and calls for other endpoints keep their arguments.
+  if (opts.configurationId || opts.apiKey !== settings.apiKey || opts.baseUrl !== settings.baseUrl) return opts
+  const config = activeAiApiConfig(settings)
+  const model = opts.model === settings.utilityModel ? (config.utilityModel || config.model) : opts.model === settings.model ? config.model : opts.model
+  return { ...opts, apiKey: config.apiKey, baseUrl: config.baseUrl, model, provider: config.provider, sampling: opts.sampling ?? config.sampling, configurationId: config.id }
+}
+
 export async function chatCompletion(opts: ChatCompletionOptions): Promise<ChatCompletionResult> {
-  // All existing feature call sites pass the active settings' legacy fields.
-  // Resolve those calls once here so chat, memory, persona and background jobs
-  // share the exact same ordered primary/fallback behaviour.
-  if (!opts.disableFailover) {
-    const settings = useSettingsStore.getState()
-    const belongsToActiveConfig = opts.apiKey === settings.apiKey && opts.baseUrl === settings.baseUrl
-    const routes = belongsToActiveConfig ? orderedAiApiConfigs(settings) : []
-    if (routes.length > 1) {
-      let lastError: unknown
-      for (let index = 0; index < routes.length; index += 1) {
-        const route = routes[index]
-        const usesUtilityModel = opts.model === settings.utilityModel
-        try {
-          const result = await chatCompletion({ ...opts, apiKey: route.apiKey, baseUrl: route.baseUrl, model: usesUtilityModel ? (route.utilityModel || route.model) : route.model, provider: route.provider, sampling: route.sampling, configurationId: route.id, disableFailover: true })
-          if (index > 0) console.warn(`[ai-failover] recovered with ${route.name}`)
-          return result
-        } catch (error) {
-          lastError = error
-          const message = error instanceof Error ? error.message : String(error)
-          const retryable = /\b(?:408|429|5\d\d)\b|网络|network|超时|timeout|timed out|failed to fetch|load failed/i.test(message)
-          if (!retryable || index === routes.length - 1) throw error
-          console.warn(`[ai-failover] ${route.name} unavailable; trying next configured API`, error)
-        }
-      }
-      throw lastError instanceof Error ? lastError : new Error(String(lastError))
-    }
-    if (routes.length === 1) {
-      const route = routes[0]
-      const usesUtilityModel = opts.model === settings.utilityModel
-      return chatCompletion({ ...opts, apiKey: route.apiKey, baseUrl: route.baseUrl, model: usesUtilityModel ? (route.utilityModel || route.model) : route.model, provider: route.provider, sampling: route.sampling, configurationId: route.id, disableFailover: true })
-    }
-  }
+  opts = resolveSelectedApiOptions(opts)
   const purpose = opts.purpose ?? 'other'
   const automatic = opts.automatic ?? false
   const provider = opts.provider ?? useSettingsStore.getState().aiProvider ?? 'deepseek'
@@ -541,26 +517,7 @@ export interface ChatCompletionProgressSnapshot {
 export async function chatCompletionProgress(
   opts: ChatCompletionOptions & { onProgress: (snapshot: ChatCompletionProgressSnapshot) => void | Promise<void> },
 ): Promise<ChatCompletionResult> {
-  if (!opts.disableFailover) {
-    const settings = useSettingsStore.getState()
-    const belongsToActiveConfig = opts.apiKey === settings.apiKey && opts.baseUrl === settings.baseUrl
-    const routes = belongsToActiveConfig ? orderedAiApiConfigs(settings) : []
-    if (routes.length) {
-      const usesUtilityModel = opts.model === settings.utilityModel
-      for (let index = 0; index < routes.length; index += 1) {
-        const route = routes[index]
-        let published = false
-        try {
-          return await chatCompletionProgress({ ...opts, apiKey: route.apiKey, baseUrl: route.baseUrl, model: usesUtilityModel ? (route.utilityModel || route.model) : route.model, provider: route.provider, sampling: route.sampling, configurationId: route.id, disableFailover: true, onProgress: async (snapshot) => { published = true; await opts.onProgress(snapshot) } })
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          const retryable = /\b(?:408|429|5\d\d)\b|网络|network|超时|timeout|timed out|failed to fetch|load failed/i.test(message)
-          if (published || !retryable || index === routes.length - 1) throw error
-          console.warn(`[ai-failover] ${route.name} failed before streaming; trying next configured API`, error)
-        }
-      }
-    }
-  }
+  opts = { ...opts, ...resolveSelectedApiOptions(opts) }
   const { onProgress, ...completionOptions } = opts
   const purpose = opts.purpose ?? 'other'
   const automatic = opts.automatic ?? false
@@ -665,6 +622,7 @@ export async function chatCompletionProgress(
 }
 
 export async function chatCompletionStream(opts: ChatCompletionOptions & { onDelta: (text: string) => void }): Promise<string> {
+  opts = { ...opts, ...resolveSelectedApiOptions(opts) }
   const purpose = opts.purpose ?? 'other'
   const messages = opts.messages
   const inputTokens = messages.reduce((sum, message) => sum + estimateTokens(message.content), 0)

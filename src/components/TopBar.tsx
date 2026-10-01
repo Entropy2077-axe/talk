@@ -20,7 +20,7 @@ export function TopBar({ title, showBack, onBack, showSearch, onSearchClick, rig
             type="button"
             onClick={onBack ?? (() => navigate(-1))}
             aria-label="返回"
-            className="flex h-9 w-9 items-center justify-center text-gray-700"
+            className="flex h-10 w-10 items-center justify-center text-gray-700"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
               <path
@@ -45,7 +45,7 @@ export function TopBar({ title, showBack, onBack, showSearch, onSearchClick, rig
           <button
             onClick={onSearchClick}
             aria-label="搜索"
-            className="flex h-9 w-9 items-center justify-center text-gray-700"
+            className="flex h-10 w-10 items-center justify-center text-gray-700"
           >
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
               <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8" />

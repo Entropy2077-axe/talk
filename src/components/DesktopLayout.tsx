@@ -11,14 +11,14 @@ import { displayName } from '../lib/contact'
 import { formatListTime } from '../lib/time'
 import { momentsUnreadCount } from '../lib/momentsUnread'
 import { useSettingsStore } from '../store/useSettingsStore'
-import { getEnabledDiscoverEntries, useModuleEnabled } from '../features'
-import { uiThemeName } from '../lib/uiTheme'
+import { useModuleEnabled } from '../features'
+import { settingsEntries, settingsCategoryForPath } from '../lib/settingsNavigation'
+import { discoverGroups } from '../lib/discoverNavigation'
 import { UiIcon } from './UiIcon'
 import { isAiTestId } from '../lib/aiTestIsolation'
 import { claimDailySalaries, localDateKey } from '../lib/finance'
 import { formatCurrency } from '../lib/wallet'
 import { checkForUpdate } from '../lib/updateCheck'
-import { imageProviderName, isImageProviderReady } from '../lib/mediaProviders'
 
 const EMPTY: never[] = []
 
@@ -28,7 +28,7 @@ function sectionForPath(path: string): DesktopSection {
   if (path === '/' || path.startsWith('/chat/')) return 'messages'
   if (path.startsWith('/contact') || path.startsWith('/group')) return 'contacts'
   if (path === '/sky-eye') return 'sky-eye'
-  if (path === '/me' || path === '/presets' || path === '/appearance' || path === '/experience-mode' || path === '/drawing-tool' || path.startsWith('/settings') || path.startsWith('/profile') || path.startsWith('/stickers') || path === '/modules' || path.startsWith('/save-load')) return 'settings'
+  if (settingsCategoryForPath(path) || path === '/me' || path.startsWith('/settings') || path.startsWith('/profile')) return 'settings'
   return 'discover'
 }
 
@@ -37,7 +37,7 @@ export function DesktopLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
   const returningToWorldPicker = location.pathname.startsWith('/library/world/')
     && (location.state as { returnTo?: string } | null)?.returnTo === '/save-load'
-  const section = returningToWorldPicker ? 'settings' : sectionForPath(location.pathname)
+  const section = returningToWorldPicker ? 'discover' : sectionForPath(location.pathname)
   const detailMode = location.pathname === '/sky-eye'
 
   return (
@@ -202,18 +202,13 @@ function DiscoverList({ query }: { query: string }) {
   const location = useLocation()
   const enabledModules = useSettingsStore((state) => state.enabledModules)
   const experienceMode = useSettingsStore((state) => state.experienceMode)
-  const adminModeEnabled = useSettingsStore((state) => state.adminModeEnabled)
-  const entries = useMemo(() => {
-    const result = [
-      { to: '/moments', label: '朋友圈', icon: '◉', note: '查看朋友们的最新动态' },
-      { to: '/social-inbox', label: '互动收件箱', icon: '✦', note: '点赞、评论与回复' },
-      { to: '/relationships', label: '关系网', icon: 'network', note: '查看 AI 之间的关系连接' },
-    ]
-    if (adminModeEnabled) result.push({ to: '/ai-test-cards', label: 'AI 自动测试', icon: '🧪', note: '后台运行人工评测用例' })
-    for (const entry of getEnabledDiscoverEntries({ enabledModules, experienceMode })) result.push({ ...entry, note: '功能模块' })
-    return [...new Map(result.map((entry) => [entry.to, entry])).values()].filter((entry) => entry.label.includes(query.trim()))
-  }, [adminModeEnabled, enabledModules, experienceMode, query])
-  return <>{entries.map((entry) => <button type="button" key={entry.to} className={`desktop-list-row ${location.pathname === entry.to ? 'active' : ''}`} onClick={() => navigate(entry.to)}><span className="desktop-menu-avatar"><UiIcon name={entry.icon} size={20} /></span><span className="desktop-list-copy"><strong>{entry.label}</strong><small>{entry.note}</small></span></button>)}</>
+  const groups = useMemo(() => discoverGroups({ enabledModules, experienceMode }).map((group) => ({
+    ...group, entries: group.entries.filter((entry) => entry.label.includes(query.trim())),
+  })).filter((group) => group.entries.length), [enabledModules, experienceMode, query])
+  return <>{groups.map((group) => <section key={group.id} className="desktop-settings-group">
+    <p className="desktop-settings-label">{group.name}</p>
+    {group.entries.map((entry) => <button type="button" key={entry.to} className={`desktop-list-row ${location.pathname === entry.to ? 'active' : ''}`} onClick={() => navigate(entry.to)}><span className="desktop-menu-avatar"><UiIcon name={entry.icon} size={20} /></span><span className="desktop-list-copy"><strong>{entry.label}</strong></span></button>)}
+  </section>)}<button type="button" className="desktop-list-row" onClick={() => navigate('/modules')}><span className="desktop-menu-avatar"><UiIcon name="▦" size={20} /></span><span className="desktop-list-copy"><strong>管理功能</strong></span></button></>
 }
 
 function SettingsList({ query }: { query: string }) {
@@ -221,7 +216,6 @@ function SettingsList({ query }: { query: string }) {
   const location = useLocation()
   const settings = useSettingsStore()
   const careerEnabled = useModuleEnabled('career')
-  const saveLoadEnabled = useModuleEnabled('saveLoad')
   const salaryClaim = useLiveQuery(() => db.walletTransactions.where('idempotencyKey').equals(`salary:user:${localDateKey()}`).first(), [])
   const [claimingSalary, setClaimingSalary] = useState(false)
   const [salaryMessage, setSalaryMessage] = useState('')
@@ -266,22 +260,13 @@ function SettingsList({ query }: { query: string }) {
 
   const normalizedQuery = query.trim().toLowerCase()
   const entries = [
-    { group: '体验', to: '/experience-mode', label: '体验模式', note: settings.experienceMode === 'immersive' ? '沉浸模式' : '自由模式', icon: '◈' },
-    { group: '体验', to: '/appearance', label: '软件风格', note: `${uiThemeName(settings.uiTheme)} · ${settings.themeMode === 'dark' ? '深色' : '浅色'}`, icon: '◐' },
-    { group: 'AI 与服务', to: '/settings/api-configurations', label: 'LLM 设置', note: settings.model || '配置聊天与多功能模型', icon: 'AI' },
-    { group: 'AI 与服务', to: '/drawing-tool', label: '绘图工具', note: isImageProviderReady(settings) ? `${imageProviderName(settings.imageProvider)} · 自由提示词测试` : '配置并测试绘图模型', icon: '✎' },
-    { group: 'AI 与服务', to: '/settings', label: '通用设置', note: '聊天体验与本机数据', icon: '⚙' },
-    { group: 'AI 与服务', to: '/presets', label: '提示词预设', note: '生成参数与全局提示词', icon: '◌' },
-    { group: 'AI 与服务', to: '/settings/other-interfaces', label: '接口服务', note: '图像、语音与联网服务', icon: '◌' },
-    { group: '内容与数据', to: '/modules', label: '功能模块', note: '启用或关闭扩展功能', icon: '▦' },
-    { group: '内容与数据', to: '/stickers', label: '表情包', note: '管理本地和远程表情', icon: '☺' },
-    ...(saveLoadEnabled ? [{ group: '内容与数据', to: '/save-load', label: '世界与备份', note: '切换世界、分支与备份', icon: '💾' }] : []),
+    ...settingsEntries(settings).map((entry) => ({ ...entry, group: '设置与工具' })),
   ].filter((entry) => `${entry.label} ${entry.note}`.toLowerCase().includes(normalizedQuery))
   const showSalary = careerEnabled && '每日工资'.includes(normalizedQuery)
   const showUpdate = '检查更新'.includes(normalizedQuery)
-  const renderEntry = (entry: (typeof entries)[number]) => <button type="button" key={entry.to} className={`desktop-list-row ${location.pathname === entry.to ? 'active' : ''}`} onClick={() => navigate(entry.to)}><span className="desktop-menu-avatar"><UiIcon name={entry.icon} size={20} /></span><span className="desktop-list-copy"><strong>{entry.label}</strong><small>{entry.note}</small></span></button>
+  const renderEntry = (entry: (typeof entries)[number]) => <button type="button" key={entry.to} className={`desktop-list-row ${(location.pathname === entry.to || settingsCategoryForPath(location.pathname) === entry.to) ? 'active' : ''}`} onClick={() => navigate(entry.to)}><span className="desktop-menu-avatar"><UiIcon name={entry.icon} size={20} /></span><span className="desktop-list-copy"><strong>{entry.label}</strong><small>{entry.note}</small></span></button>
 
-  const groups = ['体验', 'AI 与服务', '内容与数据'].map((label) => ({ label, entries: entries.filter((entry) => entry.group === label) })).filter((group) => group.entries.length)
+  const groups = ['设置与工具', '世界'].map((label) => ({ label, entries: entries.filter((entry) => entry.group === label) })).filter((group) => group.entries.length)
   const showProfile = `${settings.userNickname} 个人资料 编辑个人信息`.toLowerCase().includes(normalizedQuery)
 
   return <div className="desktop-settings-list">
